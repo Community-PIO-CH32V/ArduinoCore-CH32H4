@@ -148,25 +148,43 @@ all reset to **1**, so clearing the single master disable bit is the whole fix.
 Flash is clocked at HCLK/2 = 50 MHz while this core runs at 400 MHz, and
 uncached, every instruction fetch pays that.
 
-**Not yet fixed, and this is the core's biggest open item.** Enabling the
-cache from `startup_v5f.S` leaves the V5F trapping in startup. Four variants
-were tried on hardware, all of them failing -- intermittently at first, which
-is how it survived a 41-test run once, and then on every boot:
+**Fix.** WCH's own example, `EVT/EXAM/CPU/ICache`, has the sequence, and the
+load-bearing detail is not something anyone would guess. The final instruction
+is a **`csrc`**, and it clears **bits 24 and 25 as well as bit 1**:
 
-| attempt | result |
-|---|---|
-| clear `ic_disable` | traps |
-| invalidate index 0, then enable | traps |
-| add `fence.i` after enabling | traps |
-| invalidate all 1024 lines, then enable | traps |
+```asm
+li t0, 0x03000002
+csrc 0xbc2, t0
+```
 
-The core is fetching from flash at the moment the cache is switched on
-underneath it. What is missing is probably in the manual's cache chapter --
-the real line size, the correct invalidate protocol, and whether the enable
-has to execute from memory the cache does not cover (ITCM would do).
+Bits 24 and 25 are `ic_code_strtg` and `ic_sram_strtg` -- the blanket "cache
+everything in `0x00000000-0x1fffffff` / `0x20000000-0x3fffffff`" enables -- and
+they **reset to 1**. Clearing only `ic_disable`, which is the obvious reading of
+the manual, leaves them on: the cache then tries to cover all of flash *and* the
+TCM/SRAM window, including the ITCM the vector table and hot code live in, and
+the core traps in startup.
 
-The core therefore ships at the reset default, which boots 6/6.
-`test_flash_vs_itcm_ratio_is_recorded` keeps the number visible.
+WCH scopes caching with a **PMP entry** instead. Full sequence, in
+`startup_v5f.S`:
+
+1. `pmpaddr0` = `_cache_beg >> 2`, `pmpaddr1` = `_cache_end >> 2` (TOR).
+2. `cache_pmp_ovr` (CSR `0xBC3`) = `0x10` -- bit 4 `ic_pmp1cache_strtg`, so
+   instructions matched by PMP channel 1 may be cached. The manual says this
+   overrides the region policy in `0xBC2` for addresses the channel covers.
+3. `pmpcfg0` (CSR `0x3A0`) = `0xAD00` -- channel 1 locked, TOR, read+execute.
+4. `opcache_ctlr` (CSR `0xBD0`) = `0x4` -- flush.
+5. `csrc 0xBC2, 0x03000002` -- enable, and turn the blanket regions off.
+
+The linker script brackets `.text` and `.rodata` with `_cache_beg` /
+`_cache_end`, so the window is the flash-resident code. ITCM is deliberately
+left outside it: it is already zero-wait.
+
+Result: **6/6 clean boots and flash at 1.00x of ITCM.**
+
+Four attempts failed before the example was consulted -- clearing `ic_disable`
+alone, invalidating index 0 first, adding `fence.i`, and invalidating all 1024
+lines. All of them left bits 24 and 25 set, which was the actual problem in
+every case. The lesson is the cheap one: look for the vendor example first.
 
 **Why nobody found it before.** The MicroPython port avoided the question by
 copying 392 KB of `.text` into RAM and running from there; the libhal port ran
@@ -227,43 +245,28 @@ have. Just do not flash with it, and expect to replug afterwards.
 
 ---
 
-## Exceptions link, and do not yet work at run time
+## Exceptions: what it takes to make a throw work under -nostartfiles
 
-**State: `board_build.exceptions = enabled` builds and links, but a `throw`
-faults instead of being caught. The default, `disabled`, is fully working and
-is what M1 ships.**
+Working, 5/5 on hardware. Two things are needed and neither produces a build
+error when missing.
 
-What is in place and verified:
+**1. `.eh_frame` needs its terminating zero word.** The registry-based unwinder
+walks CIE/FDE records until it reads a zero length, and crtend.o normally
+supplies that as `__FRAME_END__`. Under `-nostartfiles` crtend is never linked,
+so the linker script appends `LONG(0)` at the end of the section. Without it the
+unwinder runs off the end and dereferences whatever follows.
 
-- `-fexceptions` builds; both settings link (`tests/test_exceptions_build.py`).
-- `.eh_frame` is emitted, 5,728 bytes, and lands in flash.
-- The section is bounded by `__eh_frame_start` / `__eh_frame_end` and carries
-  the terminating zero word that crtend would normally supply -- `-nostartfiles`
-  means crtend is never linked, so the linker script appends `LONG(0)`.
-- `ch32h4_register_eh_frame` is present in `.init_array` and runs, calling
-  `__register_frame_info` at constructor priority 101.
-- `__gnu_cxx::__verbose_terminate_handler` is overridden, which keeps the 43 KB
-  C++ name demangler out of the image.
+**2. Nothing registers `.eh_frame` at all.** This libgcc uses the
+registry-based FDE lookup and crtbegin's `frame_dummy` never runs, so
+`__register_frame_info(__eh_frame_start, ...)` is called from a
+priority-101 constructor in `ch32h4_eh.cpp`.
 
-What happens anyway:
+While the instruction cache was misconfigured, a `throw` faulted with
+`mcause=5` (load access fault) inside `strlen`. Both of the above were already
+in place at the time; the throw only started working once the cache was scoped
+correctly. The two are not obviously related and the exact interaction was not
+chased further, since the correct cache configuration is required anyway.
 
-```
-throwtest ->
-=== TRAP ===
-mcause=0x00000005 mepc=0x0000d534 mtval=0xe5ffd8a6 mstatus=0x80007800
-halted
-```
-
-`mcause=5` is a load access fault and `mepc` lands inside `strlen`, with
-`mtval` holding a pointer that is not in any section. Notably `terminate` is
-never reached -- the override would have printed -- so the unwinder is not
-simply giving up; something is corrupted before or during the landing pad.
-
-Adding the `.eh_frame` terminator did not change the address or the fault, so
-the table walk is probably not the problem. The next thing to check is whether
-the personality routine and `.gcc_except_table` are reachable and correctly
-aligned, and whether the hardware-stack interrupt mode (`0x804 = 0x0F`)
-interacts with the unwinder's expectations about the frame layout.
-
-This is the second of the two open items on this core, after the instruction
-cache.
+`__gnu_cxx::__verbose_terminate_handler` is also overridden, which keeps the
+43 KB C++ name demangler out of the image -- libstdc++'s documented
+customisation point.

@@ -56,25 +56,18 @@ Measured on this board, the same loop compiled twice:
 The V5F's instruction cache is disabled out of reset -- see `docs/hazards.md`.
 With it enabled, flash and ITCM are indistinguishable for this workload.
 
-**The cache could not be enabled reliably** -- see `docs/hazards.md` -- so the
-core currently runs with it off, and **flash execution really is ~145x slower
-than ITCM**.
+The V5F's instruction cache is disabled out of reset and is now enabled over a
+PMP-bounded window covering `.text` and `.rodata` -- see `docs/hazards.md`.
+With it on, flash and ITCM are indistinguishable for this workload.
 
-**Decision, and it is provisional.** M1 ships XIP-primary with the full ~700 KB
-heap intact, because M1's own code is not throughput-bound: it boots, blinks,
-talks and drives PWM, none of which is a hot loop. `__itcm_func` is available
-and is used for `digitalWrite`, `digitalRead`, `millis`, `micros`,
-`delayMicroseconds` and the EXTI dispatch -- the paths where it actually
-matters today.
+**Decision: XIP-primary stands, and no `RAM_CODE` region is needed.** ITCM
+holds only the trap vector table -- which is there for correctness, not speed --
+and the handful of functions marked `__itcm_func`. The rest of ITCM and all of
+the shared region stay available, and sketches get ~700 KB of heap.
 
-That will not survive M6. lwIP's receive path is exactly the loop-shaped code
-this penalises, and MicroPython copied 392 KB of `.text` into RAM rather than
-pay it. So before the networking milestone, one of two things has to happen:
+This also settles M6: lwIP's receive path is exactly the loop-shaped code that
+would have forced a `RAM_CODE` region, and at 1.00x it does not.
 
-1. **Get the instruction cache working.** It is worth 145x and costs no RAM.
-   This is by far the better outcome and it is a bounded piece of work.
-2. **Add a `RAM_CODE` region** carved from the shared half of the heap, as both
-   prior ports did, and place hot objects in it by name.
-
-Option 1 first. The measurement is already in the suite so the answer will be
-obvious either way.
+`__itcm_func` remains useful for code that must not miss a first execution --
+an ISR with a hard latency bound, or a bit-banged protocol -- but it is no
+longer a throughput lever.

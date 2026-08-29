@@ -203,29 +203,6 @@ handle_reset_v5f:
     li t0, 0x0F
     csrw 0x804, t0
 
-    /* The instruction cache is deliberately NOT enabled here.
-     *
-     * It is off out of reset -- QingKeV5 manual, cache_strtg_ctlr (CSR 0xBC2),
-     * bit 1 ic_disable, reset value 1 -- and turning it on is worth a measured
-     * 145x for code executing from flash. But every attempt to enable it from
-     * this startup left the V5F trapping in startup, intermittently at first
-     * and then every boot:
-     *
-     *   - clear ic_disable                          -> traps
-     *   - invalidate index 0 first, then enable     -> traps
-     *   - add fence.i after enabling                -> traps
-     *   - invalidate all 1024 lines, then enable    -> traps
-     *
-     * The core is fetching from flash at the moment the cache is switched on
-     * underneath it, and something about that transition is not survivable the
-     * way it is done here. Getting it right needs the manual's cache chapter
-     * read properly -- line size, the actual invalidate protocol, and whether
-     * the enable has to run from memory the cache does not cover.
-     *
-     * Until then this stays at the reset default, which boots reliably.
-     * docs/hazards.md has the measurement; it is the single highest-value
-     * open item on this core. */
-
     /* FPU on, interrupts on, and STAY IN MACHINE MODE.
      *
      * WCH ships 0x6088, which leaves MPP=00 and returns into User mode, where
@@ -241,6 +218,51 @@ handle_reset_v5f:
     la t0, _vector_base_v5f
     ori t0, t0, 3
     csrw mtvec, t0
+
+    /* Turn the instruction cache on, over a PMP-bounded window.
+     *
+     * It is off out of reset -- cache_strtg_ctlr (CSR 0xBC2) bit 1 ic_disable,
+     * reset value 1 -- and it is worth a measured 145x for code executing from
+     * flash, which is clocked at HCLK/2 = 50 MHz against this core's 400 MHz.
+     *
+     * The sequence is WCH's, from EVT/EXAM/CPU/ICache. The part that is not
+     * obvious, and that costs you the core if you get it wrong: the final
+     * instruction is a csrC, and it clears bits 24 and 25 as well as bit 1.
+     * Those are ic_code_strtg and ic_sram_strtg, the blanket "cache everything
+     * in 0x00000000-0x1fffffff / 0x20000000-0x3fffffff" enables, and they RESET
+     * TO 1. Clearing only ic_disable leaves them on, so the cache tries to
+     * cover all of flash and all of the TCM/SRAM window -- including the ITCM
+     * this core's vector table and hot code live in -- and the core traps in
+     * startup. Caching is scoped by the PMP entry instead. */
+
+    /* PMP channel 1, TOR: pmpaddr0 is the base, pmpaddr1 the top. Both are
+       address >> 2. */
+    la t0, _cache_beg
+    srli t0, t0, 2
+    csrw pmpaddr0, t0
+
+    la t0, _cache_end
+    srli t0, t0, 2
+    csrw pmpaddr1, t0
+
+    /* cache_pmp_ovr: bit 4 = ic_pmp1cache_strtg -- instructions matched by PMP
+       channel 1 may be cached. The manual notes this OVERRIDES the region
+       policy in 0xBC2 for addresses the channel covers. */
+    li t0, 0x10
+    csrw 0xbc3, t0
+
+    /* pmpcfg0 byte 1 = channel 1: locked, TOR, read + execute. Byte 0 is zero,
+       so channel 0 contributes only its address as the TOR base. */
+    li t0, 0xAD00
+    csrw 0x3a0, t0
+
+    /* Flush: opcache_ctlr, idx_mode 1, opcode 00 = invalidate. */
+    li t0, 0x4
+    csrw 0xbd0, t0
+
+    /* Enable. See the comment above for why this clears three bits. */
+    li t0, 0x03000002
+    csrc 0xbc2, t0
 
     la t0, ch32h4_v5f_main
     csrw mepc, t0

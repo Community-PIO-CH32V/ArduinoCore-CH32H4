@@ -31,7 +31,9 @@ the milestones below.
 | Shared SRAM | `0x20100000` | 512 KB | DMA buffers, bulk heap |
 | Flash | `0x08000000` | 960 KB | 32 KB V3F stub, 912 KB image, 16 KB EEPROM |
 
-Code runs XIP from flash. About **708 KB of heap** is available to sketches:
+Code runs XIP from flash, behind the V5F's 32 KB instruction cache — which is
+disabled at reset and which this core enables, worth a measured 145x. About
+**708 KB of heap** is available to sketches:
 `_sbrk` hands out DTCM first — zero-wait at 400 MHz — then continues into the
 shared region, and newlib's allocator opens a second segment at the gap.
 
@@ -77,21 +79,8 @@ C++ exceptions are a build option, off by default:
 board_build.exceptions = enabled
 ```
 
-**Both settings build and link, but `enabled` does not yet work at run time** --
-a `throw` faults rather than being caught. See `docs/hazards.md`. The default
-is fully working.
-
-## Known gaps
-
-Two things are measured, understood and not yet fixed. Both are written up in
-`docs/hazards.md`.
-
-1. **The V5F instruction cache is off.** It is disabled at reset and worth a
-   measured **145x** for code running from flash. Four ways of enabling it were
-   tried; all leave the core trapping in startup. This is the highest-value
-   open item, and it has to be settled before the networking milestone, whose
-   lwIP receive path is exactly the loop-shaped code that pays for it.
-2. **Exceptions do not work at run time**, as above.
+Both settings build, link and run; a `throw` is caught on hardware. Enabling
+costs roughly 30 KB of unwind tables, which stay in flash.
 
 ## Testing
 

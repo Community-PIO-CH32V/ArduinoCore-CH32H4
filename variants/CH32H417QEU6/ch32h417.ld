@@ -141,8 +141,13 @@ SECTIONS
     } >ITCM AT>FLASH_V5F
 
 
+    /* The instruction cache covers exactly this span, bounded by a PMP entry
+       -- see the enable sequence in startup_v5f.S. It brackets the flash-
+       resident code and rodata, which is what actually benefits: ITCM is
+       already zero-wait and is deliberately left outside the window. */
     .text : {
         . = ALIGN(4);
+        _cache_beg = .;
         *(.text.unlikely .text.unlikely.*)
         *(.text.startup .text.startup.*)
         *(.text .text.*)
@@ -156,6 +161,7 @@ SECTIONS
         *(.rodata .rodata.*)
         *(.gnu.linkonce.r.*)
         . = ALIGN(4);
+        _cache_end = .;
     } >FLASH_V5F
 
     .init_array : {

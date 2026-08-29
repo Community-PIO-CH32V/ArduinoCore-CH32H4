@@ -32,3 +32,10 @@ def test_enabling_exceptions_emits_unwind_tables():
             assert int(line.split()[1]) > 1000, line
             return
     raise AssertionError(".eh_frame missing from the exceptions build")
+
+
+# The run-time half of this lives in tests/hw/test_runtime.py
+# (test_a_throw_is_actually_caught) and in the exceptions sketch itself: a
+# clean link proves nothing here, because the failure mode this core guards
+# against -- nano.specs, or an unregistered .eh_frame -- links perfectly and
+# faults only when something throws.
