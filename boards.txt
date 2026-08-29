@@ -2,6 +2,7 @@
 # platform-ch32v instead; this file is here so the core is usable from the
 # Arduino IDE and boards manager as well.
 
+menu.serial=Serial port
 menu.exceptions=C++ Exceptions
 
 ch32h417qeu6.name=CH32H417QEU6-R0-1v1
@@ -24,3 +25,15 @@ ch32h417qeu6.menu.exceptions.Disabled=Disabled
 ch32h417qeu6.menu.exceptions.Disabled.build.exceptions=disabled
 ch32h417qeu6.menu.exceptions.Enabled=Enabled
 ch32h417qeu6.menu.exceptions.Enabled.build.exceptions=enabled
+
+# What `Serial` refers to. Serial1 is always USART1 on PA9/PA10, into the
+# WCH-Link's VCP, whichever is chosen here.
+#
+# USB CDC is the default because it is what someone plugging the board into a
+# PC expects to find. The UART option is worth keeping for debugging: a fault
+# during static initialisation happens before USB has enumerated, so a board
+# that only speaks CDC cannot report one.
+ch32h417qeu6.menu.serial.usb=USB CDC
+ch32h417qeu6.menu.serial.usb.build.serial=usb
+ch32h417qeu6.menu.serial.uart=USART1
+ch32h417qeu6.menu.serial.uart.build.serial=uart

@@ -32,6 +32,7 @@ FRAMEWORK_DIR = platform.get_package_dir("framework-arduinoch32h4")
 assert isdir(FRAMEWORK_DIR)
 
 SDK_DIR = join(FRAMEWORK_DIR, "system", "ch32h417lib")
+TINYUSB_DIR = join(FRAMEWORK_DIR, "system", "tinyusb", "src")
 CORE_DIR = join(FRAMEWORK_DIR, "cores", "ch32h4")
 variant = board.get("build.variant")
 VARIANT_DIR = join(FRAMEWORK_DIR, "variants", variant)
@@ -57,6 +58,19 @@ machine_flags = [
 # flash.
 exceptions = str(board.get("build.exceptions", "disabled")) == "enabled"
 exc_flags = ["-fexceptions"] if exceptions else ["-fno-exceptions"]
+
+# Which peripheral `Serial` refers to.
+#
+# USB CDC by default: it needs no extra wiring and is what a user plugging the
+# board in expects to find. `Serial1` is always USART1 on PA9/PA10, into the
+# WCH-Link's VCP.
+#
+# The swap is worth keeping. A fault during static initialisation happens
+# before USB has enumerated, so a board that only speaks CDC cannot report one
+# -- and the porting notes for this silicon are emphatic that silence is the
+# worst diagnostic there is.
+serial_iface = str(board.get("build.serial", "usb")).lower()
+usb_enabled = serial_iface == "usb" or str(board.get("build.usb", "enabled")) == "enabled"
 
 env.Append(
     ASFLAGS=machine_flags,
@@ -117,7 +131,10 @@ env.Append(
         "ARDUINO_ARCH_CH32H4",
         ("F_CPU", board.get("build.f_cpu")),
         ("CH32_V5F_START_ADDR", V5F_START_ADDR),
-    ] + (["CH32H4_EXCEPTIONS"] if exceptions else []),
+    ] + (["CH32H4_EXCEPTIONS"] if exceptions else [])
+      + (["CH32H4_USB", ("CFG_TUSB_MCU", "OPT_MCU_CH32H417"),
+          ("CFG_TUSB_OS", "OPT_OS_NONE")] if usb_enabled else [])
+      + ([("CH32H4_SERIAL_IS_USB", 1)] if serial_iface == "usb" else []),
 
     CPPPATH=[
         # cores/ch32h4/api is deliberately NOT on the include path. On a
@@ -129,7 +146,7 @@ env.Append(
         VARIANT_DIR,
         join(SDK_DIR, "Core"),
         join(SDK_DIR, "Peripheral", "inc"),
-    ],
+    ] + ([TINYUSB_DIR] if usb_enabled else []),
 
     LIBSOURCE_DIRS=[join(FRAMEWORK_DIR, "libraries")],
 )
@@ -166,6 +183,25 @@ libs.append(sdk_env.BuildLibrary(
 libs.append(sdk_env.BuildLibrary(
     join("$BUILD_DIR", "FrameworkCH32SDKCore"),
     join(SDK_DIR, "Core")))
+
+# TinyUSB. Built in its own environment for the same reason the vendor SDK is:
+# it is third-party code, and its warnings would bury ours.
+#
+# Only the device stack and the USBFS driver are compiled -- the host stack,
+# the other portable backends and the class drivers we do not enable would all
+# be dead weight, and some of them do not compile for this target at all.
+if usb_enabled:
+    tusb_env = env.Clone()
+    tusb_env.Append(CCFLAGS=["-w"])
+    for src, name in (
+        (join(TINYUSB_DIR, "tusb.c"), "tusb"),
+        (join(TINYUSB_DIR, "common", "tusb_fifo.c"), "tusb_fifo"),
+        (join(TINYUSB_DIR, "device", "usbd.c"), "tusb_usbd"),
+        (join(TINYUSB_DIR, "class", "cdc", "cdc_device.c"), "tusb_cdc"),
+        (join(TINYUSB_DIR, "portable", "wch", "dcd_ch32_usbfs.c"), "tusb_dcd"),
+    ):
+        env.Append(PIOBUILDFILES=tusb_env.StaticObject(
+            join("$BUILD_DIR", "FrameworkTinyUSB", name + ".o"), src))
 
 libs.append(env.BuildLibrary(
     join("$BUILD_DIR", "FrameworkArduino"),

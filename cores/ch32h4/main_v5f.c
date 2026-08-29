@@ -9,6 +9,9 @@
 #include "ch32h4_xcore.h"
 #include "ch32h417.h"
 #include "system_ch32h417.h"
+#ifdef CH32H4_USB
+#include "ch32h4_usb.h"
+#endif
 
 /* wiring_time.c */
 void ch32h4_systick_init(void);
@@ -85,6 +88,20 @@ void ch32h4_v5f_main(void) {
      * which is more than the usual Arduino model manages. */
     run_static_constructors();
 
+#ifdef CH32H4_USB
+    /* Bring USB up before setup() so `Serial` exists as soon as a sketch
+     * touches it, and so enumeration overlaps whatever setup() does rather
+     * than waiting behind it. It refuses to start on the internal RC -- USB
+     * cannot meet spec from an RC oscillator -- and says so. */
+    if (ch32h4_usb_init()) {
+        ch32h4_console_puts("V5F: usb up");
+    } else {
+        ch32h4_console_puts("V5F: usb DOWN (needs the crystal)");
+    }
+    ch32h4_console_putc('\n');
+    ch32h4_console_flush();
+#endif
+
     /* Published last: in M4 the V3F blocks on this before calling setup1(). */
     ch32h4_runtime_ready = CH32H4_RUNTIME_READY_MAGIC;
 
@@ -93,5 +110,11 @@ void ch32h4_v5f_main(void) {
     setup();
     for (;;) {
         loop();
+#ifdef CH32H4_USB
+        /* Pump the device stack once per iteration. It also runs from the USB
+         * interrupt, so a sketch that blocks in loop() cannot starve it -- but
+         * calling it here keeps the common case off the interrupt path. */
+        ch32h4_usb_task();
+#endif
     }
 }

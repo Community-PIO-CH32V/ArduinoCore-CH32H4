@@ -4,3 +4,7 @@
 [submodule "ArduinoCore-API"]
 	path = ArduinoCore-API
 	url = https://github.com/arduino/ArduinoCore-API.git
+[submodule "system/tinyusb"]
+	path = system/tinyusb
+	url = https://github.com/maxgerhardt/tinyusb.git
+	branch = ch32h417-v2

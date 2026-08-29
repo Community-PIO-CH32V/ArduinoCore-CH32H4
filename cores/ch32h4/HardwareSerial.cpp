@@ -103,14 +103,10 @@ void CH32H4Serial::_isr() {
     }
 }
 
-CH32H4Serial Serial(USART1);
-
-/* Serial1 is the same object until M2 gives Serial to USB CDC. Sketches
- * written for the final arrangement therefore already work. */
-CH32H4Serial &Serial1 = Serial;
+CH32H4Serial Serial1(USART1);
 
 /* The attribute belongs on the declaration -- see ch32h4_irq.h. */
 extern "C" void CH32H4_IRQ_HANDLER(USART1_IRQHandler);
 extern "C" void USART1_IRQHandler(void) {
-    Serial._isr();
+    Serial1._isr();
 }

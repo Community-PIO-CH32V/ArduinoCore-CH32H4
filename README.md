@@ -47,7 +47,7 @@ EXTI dispatch. See "Known gaps" for why that placement still matters.
 | | Milestone | State |
 |---|---|---|
 | **M1** | Boot, clocks, single ELF, core Arduino API | **working**, 43 hardware tests |
-| M2 | TinyUSB, `Serial` as USB CDC, Adafruit_TinyUSB | planned |
+| M2 | TinyUSB, `Serial` as USB CDC | **CDC working**; Adafruit_TinyUSB next |
 | M3 | Wire, SPI, EEPROM, Servo, Tone, I2S, ADCInput, Ticker | planned |
 | M4 | `setup1()`/`loop1()` on the V3F, IPC FIFO, HSEM mutexes | planned |
 | M5 | SD, SDFS, FatFS | planned |
@@ -71,6 +71,14 @@ Then point a PlatformIO project at it:
 platform = https://github.com/Community-PIO-CH32V/platform-ch32v.git#feature/ch32h4-arduino
 board = ch32h417qeu6_evt_r0
 framework = arduino
+```
+
+`Serial` is USB CDC by default and `Serial1` is USART1 on PA9/PA10. To swap
+them — worth doing while debugging anything that can fault before USB
+enumerates:
+
+```ini
+board_build.serial = uart
 ```
 
 C++ exceptions are a build option, off by default:

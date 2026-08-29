@@ -34,6 +34,26 @@ using namespace arduino;
 
 #include "HardwareSerial.h"
 
+#ifdef CH32H4_USB
+#include "ch32h4_usb.h"
+#include "SerialUSB.h"
+#endif
+
+/* `Serial`.
+ *
+ * A macro rather than a reference, so the concrete type survives and a sketch
+ * can still reach SerialUSB::baud() or CH32H4Serial::begin(baud, config)
+ * through it. Every Arduino core that offers this choice does it this way.
+ *
+ * Default: USB CDC, which is what someone plugging the board into a PC
+ * expects to find. Set board_build.serial = uart to put it back on USART1 --
+ * worth doing while debugging anything that can fault before USB enumerates. */
+#if defined(CH32H4_SERIAL_IS_USB) && defined(CH32H4_USB)
+#define Serial SerialUSB
+#else
+#define Serial Serial1
+#endif
+
 /* setup1() and loop1() run on the V3F and arrive in M4. They are declared here
  * now so a sketch written against arduino-pico's model still compiles; until
  * M4 they are simply never called, and the core says so at boot rather than

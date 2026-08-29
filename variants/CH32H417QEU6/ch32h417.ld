@@ -228,6 +228,38 @@ SECTIONS
         _itcm_end = .;
     } >ITCM AT>FLASH_V5F
 
+    /* ---- USB ------------------------------------------------------------ */
+
+    /* TinyUSB's .bss, relocated into the shared region.
+     *
+     * The USB controller's own bus master cannot reach DTCM -- unlike DMA1/2,
+     * which reach everything -- so every endpoint buffer, transfer descriptor
+     * and class-driver state variable has to live here.
+     *
+     * That puts it OUTSIDE the _sbss.._ebss range the startup code clears, and
+     * nothing else zeroes it. ch32h4_usb_init() does so explicitly using these
+     * symbols. Skipping that leaves TinyUSB starting from whatever survived in
+     * RAM, which presents as USB working or not depending on the build. */
+    .usbram (NOLOAD) : {
+        . = ALIGN(8);
+        _susbram = .;
+        /* Matched on FILENAME, not path.
+           
+           On Windows the linker sees object paths with backslashes --
+           `.piouild\ch32h417\FrameworkTinyUSB	usb.o` -- so any wildcard
+           written with forward slashes matches nothing at all, silently. The
+           build script names every TinyUSB object tusb*.o precisely so this
+           pattern can be path-independent.
+           
+           Getting this wrong is not a link error: TinyUSB's buffers simply
+           stay in DTCM, which the USB controller's bus master cannot reach,
+           and the device enumerates but transfers nothing. `size -A` showing
+           .usbram at 0 is the tell. */
+        *tusb*.o(.bss .bss.* COMMON)
+        . = ALIGN(8);
+        _eusbram = .;
+    } >USB_RAM
+
     /* ---- Cross-core state ----------------------------------------------- */
 
     /* The shared region is the only memory both cores reach at speed, and the

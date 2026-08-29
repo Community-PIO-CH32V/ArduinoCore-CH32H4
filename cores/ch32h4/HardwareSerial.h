@@ -5,10 +5,11 @@
 
 /* Serial is USART1 on PA9/PA10 (AF7), into the WCH-Link's VCP.
  *
- * From M2 onward `Serial` becomes the USB CDC device and this object moves to
- * `Serial1`, with a build option to swap them back -- the porting notes are
- * emphatic that a console which exists before static constructors run is worth
- * keeping, because a fault during static init is otherwise completely silent.
+ * `Serial` is the USB CDC device by default and this object is `Serial1`; a
+ * build option swaps them. Keeping the swap matters: a fault during static
+ * initialisation happens before USB has enumerated, so a board that only
+ * speaks CDC cannot report one, and the porting notes for this silicon are
+ * emphatic that silence is the worst diagnostic there is.
  */
 class CH32H4Serial : public arduino::HardwareSerial {
 public:
@@ -41,5 +42,6 @@ private:
     uint8_t _rx[RX_SIZE];
 };
 
-extern CH32H4Serial Serial;
-extern CH32H4Serial &Serial1;
+/* USART1 on PA9/PA10, into the WCH-Link's VCP. Always Serial1, whatever
+ * `Serial` is bound to -- see Arduino.h. */
+extern CH32H4Serial Serial1;
