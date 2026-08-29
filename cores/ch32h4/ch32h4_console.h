@@ -34,6 +34,16 @@ void ch32h4_console_putu(uint32_t v);
 /* Zero-padded 32-bit hex, "0x" prefixed. */
 void ch32h4_console_puthex(uint32_t v);
 
+/* Wait until the last byte has actually left the shift register.
+ *
+ * putc only waits for TXE -- room in the holding register -- so on return from
+ * a print up to two bytes are still on the wire. If the next thing that
+ * happens is a trap or a reset, those bytes are lost and the line arrives
+ * truncated, which reads exactly like the board dying earlier than it did.
+ * That cost a wrong diagnosis once: "mtvec=0" was really "mtvec=0x..." cut
+ * after the first character. */
+void ch32h4_console_flush(void);
+
 #ifdef __cplusplus
 }
 #endif

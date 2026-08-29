@@ -184,4 +184,15 @@ def board():
             f"--- what it did say ---\n{banner!r}",
             returncode=1)
 
+    # Wait for the sketch's prompt before handing the board over. Without
+    # this the first command() answers with whatever tail of the banner was
+    # still arriving, which looks like the board ignoring the command.
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        chunk = ser.read(ser.in_waiting or 1)
+        if chunk:
+            banner += chunk.decode(errors="replace")
+        if banner.rstrip().endswith(">"):
+            break
+
     return Board(banner, ser)

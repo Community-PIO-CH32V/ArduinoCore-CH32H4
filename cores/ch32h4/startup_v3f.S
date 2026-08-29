@@ -31,6 +31,7 @@ _start_v3f:
  * setup1()/loop1() in M4; until then the table only has to be valid, so the
  * fault entries trap visibly rather than running into whatever follows. */
     .section .vector_v3f, "ax", @progbits
+    .global _vector_base_v3f
     .align  6
 _vector_base_v3f:
     .option norvc
@@ -152,6 +153,19 @@ _load_base_v3f:
     li  s3, 0x8
     and s2, s2, s3
     beqz s2, 1b
+
+    /* The V5F's vector table, into ITCM. It must be in RAM before that core
+       takes its first interrupt -- see the comment in the linker script. */
+    la a0, _vector_lma
+    la a1, _vector_start
+    la a2, _vector_end
+    bgeu a1, a2, 3f
+1:  lw t0, (a0)
+    sw t0, (a1)
+    addi a0, a0, 4
+    addi a1, a1, 4
+    bltu a1, a2, 1b
+3:
 
     /* .itcm_text: the measured-hot code. Usually small, often empty. ITCM is
        tightly coupled to the V5F, but it is globally addressable and this core

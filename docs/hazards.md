@@ -89,3 +89,82 @@ port. What the harness then catches is whatever was still in flight.
 
 **Fix.** Open the port first, then reset deliberately. `tests/hw/conftest.py`
 does this in `reset()`, called after the port is open.
+
+---
+
+## The V5F's trap vector table cannot live in flash
+
+**Symptom.** The board boots, prints, and then appears to boot-loop: the V3F
+banner repeats endlessly, garbled and interleaved. It starts exactly one
+millisecond after the SysTick interrupt is enabled -- about twelve characters
+at 115200 baud, which is what made the timing legible.
+
+**What it actually was.** Not a reset loop. GDB on `wch_riscv.cpu.1` showed the
+**V5F** halted with `pc = 0x00000000`, which is `_start_v3f`: the second core
+had fallen into the *first* core's reset vector and was re-running the whole
+V3F boot, wake included. Hence the repetition, and hence the interleaving --
+both cores were printing.
+
+`mcause = 0x2` (illegal instruction), `mepc = 0x800800`, an address in no
+section of the image.
+
+**Cause.** In `mtvec` mode 3 the trap hardware reads an absolute handler
+address out of the vector table at the moment the interrupt fires. That read
+does not take the path ordinary instruction fetch takes, and **from flash it
+returns garbage**. The core jumps to a nonsense address, takes an illegal
+instruction, and traps again into whatever `mtvec` then resolves to.
+
+**Fix.** The vector table is linked into ITCM and copied there by the V3F in
+`_load_base_v3f`, alongside `.data` and `.itcm_text`. `mtvec` then reads
+`0x200a0003`. Ordinary code still runs XIP from flash -- only the 596-byte
+table has to be in RAM.
+
+**How it was found.** Both prior ports place `.vector` inside `.highcode`,
+which is `>RAM_CODE AT>FLASH`. Neither says why. Once every other difference
+had been eliminated -- the CSRs matched MicroPython's working V5F exactly, the
+vector entry pointed at the right handler, and the handler disassembled to a
+correct ISR ending in `mret` -- the placement was the only thing left.
+
+## An interrupt attribute on the definition is silently ignored
+
+**Symptom.** None at build time. At run time the first interrupt corrupts the
+machine.
+
+**Cause.** `__attribute__((interrupt("WCH-Interrupt-fast")))` written on the
+function *definition* is applied after GCC has already emitted the prologue.
+You get an ordinary function -- one that ends in `ret` rather than `mret` --
+installed in the vector table, with no warning of any kind.
+
+**Fix.** `CH32H4_IRQ_HANDLER()` in `ch32h4_irq.h`. The attribute goes on a
+declaration that precedes the definition.
+
+## SysTick: only four CTLR bits, and a per-core acknowledge
+
+`CTLR` takes `EN | IE | NO_RTC | AUTO_RELOAD` -- bits 0 to 3, per reference
+manual 4.6.1.1. Setting more (0x3F was tried) is not "more of the same".
+
+There is **one** status register for both cores' timers, in `SysTick0`, and
+core N owns bit N of it. The acknowledge is a read-modify-write of that bit,
+not a store of zero to the register: a store clobbers the other core's flag.
+
+## micros() must fold in the pending tick, or it runs backwards
+
+Between the counter wrapping and the SysTick ISR actually running, the
+millisecond count is one behind what `CNT` implies. A reader that trusts
+`s_millis` returns `ms*1000 + 0` immediately after having returned
+`ms*1000 + 999`. Retrying while `ms != s_millis` does not help -- `s_millis`
+has not changed yet.
+
+`micros()` masks interrupts, reads the overflow flag, and adds the tick the ISR
+has not yet counted. Caught by `test_micros_is_monotonic`, which is worth
+keeping precisely because the window is small enough to look like it works.
+
+## Mixing OpenOCD and wlink wedges the probe
+
+Confirmed here, as the porting guide warns. After an OpenOCD/GDB session,
+`wlink status` returned `WCH-Link underlying protocol error: 0x55` for every
+subsequent operation. Only a physical USB replug cleared it.
+
+OpenOCD is still the right tool for *debugging* -- halting cpu.1 and reading
+`mcause`/`mepc` is what found the vector-table bug, and nothing else would
+have. Just do not flash with it, and expect to replug afterwards.

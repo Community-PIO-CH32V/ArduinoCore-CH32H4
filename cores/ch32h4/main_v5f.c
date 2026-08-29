@@ -10,6 +10,9 @@
 #include "ch32h417.h"
 #include "system_ch32h417.h"
 
+/* wiring_time.c */
+void ch32h4_systick_init(void);
+
 /* Lives in the shared region, which is the only memory both cores reach at
  * speed. It cannot live in .bss: the V3F zeroes .bss before this core is even
  * awake, and the V5F's I-cache is not coherent with anything, so cross-core
@@ -36,6 +39,10 @@ void ch32h4_v5f_main(void) {
      * refreshed -- and this function is core-aware, so SystemCoreClock comes
      * out as this core's 400 MHz rather than the V3F's 100 MHz. */
     SystemAndCoreClockUpdate();
+
+    /* millis()/micros()/delay() from here on. SysTick counts at HCLK, so this
+     * must come after the clock variables are refreshed. */
+    ch32h4_systick_init();
 
     ch32h4_console_puts("V5F: alive core_id=");
     ch32h4_console_putu(NVIC_GetCurrentCoreID());

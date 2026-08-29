@@ -1,0 +1,179 @@
+/* CH32H417QEU6-R0-1v1.
+ *
+ * Pin numbers are dense and port-ordered: port index * 16 + bit. PA0..PA15 are
+ * 0..15, PB 16..31, PC 32..47, PD 48..63, PE 64..79, PF 80..95. That is the
+ * same encoding the MicroPython port uses for this silicon, so its peripheral
+ * tables port across unchanged.
+ *
+ * The peripheral assignments below are the ones the libhal port proved in situ
+ * on this board, not datasheet options. The alternate-function maps in
+ * pin_map.c are the silicon's, and are what analogWrite() and the peripheral
+ * libraries search.
+ */
+#pragma once
+
+#include <stdint.h>
+
+#define PINS_COUNT           96
+#define NUM_DIGITAL_PINS     PINS_COUNT
+#define NUM_ANALOG_INPUTS    10
+
+#define PA0   0
+#define PA1   1
+#define PA2   2
+#define PA3   3
+#define PA4   4
+#define PA5   5
+#define PA6   6
+#define PA7   7
+#define PA8   8
+#define PA9   9
+#define PA10  10
+#define PA11  11
+#define PA12  12
+#define PA13  13
+#define PA14  14
+#define PA15  15
+
+#define PB0   16
+#define PB1   17
+#define PB2   18
+#define PB3   19
+#define PB4   20
+#define PB5   21
+#define PB6   22
+#define PB7   23
+#define PB8   24
+#define PB9   25
+#define PB10  26
+#define PB11  27
+#define PB12  28
+#define PB13  29
+#define PB14  30
+#define PB15  31
+
+#define PC0   32
+#define PC1   33
+#define PC2   34
+#define PC3   35
+#define PC4   36
+#define PC5   37
+#define PC6   38
+#define PC7   39
+#define PC8   40
+#define PC9   41
+#define PC10  42
+#define PC11  43
+#define PC12  44
+#define PC13  45
+#define PC14  46
+#define PC15  47
+
+#define PD0   48
+#define PD1   49
+#define PD2   50
+#define PD3   51
+#define PD4   52
+#define PD5   53
+#define PD6   54
+#define PD7   55
+#define PD8   56
+#define PD9   57
+#define PD10  58
+#define PD11  59
+#define PD12  60
+#define PD13  61
+#define PD14  62
+#define PD15  63
+
+#define PE0   64
+#define PE1   65
+#define PE2   66
+#define PE3   67
+#define PE4   68
+#define PE5   69
+#define PE6   70
+#define PE7   71
+#define PE8   72
+#define PE9   73
+#define PE10  74
+#define PE11  75
+#define PE12  76
+#define PE13  77
+#define PE14  78
+#define PE15  79
+
+#define PF0   80
+#define PF1   81
+#define PF2   82
+#define PF3   83
+#define PF4   84
+#define PF5   85
+#define PF6   86
+#define PF7   87
+#define PF8   88
+#define PF9   89
+#define PF10  90
+#define PF11  91
+#define PF12  92
+#define PF13  93
+#define PF14  94
+#define PF15  95
+
+/* Analog inputs. PA0-PA3 are ADC1 channels 0-3 (and also TIM2 CH1-4 on AF1);
+   PC0-PC5 are ADC1 channels 10-15. Nothing else on this package reaches the
+   ADC. */
+#define A0   PC0
+#define A1   PC1
+#define A2   PC2
+#define A3   PC3
+#define A4   PC4
+#define A5   PC5
+#define A6   PA0
+#define A7   PA1
+#define A8   PA2
+#define A9   PA3
+
+/* ADC1_IN17 is the internal reference, nominally 1.20 V. Reading it is the
+   check on the assumption that VDDA is 3.3 V -- see ch32h4_vdda_volts(). */
+#define ADC_INTERNAL_VREF_CHANNEL  17
+
+/* An interrupt "number" here is just the pin number. Note that EXTI lines are
+   shared by pin NUMBER across ports, so PA0 and PB0 cannot both have one --
+   attachInterrupt refuses the second rather than stealing the line. */
+#define digitalPinToInterrupt(p)  (p)
+
+/* Peripheral pins, proven on this board. */
+#define PIN_SERIAL1_TX   PA9    /* AF7 */
+#define PIN_SERIAL1_RX   PA10   /* AF7 */
+#define PIN_WIRE_SDA     PB7    /* I2C1, AF4 */
+#define PIN_WIRE_SCL     PB6    /* I2C1, AF4 */
+#define PIN_SPI_SCK      PA5    /* SPI1, AF5 */
+#define PIN_SPI_MISO     PA6    /* SPI1, AF5 */
+#define PIN_SPI_MOSI     PA7    /* SPI1, AF5 */
+#define PIN_I2S_WS       PB12   /* I2S2 (SPI2, on HB1), AF5 */
+#define PIN_I2S_CK       PB13
+#define PIN_I2S_SD       PB15
+#define PIN_DAC_OUT      PA4
+#define PIN_ONEWIRE      PB5    /* open-drain; needs a REAL external pull-up */
+#define PIN_SDMMC_CK     PC12
+#define PIN_SDMMC_CMD    PD2
+#define PIN_SDMMC_D0     PC8
+#define PIN_ETH_LED_LINK PF0    /* driven by the PHY itself, AF10 */
+#define PIN_ETH_LED_ACT  PF2
+
+/* The board's two test jumpers, both there so a test can prove a wire rather
+   than a register: PA6-PA7 is the SPI1 loopback, PC3-PC4 crosses the
+   VIO18/VDDIO domain boundary. */
+#define PIN_LOOPBACK_A   PA6
+#define PIN_LOOPBACK_B   PA7
+#define PIN_JUMPER_A     PC3
+#define PIN_JUMPER_B     PC4
+
+/* Supply domains matter. Only PA5-PA7 and PE2-PE6 sit on the 3.3 V rail; every
+   other pin is on VIO18 and idles well below 3.3 V, so a 3.3 V peripheral
+   driven from one of them may not meet its input thresholds. */
+#define PIN_IS_3V3_DOMAIN(p)     (((p) >= PA5 && (p) <= PA7) || ((p) >= PE2 && (p) <= PE6))
+
+#define SERIAL_PORT_HARDWARE   Serial1
+#define SERIAL_PORT_MONITOR    Serial

@@ -110,11 +110,35 @@ SECTIONS
         . = ALIGN(4);
     } >FLASH_V5F
 
+    /* The V5F's vector table lives in RAM, not flash.
+     *
+     * In mtvec mode 3 the trap hardware reads an absolute address out of this
+     * table at the moment an interrupt fires. That read does not go through
+     * the path ordinary instruction fetch uses, and from flash it returns
+     * garbage: the core jumps to a nonsense address and takes an illegal
+     * instruction (mcause=2, mepc=0x800800 was the observed pair), which then
+     * traps again. With mtvec still reading 0 at that point the second trap
+     * lands at address 0 -- which is _start_v3f -- so the V5F re-runs the V3F's
+     * startup and the board appears to boot-loop.
+     *
+     * Both prior ports to this silicon put .vector in RAM_CODE for the same
+     * reason; neither says why, and this is why.
+     *
+     * It goes in ITCM rather than the shared region because it is read on
+     * every interrupt and ITCM is zero-wait at the V5F's core clock. The V3F
+     * copies it in _load_base_v3f, alongside .data and .itcm_text. */
+    .vectoralign : {
+        . = ALIGN(4);
+        _vector_lma = .;
+    } >FLASH_V5F
+
     .v5f_vector : {
         . = ALIGN(64);
+        _vector_start = .;
         KEEP(*(.vector_v5f))
         . = ALIGN(4);
-    } >FLASH_V5F
+        _vector_end = .;
+    } >ITCM AT>FLASH_V5F
 
 
     .text : {

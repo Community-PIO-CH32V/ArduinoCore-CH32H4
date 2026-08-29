@@ -62,6 +62,13 @@ void ch32h4_console_puts(const char *s) {
     }
 }
 
+void ch32h4_console_flush(void) {
+    /* TC, not TXE: TXE only says the holding register is free. */
+    uint32_t guard = 2000000u;
+    while (USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET && --guard) {
+    }
+}
+
 void ch32h4_console_putu(uint32_t v) {
     char buf[11];
     int i = 0;
