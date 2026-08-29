@@ -34,6 +34,11 @@ SKETCH = ROOT / "tests" / "sketches" / "coretest"
 BUILD = SKETCH / ".pio" / "build" / "ch32h417"
 
 PORT = os.environ.get("CH32_PORT", "COM7")
+
+# The end of boot is the V5F reporting itself ready, not the V3F's "boot ok" --
+# the V3F is only half the image, and stopping at its line would mean the
+# banner never contains anything the second core said.
+BOOT_SENTINEL = "V5F: runtime ready"
 BAUD = 115200
 
 # Exit codes. The point is that a broken tool can never be read as a broken
@@ -170,12 +175,12 @@ def board():
         chunk = ser.read(ser.in_waiting or 1)
         if chunk:
             banner += chunk.decode(errors="replace")
-        if "boot ok" in banner:
+        if BOOT_SENTINEL in banner:
             break
     else:
         pytest.exit(
-            "the board did not reach 'boot ok' within 5 s. Ending the session "
-            "rather than letting every test wait out its own timeout.\n"
+            f"the board did not reach {BOOT_SENTINEL!r} within 5 s. Ending the "
+            "session rather than letting every test wait out its own timeout.\n"
             f"--- what it did say ---\n{banner!r}",
             returncode=1)
 

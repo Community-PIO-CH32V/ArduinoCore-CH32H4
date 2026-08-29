@@ -5,6 +5,7 @@
  */
 #include "ch32h4_clock.h"
 #include "ch32h4_console.h"
+#include "ch32h4_xcore.h"
 #include "ch32h417.h"
 
 /* NVIC_WakeUp_V5F() masks the address with ~0x3FF and does not complain, so an
@@ -75,6 +76,28 @@ void ch32h4_v3f_main(void) {
 
     ch32h4_console_puts("boot ok\n");
 
+    /* XCORE_RAM is NOLOAD, so nothing has initialised this. Clear it before
+     * the wake, or the V5F's "ready" flag reads as whatever the region
+     * happened to contain. */
+    ch32h4_runtime_ready = 0;
+
+    ch32h4_console_puts("V3F: waking V5F\n");
+    NVIC_WakeUp_V5F((uint32_t)CH32_V5F_START_ADDR);
+
+    /* PWR_EnterSTOPMode rather than a bare WFI, and in a loop.
+     *
+     * Stop mode takes effect only when BOTH cores request it, and this helper
+     * clears its own SLEEPDEEP on the way out -- a plain WFI would leave this
+     * core in shallow sleep after any wake, so a later deepsleep would
+     * silently degrade to Sleep mode and stop saving the power that is its
+     * whole point. The helper returns whenever a wake source fires, hence the
+     * loop; a `nop` loop here would spin the core at full clock forever.
+     *
+     * M4 replaces all of this with setup1() / loop1(), which first wait for
+     * ch32h4_runtime_ready. */
+    RCC_HB1PeriphClockCmd(RCC_HB1Periph_PWR, ENABLE);
+    (void)RCC->HB1PCENR;
     for (;;) {
+        PWR_EnterSTOPMode(PWR_Regulator_LowPower, PWR_STOPEntry_WFE);
     }
 }
