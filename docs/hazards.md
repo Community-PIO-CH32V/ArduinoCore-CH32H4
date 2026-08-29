@@ -125,6 +125,46 @@ had been eliminated -- the CSRs matched MicroPython's working V5F exactly, the
 vector entry pointed at the right handler, and the handler disassembled to a
 correct ISR ending in `mret` -- the placement was the only thing left.
 
+## The V5F's instruction cache is OFF at reset, and it is worth 145x
+
+**Symptom.** Everything works. It is just extremely slow, and only if you
+measure it against something do you find out.
+
+**Measured**, same loop compiled twice, one copy in flash and one in ITCM:
+
+| | XIP (flash) | ITCM | ratio |
+|---|---|---|---|
+| I-cache off (the reset default) | 365,606 us | 2,517 us | **145x** |
+| I-cache on | 2,507 us | 2,505 us | **1.00x** |
+
+**Cause.** QingKeV5 manual, `cache_strtg_ctlr` (CSR `0xBC2`), bit 1
+`ic_disable`: *"Instruction cache disable flag bit, which is 0 to turn on the
+instruction cache function."* **Reset value: 1.** The 32 KB instruction cache
+is disabled out of reset and nothing anywhere says so.
+
+The per-region enables above it -- bit 24 `ic_code_strtg` for
+`0x00000000-0x1fffffff`, bit 25 `ic_sram_strtg` for `0x20000000-0x3fffffff` --
+all reset to **1**, so clearing the single master disable bit is the whole fix.
+Flash is clocked at HCLK/2 = 50 MHz while this core runs at 400 MHz, and
+uncached, every instruction fetch pays that.
+
+**Fix.** `startup_v5f.S` invalidates the cache (`opcache_ctlr`, CSR `0xBD0`,
+opcode 00) and clears `ic_disable`. `test_xip_runs_at_itcm_speed` is the
+regression guard.
+
+**Why nobody found it before.** The MicroPython port avoided the question by
+copying 392 KB of `.text` into RAM and running from there; the libhal port ran
+on the V3F, which has no instruction cache at all. Neither had reason to look,
+and both paid for it -- MicroPython in RAM it could have given to its heap.
+
+This is what makes the XIP-primary memory strategy work: code runs from flash
+at ITCM speed, and the ~700 KB of RAM stays available to sketches.
+
+**A dead end worth recording**, since it looks plausible: `FLASH_ACTLR`'s
+`EHMOD` "enhance mode" bit, which the SDK exposes as `FLASH_Enhance_Mode()`,
+makes no measurable difference here (365,360 us against 365,606 us). It is not
+the code accelerator it resembles on other CH32 parts.
+
 ## An interrupt attribute on the definition is silently ignored
 
 **Symptom.** None at build time. At run time the first interrupt corrupts the

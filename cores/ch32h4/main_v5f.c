@@ -40,6 +40,17 @@ void ch32h4_v5f_main(void) {
      * out as this core's 400 MHz rather than the V3F's 100 MHz. */
     SystemAndCoreClockUpdate();
 
+    /* Flash "enhance mode" is the code accelerator, and it is OFF at reset.
+     *
+     * Without it this core executes from flash at roughly a 145th of its ITCM
+     * speed -- flash is clocked at HCLK/2 = 50 MHz against a 400 MHz core, and
+     * every fetch pays it. With it, XIP becomes usable and the whole
+     * "run from flash, keep the RAM for the heap" strategy holds up.
+     *
+     * The vendor SDK exposes it but nothing calls it, and nothing reports that
+     * it is off: the board simply runs, slowly. */
+    FLASH_Enhance_Mode(ENABLE);
+
     /* millis()/micros()/delay() from here on. SysTick counts at HCLK, so this
      * must come after the clock variables are refreshed. */
     ch32h4_systick_init();

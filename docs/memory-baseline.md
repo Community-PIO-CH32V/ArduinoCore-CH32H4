@@ -39,3 +39,28 @@ come out of it before the heap starts.
 `_v5f_entry` links at `0x00008000`, which matches `CH32_V5F_START_ADDR` in
 `tools/platformio-build.py`. The linker script asserts the 1 KB alignment that
 `NVIC_WakeUp_V5F` silently requires, and `main_v3f.c` asserts the two agree.
+
+## The XIP measurement, and what it decided
+
+The spec (section 4.3) made the XIP-primary layout provisional: MicroPython had
+found flash execution "far worse than the 4x clock ratio implies", and the
+fallback was to carve a `RAM_CODE` region out of the heap.
+
+Measured on this board, the same loop compiled twice:
+
+| | XIP (flash) | ITCM | ratio |
+|---|---|---|---|
+| I-cache off (reset default) | 365,606 us | 2,517 us | 145x |
+| **I-cache on** | **2,507 us** | 2,505 us | **1.00x** |
+
+The V5F's instruction cache is disabled out of reset -- see `docs/hazards.md`.
+With it enabled, flash and ITCM are indistinguishable for this workload.
+
+**Decision: XIP-primary stands, and no `RAM_CODE` region is needed.** ITCM
+holds only the trap vector table (a correctness requirement, not a speed one)
+and the handful of functions marked `__itcm_func`; the rest of ITCM and all of
+the shared region stay available. Sketches get ~700 KB of heap.
+
+`__itcm_func` remains useful for code that must not miss -- an ISR whose first
+execution is latency-critical, or a bit-banged protocol -- but it is no longer
+a throughput lever.

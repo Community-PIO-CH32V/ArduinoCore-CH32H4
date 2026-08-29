@@ -203,6 +203,31 @@ handle_reset_v5f:
     li t0, 0x0F
     csrw 0x804, t0
 
+    /* Turn the instruction cache ON.
+     *
+     * QingKeV5 manual, cache_strtg_ctlr (CSR 0xBC2), bit 1 ic_disable:
+     * "Instruction cache disable flag bit, which is 0 to turn on the
+     * instruction cache function." Its RESET VALUE IS 1 -- so the 32 KB
+     * instruction cache is OFF out of reset and nothing says so.
+     *
+     * The per-region enables above it (bit 24 ic_code_strtg for
+     * 0x00000000-0x1fffffff, bit 25 ic_sram_strtg for 0x20000000-0x3fffffff)
+     * all reset to 1, so clearing the master disable is all that is needed.
+     *
+     * This is worth 145x. Without it a loop executing from flash runs at
+     * 1/145th of its ITCM speed -- flash is clocked at HCLK/2 = 50 MHz while
+     * this core runs at 400 MHz, and uncached every single fetch pays that.
+     * With it, running code from flash is viable and the RAM stays available
+     * as heap, which is the whole memory strategy.
+     *
+     * Invalidate first (opcache_ctlr, CSR 0xBD0, opcode 00 = Icache
+     * invalidate), then enable, so nothing stale from before reset is used. */
+    li t0, 0
+    csrw 0xBD0, t0
+    csrr t0, 0xBC2
+    andi t0, t0, -3          /* clear bit 1, ic_disable */
+    csrw 0xBC2, t0
+
     /* FPU on, interrupts on, and STAY IN MACHINE MODE.
      *
      * WCH ships 0x6088, which leaves MPP=00 and returns into User mode, where
