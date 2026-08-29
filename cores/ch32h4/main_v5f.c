@@ -34,6 +34,21 @@ static void run_static_constructors(void) {
 }
 
 void ch32h4_v5f_main(void) {
+    /* Guard: only the V5F belongs here.
+     *
+     * If the V3F arrives, it has fallen through from somewhere it should not
+     * have, and letting it run on would give two cores printing to one UART
+     * and a "V5F:" banner reporting the V3F's 100 MHz core clock -- which is
+     * exactly the confusing interleaved mess this guard exists to replace. */
+    if (NVIC_GetCurrentCoreID() != 1u) {
+        ch32h4_console_putc('\n');
+        ch32h4_console_puts("FATAL: V3F entered ch32h4_v5f_main");
+        ch32h4_console_putc('\n');
+        ch32h4_console_flush();
+        for (;;) {
+        }
+    }
+
     /* NOT SystemInit(). The V3F has already programmed every PLL, and this
      * core must not touch them. Only the cached frequency variables are
      * refreshed -- and this function is core-aware, so SystemCoreClock comes

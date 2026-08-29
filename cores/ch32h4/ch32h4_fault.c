@@ -18,6 +18,14 @@
 /* Reprogramming a peripheral the console may already own is fine here: this
  * function never returns, so there is nothing left to interfere with. */
 static void raw_uart_bringup(void) {
+    /* If the console is already up, leave it alone. Reprogramming a working
+     * USART mid-stream drops characters and mangles the dump -- and the dump
+     * is the entire point. Only build it from nothing when there is nothing,
+     * which is the static-init case this function exists for. */
+    if (USART1->CTLR1 & USART_CTLR1_UE) {
+        return;
+    }
+
     RCC->HB2PCENR |= RCC_HB2Periph_GPIOA | RCC_HB2Periph_USART1
                      | RCC_HB2Periph_AFIO;
     (void)RCC->HB2PCENR;
@@ -68,6 +76,12 @@ static void puthex_raw(uint32_t v) {
  * the declaration -- see ch32h4_irq.h. */
 void CH32H4_IRQ_HANDLER(HardFault_Handler);
 void HardFault_Handler(void) {
+    /* Stop the world. Without this SysTick keeps firing into the spin loop at
+     * the bottom, each one nesting on the last until the hardware stack
+     * overflows and the part resets -- so the dump scrolls past and the board
+     * appears to boot-loop instead of halting. */
+    __disable_irq();
+
     uint32_t mcause, mepc, mtval, mstatus;
     __asm volatile("csrr %0, mcause"  : "=r"(mcause));
     __asm volatile("csrr %0, mepc"    : "=r"(mepc));

@@ -136,6 +136,24 @@ class Board:
         self.banner = banner
         self.ser = ser
 
+    def reboot(self, timeout: float = 5.0):
+        """Reset and wait for the prompt again.
+
+        For tests that deliberately halt the board -- the fault handler stops
+        the world, by design -- so the ones after them still have a board to
+        talk to."""
+        self.ser.reset_input_buffer()
+        reset()
+        deadline = time.time() + timeout
+        seen = ""
+        while time.time() < deadline:
+            chunk = self.ser.read(self.ser.in_waiting or 1)
+            if chunk:
+                seen += chunk.decode(errors="replace")
+            if seen.rstrip().endswith(">"):
+                return
+        raise AssertionError(f"board did not come back after reset: {seen!r}")
+
     def command(self, line: str, timeout: float = 3.0) -> str:
         self.ser.reset_input_buffer()
         self.ser.write((line + "\n").encode())

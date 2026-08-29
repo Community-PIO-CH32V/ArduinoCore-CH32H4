@@ -186,6 +186,16 @@ SECTIONS
         . = ALIGN(4);
         __eh_frame_start = .;
         KEEP(*(.eh_frame))
+        /* The terminating zero word.
+         *
+         * The registry-based unwinder walks CIE/FDE records until it reads a
+         * zero length, and normally crtend.o supplies that word as
+         * __FRAME_END__. Under -nostartfiles crtend is not linked, so without
+         * this the unwinder runs off the end of the table and dereferences
+         * whatever follows: the first throw takes a load access fault
+         * (mcause=5) with mtval holding the garbage pointer, instead of being
+         * caught. It links cleanly either way. */
+        LONG(0)
         __eh_frame_end = .;
         . = ALIGN(4);
     } >FLASH_V5F

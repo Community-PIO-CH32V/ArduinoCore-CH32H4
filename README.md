@@ -31,15 +31,20 @@ the milestones below.
 | Shared SRAM | `0x20100000` | 512 KB | DMA buffers, bulk heap |
 | Flash | `0x08000000` | 960 KB | 32 KB V3F stub, 912 KB image, 16 KB EEPROM |
 
-Code runs XIP from flash behind the V5F's I-cache. About **660 KB of heap** is
-available to sketches. `_sbrk` hands out DTCM first — zero-wait at 400 MHz —
-then continues into the shared region.
+Code runs XIP from flash. About **708 KB of heap** is available to sketches:
+`_sbrk` hands out DTCM first — zero-wait at 400 MHz — then continues into the
+shared region, and newlib's allocator opens a second segment at the gap.
+
+ITCM holds the V5F's trap vector table, which has to be in RAM for correctness
+rather than speed, plus whatever is marked `__itcm_func` — currently
+`digitalWrite`, `digitalRead`, `millis`, `micros`, `delayMicroseconds` and the
+EXTI dispatch. See "Known gaps" for why that placement still matters.
 
 ## Status
 
 | | Milestone | State |
 |---|---|---|
-| **M1** | Boot, clocks, single ELF, core Arduino API | in progress |
+| **M1** | Boot, clocks, single ELF, core Arduino API | **working**, 43 hardware tests |
 | M2 | TinyUSB, `Serial` as USB CDC, Adafruit_TinyUSB | planned |
 | M3 | Wire, SPI, EEPROM, Servo, Tone, I2S, ADCInput, Ticker | planned |
 | M4 | `setup1()`/`loop1()` on the V3F, IPC FIFO, HSEM mutexes | planned |
@@ -71,6 +76,22 @@ C++ exceptions are a build option, off by default:
 ```ini
 board_build.exceptions = enabled
 ```
+
+**Both settings build and link, but `enabled` does not yet work at run time** --
+a `throw` faults rather than being caught. See `docs/hazards.md`. The default
+is fully working.
+
+## Known gaps
+
+Two things are measured, understood and not yet fixed. Both are written up in
+`docs/hazards.md`.
+
+1. **The V5F instruction cache is off.** It is disabled at reset and worth a
+   measured **145x** for code running from flash. Four ways of enabling it were
+   tried; all leave the core trapping in startup. This is the highest-value
+   open item, and it has to be settled before the networking milestone, whose
+   lwIP receive path is exactly the loop-shaped code that pays for it.
+2. **Exceptions do not work at run time**, as above.
 
 ## Testing
 

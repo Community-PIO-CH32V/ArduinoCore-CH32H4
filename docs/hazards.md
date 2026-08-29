@@ -148,9 +148,25 @@ all reset to **1**, so clearing the single master disable bit is the whole fix.
 Flash is clocked at HCLK/2 = 50 MHz while this core runs at 400 MHz, and
 uncached, every instruction fetch pays that.
 
-**Fix.** `startup_v5f.S` invalidates the cache (`opcache_ctlr`, CSR `0xBD0`,
-opcode 00) and clears `ic_disable`. `test_xip_runs_at_itcm_speed` is the
-regression guard.
+**Not yet fixed, and this is the core's biggest open item.** Enabling the
+cache from `startup_v5f.S` leaves the V5F trapping in startup. Four variants
+were tried on hardware, all of them failing -- intermittently at first, which
+is how it survived a 41-test run once, and then on every boot:
+
+| attempt | result |
+|---|---|
+| clear `ic_disable` | traps |
+| invalidate index 0, then enable | traps |
+| add `fence.i` after enabling | traps |
+| invalidate all 1024 lines, then enable | traps |
+
+The core is fetching from flash at the moment the cache is switched on
+underneath it. What is missing is probably in the manual's cache chapter --
+the real line size, the correct invalidate protocol, and whether the enable
+has to execute from memory the cache does not cover (ITCM would do).
+
+The core therefore ships at the reset default, which boots 6/6.
+`test_flash_vs_itcm_ratio_is_recorded` keeps the number visible.
 
 **Why nobody found it before.** The MicroPython port avoided the question by
 copying 392 KB of `.text` into RAM and running from there; the libhal port ran
@@ -208,3 +224,46 @@ subsequent operation. Only a physical USB replug cleared it.
 OpenOCD is still the right tool for *debugging* -- halting cpu.1 and reading
 `mcause`/`mepc` is what found the vector-table bug, and nothing else would
 have. Just do not flash with it, and expect to replug afterwards.
+
+---
+
+## Exceptions link, and do not yet work at run time
+
+**State: `board_build.exceptions = enabled` builds and links, but a `throw`
+faults instead of being caught. The default, `disabled`, is fully working and
+is what M1 ships.**
+
+What is in place and verified:
+
+- `-fexceptions` builds; both settings link (`tests/test_exceptions_build.py`).
+- `.eh_frame` is emitted, 5,728 bytes, and lands in flash.
+- The section is bounded by `__eh_frame_start` / `__eh_frame_end` and carries
+  the terminating zero word that crtend would normally supply -- `-nostartfiles`
+  means crtend is never linked, so the linker script appends `LONG(0)`.
+- `ch32h4_register_eh_frame` is present in `.init_array` and runs, calling
+  `__register_frame_info` at constructor priority 101.
+- `__gnu_cxx::__verbose_terminate_handler` is overridden, which keeps the 43 KB
+  C++ name demangler out of the image.
+
+What happens anyway:
+
+```
+throwtest ->
+=== TRAP ===
+mcause=0x00000005 mepc=0x0000d534 mtval=0xe5ffd8a6 mstatus=0x80007800
+halted
+```
+
+`mcause=5` is a load access fault and `mepc` lands inside `strlen`, with
+`mtval` holding a pointer that is not in any section. Notably `terminate` is
+never reached -- the override would have printed -- so the unwinder is not
+simply giving up; something is corrupted before or during the landing pad.
+
+Adding the `.eh_frame` terminator did not change the address or the fault, so
+the table walk is probably not the problem. The next thing to check is whether
+the personality routine and `.gcc_except_table` are reachable and correctly
+aligned, and whether the hardware-stack interrupt mode (`0x804 = 0x0F`)
+interacts with the unwinder's expectations about the frame layout.
+
+This is the second of the two open items on this core, after the instruction
+cache.
