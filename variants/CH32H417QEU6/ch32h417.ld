@@ -39,8 +39,8 @@ MEMORY
     /* DTCM: zero-wait at the V5F core clock. .data, .bss, the V5F stack and the
        fast half of the heap. The V3F reaches it with HCLK waits, which is fine
        for the stub. */
-    RAM_LOAD (xrw)  : ORIGIN = 0x200C0000, LENGTH = 256
-    DTCM (xrw)      : ORIGIN = 0x200C0100, LENGTH = 256K - 256
+    RAM_LOAD (xrw)  : ORIGIN = 0x200C0000, LENGTH = 512
+    DTCM (xrw)      : ORIGIN = 0x200C0200, LENGTH = 256K - 512
 
     /* Shared SRAM: the only memory both cores reach at speed, and the only
        memory the USB controller's own bus master can reach at all. (DMA1/2
@@ -82,6 +82,25 @@ SECTIONS
         . = ALIGN(4);
     } >FLASH_V3F
 
+    /* The V3F copies this to RAM and calls it there. It reprograms the PLL,
+       and changing the PLL while instructions are being fetched from flash
+       changes the flash access timing underneath the fetch. It also carries
+       the .data / .bss / .itcm_text copies, which this core owns -- see the
+       header comment in startup_v3f.S for why the second core must not repeat
+       them. */
+    .loadcodealign : {
+        . = ALIGN(4);
+        _loadcode_lma = .;
+    } >FLASH_V3F
+
+    .loadcode : {
+        . = ALIGN(4);
+        _loadcode_vma_start = .;
+        *(.load)
+        . = ALIGN(4);
+        _loadcode_vma_end = .;
+    } >RAM_LOAD AT>FLASH_V3F
+
     /* ---- V5F image ------------------------------------------------------ */
 
     .v5f_init : {
@@ -97,21 +116,6 @@ SECTIONS
         . = ALIGN(4);
     } >FLASH_V5F
 
-    /* The flash cache control bits at 0x40022000 are toggled around the RAM
-       copies, so the copy routine itself must not be executing from flash
-       while that happens. It is copied to RAM_LOAD first and called there. */
-    .loadcodealign : {
-        . = ALIGN(4);
-        _loadcode_lma = .;
-    } >FLASH_V5F
-
-    .loadcode : {
-        . = ALIGN(4);
-        _loadcode_vma_start = .;
-        *(.load)
-        . = ALIGN(4);
-        _loadcode_vma_end = .;
-    } >RAM_LOAD AT>FLASH_V5F
 
     .text : {
         . = ALIGN(4);

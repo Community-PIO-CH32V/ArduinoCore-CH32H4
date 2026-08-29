@@ -68,6 +68,11 @@ env.Append(
         "-Os",
         "-Wall",
         "-Wextra",
+        # The vendor's ch32h417_eth.h has nested "/*" in its register banner
+        # comments, and it is included by anything that touches the SDK. Left
+        # on, it produces hundreds of lines per build from a header we do not
+        # own, which is exactly how a real warning gets missed.
+        "-Wno-comment",
         "-fmessage-length=0",
         "-fsigned-char",
         "-ffunction-sections",
