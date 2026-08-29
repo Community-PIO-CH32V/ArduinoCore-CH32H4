@@ -1,12 +1,272 @@
-/* Stand-in. Task 3 replaces this with the real dual-core map; it exists only
-   so the link succeeds while the PlatformIO integration is being verified. */
+/* CH32H417QEU6 -- one ELF, both cores.
+ *
+ * The V3F boots at flash origin and wakes the V5F at _v5f_entry, which lives
+ * in this same image. Both prior ports to this silicon ship two ELFs merged by
+ * a script; they had to, because WCH's stock startup files for the two cores
+ * define the same ~150 symbols. This core writes its own startup with prefixed
+ * symbols, so one link produces one .bin and there is no merge step.
+ *
+ * NVIC_WakeUp_V5F() masks the entry address with ~0x3FF and does not complain,
+ * so an unaligned entry starts the core in the middle of whatever precedes it.
+ * That is asserted at the bottom of this file.
+ *
+ * Code runs XIP from flash behind the V5F's 32 KB I-cache. Only functions
+ * measured as hot are placed in ITCM, via __itcm_func. See
+ * docs/superpowers/specs/2026-08-29-ch32h4-arduino-core-design.md section 4.
+ */
 ENTRY( _start_v3f )
-MEMORY {
-  FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = 960K
-  RAM   (xrw) : ORIGIN = 0x200C0000, LENGTH = 256K
+
+__stack_size_v3f = 2048;
+__stack_size_v5f = 16384;
+
+MEMORY
+{
+    /* The V3F stub: vectors, clocks, VIO18, console, wake. It is small and does
+       not grow, so 32 K is generous and keeps _v5f_entry on a round number. */
+    FLASH_V3F (rx)  : ORIGIN = 0x00000000, LENGTH = 32K
+
+    /* The Arduino image. This region deliberately STOPS at the EEPROM base
+       rather than running to the end of the 960 K user area, so an oversized
+       image is a link error instead of a board that works until someone writes
+       a setting. MicroPython lost 26 K of image into its filesystem for want
+       of exactly this, and boot-looped on the next reset. */
+    FLASH_V5F (rx)  : ORIGIN = 0x00008000, LENGTH = 912K
+
+    /* ITCM: zero-wait at the V5F core clock. NOT where code goes by default --
+       only what has been measured as hot. */
+    ITCM (xrw)      : ORIGIN = 0x200A0000, LENGTH = 128K
+
+    /* DTCM: zero-wait at the V5F core clock. .data, .bss, the V5F stack and the
+       fast half of the heap. The V3F reaches it with HCLK waits, which is fine
+       for the stub. */
+    RAM_LOAD (xrw)  : ORIGIN = 0x200C0000, LENGTH = 256
+    DTCM (xrw)      : ORIGIN = 0x200C0100, LENGTH = 256K - 256
+
+    /* Shared SRAM: the only memory both cores reach at speed, and the only
+       memory the USB controller's own bus master can reach at all. (DMA1/2
+       reach every region including DTCM -- MEMARY_CFGR, CSR 0xBC5, resets to
+       read+write enabled -- so these reservations are about the USB and
+       Ethernet masters, not about DMA in general.)
+
+       These four are carved out now, in M1, so the map does not churn under
+       later milestones. The sizes are the MicroPython port's measured ones. */
+    USB_RAM (xrw)   : ORIGIN = 0x20100000, LENGTH = 8K     /* M2 */
+    ETH_RAM (xrw)   : ORIGIN = 0x20102000, LENGTH = 28K    /* M6 */
+    SD_RAM (rw)     : ORIGIN = 0x20109000, LENGTH = 8K     /* M5 */
+    XCORE_RAM (xrw) : ORIGIN = 0x2010B000, LENGTH = 8K     /* M4 */
+    SHARED (xrw)    : ORIGIN = 0x2010D000, LENGTH = 512K - 52K
 }
-SECTIONS {
-  .text : { *(.init) *(.text) *(.text.*) *(.rodata) *(.rodata.*) } >FLASH
-  .data : { *(.data) *(.data.*) } >RAM AT>FLASH
-  .bss  : { *(.bss) *(.bss.*) *(COMMON) } >RAM
+
+SECTIONS
+{
+    /* ---- V3F image ------------------------------------------------------ */
+
+    .v3f_init : {
+        . = ALIGN(4);
+        KEEP(*(SORT_NONE(.init_v3f)))
+        . = ALIGN(4);
+    } >FLASH_V3F
+
+    .v3f_vector : {
+        . = ALIGN(64);
+        KEEP(*(.vector_v3f))
+        . = ALIGN(4);
+    } >FLASH_V3F
+
+    .v3f_text : {
+        . = ALIGN(4);
+        *(.text.v3f)
+        *(.text.v3f.*)
+        *(.rodata.v3f)
+        *(.rodata.v3f.*)
+        . = ALIGN(4);
+    } >FLASH_V3F
+
+    /* ---- V5F image ------------------------------------------------------ */
+
+    .v5f_init : {
+        . = ALIGN(1024);
+        _v5f_entry = .;
+        KEEP(*(SORT_NONE(.init_v5f)))
+        . = ALIGN(4);
+    } >FLASH_V5F
+
+    .v5f_vector : {
+        . = ALIGN(64);
+        KEEP(*(.vector_v5f))
+        . = ALIGN(4);
+    } >FLASH_V5F
+
+    /* The flash cache control bits at 0x40022000 are toggled around the RAM
+       copies, so the copy routine itself must not be executing from flash
+       while that happens. It is copied to RAM_LOAD first and called there. */
+    .loadcodealign : {
+        . = ALIGN(4);
+        _loadcode_lma = .;
+    } >FLASH_V5F
+
+    .loadcode : {
+        . = ALIGN(4);
+        _loadcode_vma_start = .;
+        *(.load)
+        . = ALIGN(4);
+        _loadcode_vma_end = .;
+    } >RAM_LOAD AT>FLASH_V5F
+
+    .text : {
+        . = ALIGN(4);
+        *(.text.unlikely .text.unlikely.*)
+        *(.text.startup .text.startup.*)
+        *(.text .text.*)
+        *(.gnu.linkonce.t.*)
+        . = ALIGN(4);
+    } >FLASH_V5F
+
+    .rodata : {
+        . = ALIGN(4);
+        *(.rdata)
+        *(.rodata .rodata.*)
+        *(.gnu.linkonce.r.*)
+        . = ALIGN(4);
+    } >FLASH_V5F
+
+    .init_array : {
+        . = ALIGN(4);
+        __init_array_start = .;
+        KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*)))
+        KEEP(*(.init_array))
+        __init_array_end = .;
+        . = ALIGN(4);
+    } >FLASH_V5F
+
+    .fini_array : {
+        . = ALIGN(4);
+        __fini_array_start = .;
+        KEEP(*(SORT_BY_INIT_PRIORITY(.fini_array.*)))
+        KEEP(*(.fini_array))
+        __fini_array_end = .;
+        . = ALIGN(4);
+    } >FLASH_V5F
+
+    /* The unwind tables stay in flash: nothing reads them until something
+       throws, a throw already costs microseconds of table walking, and this
+       keeps roughly 30 K out of RAM. __eh_frame_start is handed to
+       __register_frame_info by a priority-101 constructor, because under
+       -nostartfiles nothing else registers it and every throw would otherwise
+       reach std::terminate after a perfectly clean link. */
+    .eh_frame : {
+        . = ALIGN(4);
+        __eh_frame_start = .;
+        KEEP(*(.eh_frame))
+        __eh_frame_end = .;
+        . = ALIGN(4);
+    } >FLASH_V5F
+
+    .gcc_except_table : {
+        . = ALIGN(4);
+        *(.gcc_except_table .gcc_except_table.*)
+        . = ALIGN(4);
+    } >FLASH_V5F
+
+    /* ---- ITCM: measured-hot code only ----------------------------------- */
+
+    .itcmalign : {
+        . = ALIGN(4);
+        _itcm_lma = .;
+    } >FLASH_V5F
+
+    .itcm_text : {
+        . = ALIGN(4);
+        _itcm_start = .;
+        *(.itcm_text)
+        *(.itcm_text.*)
+        . = ALIGN(4);
+        _itcm_end = .;
+    } >ITCM AT>FLASH_V5F
+
+    /* ---- Cross-core state ----------------------------------------------- */
+
+    /* The shared region is the only memory both cores reach at speed, and the
+       V5F's I-cache is not coherent with anything, so cross-core state cannot
+       live in DTCM or be inlined into cached code. */
+    .xcore (NOLOAD) : {
+        . = ALIGN(8);
+        *(.xcore)
+        *(.xcore.*)
+        . = ALIGN(8);
+    } >XCORE_RAM
+
+    /* ---- Data ----------------------------------------------------------- */
+
+    .dataalign : {
+        . = ALIGN(8);
+        _data_lma = .;
+    } >FLASH_V5F
+
+    .data : {
+        . = ALIGN(8);
+        _data_vma = .;
+        *(.data .data.*)
+        *(.gnu.linkonce.d.*)
+        . = ALIGN(8);
+        __global_pointer$ = . + 0x800;
+        *(.sdata .sdata.*)
+        *(.sdata2 .sdata2.*)
+        *(.gnu.linkonce.s.*)
+        . = ALIGN(8);
+        _edata = .;
+    } >DTCM AT>FLASH_V5F
+
+    .bss (NOLOAD) : {
+        . = ALIGN(8);
+        _sbss = .;
+        *(.sbss .sbss.*)
+        *(.gnu.linkonce.sb.*)
+        *(.bss .bss.*)
+        *(.gnu.linkonce.b.*)
+        *(COMMON)
+        . = ALIGN(8);
+        _ebss = .;
+    } >DTCM
+
+    /* NOLOAD on both stacks, or a section that merely advances the location
+       counter becomes PROGBITS at a RAM load address and objcopy pads the .bin
+       out to it. That produced a 514 MB firmware.bin in the libhal port. */
+    .v3f_stack (NOLOAD) : {
+        . = ALIGN(16);
+        . = . + __stack_size_v3f;
+        . = ALIGN(16);
+        _estack_v3f = .;
+    } >DTCM
+
+    .v5f_stack (NOLOAD) : {
+        . = ALIGN(16);
+        . = . + __stack_size_v5f;
+        . = ALIGN(16);
+        _estack_v5f = .;
+    } >DTCM
+
+    /* ---- Heap ----------------------------------------------------------- */
+
+    /* Two disjoint regions. _sbrk hands out DTCM first -- zero-wait at the
+       V5F's 400 MHz -- then continues into the shared region, which runs at
+       HCLK and is larger. newlib's dlmalloc starts a NEW SEGMENT when sbrk
+       returns memory that is not contiguous with the previous top, rather than
+       assuming contiguity, so no allocation ever spans the gap. */
+    _heap_dtcm_start = ALIGN(_estack_v5f, 8);
+    _heap_dtcm_end = ORIGIN(DTCM) + LENGTH(DTCM);
+    _heap_shared_start = ORIGIN(SHARED);
+    _heap_shared_end = ORIGIN(SHARED) + LENGTH(SHARED);
+
+    /DISCARD/ : {
+        *(.note.*)
+        *(.comment)
+        *(.eh_frame_hdr)
+    }
 }
+
+ASSERT( _v5f_entry % 1024 == 0,
+    "The V5F entry must be 1 KB aligned: NVIC_WakeUp_V5F masks it with ~0x3FF and starts the core mid-instruction without complaining." )
+
+ASSERT( _heap_dtcm_end > _heap_dtcm_start,
+    "DTCM is full: .data, .bss and the two stacks leave no room for a heap." )
