@@ -1,0 +1,11 @@
+{
+  "name": "framework-arduinoch32h4",
+  "version": "0.1.0",
+  "description": "Arduino core for the WCH CH32H41x dual-core RISC-V MCU",
+  "keywords": ["framework", "arduino", "ch32h4", "risc-v", "wch"],
+  "license": "LGPL-2.1-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Community-PIO-CH32V/arduino-core-ch32h4.git"
+  }
+}

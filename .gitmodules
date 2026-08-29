@@ -1,0 +1,6 @@
+[submodule "system/ch32h417lib"]
+	path = system/ch32h417lib
+	url = https://github.com/maxgerhardt/ch32h417lib.git
+[submodule "ArduinoCore-API"]
+	path = ArduinoCore-API
+	url = https://github.com/arduino/ArduinoCore-API.git

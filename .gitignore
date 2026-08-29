@@ -1,0 +1,7 @@
+.pio/
+build/
+*.elf
+*.bin
+*.map
+__pycache__/
+.pytest_cache/
