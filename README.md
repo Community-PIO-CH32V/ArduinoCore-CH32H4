@@ -18,9 +18,14 @@ merged by a script, because WCH's stock startup files for the two cores define
 the same ~150 symbols and collide at link time. This core writes its own
 startup with prefixed symbols, so one link produces one `.bin`.
 
-`setup()` and `loop()` run on the V5F. `setup1()` and `loop1()` will run on the
-V3F, as in [arduino-pico](https://github.com/earlephilhower/arduino-pico) — see
-the milestones below.
+`setup()` and `loop()` run on the V5F. `setup1()` and `loop1()` run on the V3F,
+as in [arduino-pico](https://github.com/earlephilhower/arduino-pico) — though
+the assignment is the other way round there, because here the boot core is the
+slow one and a sketch that says nothing about cores should get the fast one.
+
+Define neither and the V3F sleeps, which costs a single-core sketch nothing.
+`CH32H4.fifo` carries words between the cores and `CH32H4.mutexLock()` wraps the
+hardware semaphores.
 
 ## Memory
 
@@ -49,7 +54,7 @@ EXTI dispatch. See "Known gaps" for why that placement still matters.
 | **M1** | Boot, clocks, single ELF, core Arduino API | **working**, 43 hardware tests |
 | M2 | Adafruit TinyUSB, `Serial` as USB CDC | **working** |
 | M3 | Wire, SPI, EEPROM, Servo | **building**; Tone, I2S, ADCInput, Ticker next |
-| M4 | `setup1()`/`loop1()` on the V3F, IPC FIFO, HSEM mutexes | planned |
+| M4 | `setup1()`/`loop1()` on the V3F, FIFO, HSEM mutexes | **building**, awaiting hardware |
 | M5 | SD, SDFS, FatFS | planned |
 | M6 | lwIP, on-chip Ethernet, the `lwip_*` library structure | planned |
 | M7 | mbedTLS with the ECDC AES and TRNG accelerators | planned |

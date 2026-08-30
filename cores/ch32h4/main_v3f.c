@@ -18,6 +18,10 @@ _Static_assert(CH32_V5F_START_ADDR % 1024 == 0,
  * compares them. */
 extern char _v5f_entry[];
 
+/* Weak: a single-core sketch defines neither, and this core sleeps. */
+extern void setup1(void) __attribute__((weak));
+extern void loop1(void) __attribute__((weak));
+
 #define CH32H4_V3F_TEXT  __attribute__((section(".text.v3f")))
 
 /* The VIO18 rail must be set before ANY pin is configured, including the
@@ -76,25 +80,58 @@ void ch32h4_v3f_main(void) {
 
     ch32h4_console_puts("boot ok\n");
 
-    /* XCORE_RAM is NOLOAD, so nothing has initialised this. Clear it before
-     * the wake, or the V5F's "ready" flag reads as whatever the region
-     * happened to contain. */
+    /* XCORE_RAM is NOLOAD, so nothing has initialised it. Clear the ready
+     * flag and both FIFO rings before the wake -- this is the only moment at
+     * which one core can safely touch state the other will use. */
     ch32h4_runtime_ready = 0;
+    ch32h4_xcore_init();
 
     ch32h4_console_puts("V3F: waking V5F\n");
     NVIC_WakeUp_V5F((uint32_t)CH32_V5F_START_ADDR);
 
-    /* PWR_EnterSTOPMode rather than a bare WFI, and in a loop.
+    /* If the sketch defines setup1() or loop1(), this core runs them.
      *
-     * Stop mode takes effect only when BOTH cores request it, and this helper
-     * clears its own SLEEPDEEP on the way out -- a plain WFI would leave this
-     * core in shallow sleep after any wake, so a later deepsleep would
-     * silently degrade to Sleep mode and stop saving the power that is its
-     * whole point. The helper returns whenever a wake source fires, hence the
-     * loop; a `nop` loop here would spin the core at full clock forever.
+     * Wait for the V5F first. A sketch's globals are constructed over there,
+     * in .init_array, and setup1() touching one before that finishes would
+     * read an unconstructed object -- a bug that would appear and disappear
+     * with the relative speed of the two cores, which is the worst kind. */
+    if (setup1 || loop1) {
+        ch32h4_console_puts("V3F: waiting for the V5F runtime\n");
+        ch32h4_console_flush();
+
+        uint32_t guard = 0;
+        while (ch32h4_runtime_ready != CH32H4_RUNTIME_READY_MAGIC) {
+            if (++guard > 200000000u) {
+                /* The V5F never got there. Say so rather than sitting in a
+                 * loop that looks identical to a working idle core. */
+                ch32h4_console_puts("V3F: FATAL, V5F never signalled ready\n");
+                ch32h4_console_flush();
+                break;
+            }
+        }
+
+        ch32h4_console_puts("V3F: running setup1/loop1\n");
+        ch32h4_console_flush();
+
+        if (setup1) {
+            setup1();
+        }
+        for (;;) {
+            if (loop1) {
+                loop1();
+            }
+        }
+    }
+
+    /* Otherwise this core has nothing to do, so it sleeps.
      *
-     * M4 replaces all of this with setup1() / loop1(), which first wait for
-     * ch32h4_runtime_ready. */
+     * PWR_EnterSTOPMode rather than a bare WFI, and in a loop. Stop mode takes
+     * effect only when BOTH cores request it, and this helper clears its own
+     * SLEEPDEEP on the way out -- a plain WFI would leave this core in shallow
+     * sleep after any wake, so a later deepsleep would silently degrade to
+     * Sleep mode and stop saving the power that is its whole point. The helper
+     * returns whenever a wake source fires, hence the loop; a `nop` loop here
+     * would spin the core at full clock forever. */
     RCC_HB1PeriphClockCmd(RCC_HB1Periph_PWR, ENABLE);
     (void)RCC->HB1PCENR;
     for (;;) {

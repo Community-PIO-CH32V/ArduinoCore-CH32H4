@@ -21,6 +21,14 @@ extern "C" {
 
 void yield(void) {
 #ifdef CH32H4_USB
+    /* The USB stack belongs to the V5F. loop1() on the V3F calls delay(),
+     * which calls yield(), and letting that reach tud_task() would put two
+     * cores inside TinyUSB's event queue at once -- which it has no locking
+     * for and would corrupt silently. */
+    if (ch32h4_core_num() != 1u) {
+        return;
+    }
+
     /* Re-entrancy guard, and it is not optional.
      *
      * Adafruit_USBD_CDC::write(), ::available() and ::operator bool() all call

@@ -59,10 +59,11 @@ using namespace arduino;
 #define Serial Serial1
 #endif
 
-/* setup1() and loop1() run on the V3F and arrive in M4. They are declared here
- * now so a sketch written against arduino-pico's model still compiles; until
- * M4 they are simply never called, and the core says so at boot rather than
- * leaving the sketch to wonder. */
+/* setup1() and loop1() run on the V3F.
+ *
+ * Define either and the V3F runs it after the V5F has finished constructing
+ * the sketch's globals; define neither and the V3F sleeps, which is what a
+ * single-core sketch wants and costs it nothing. */
 extern void setup1() __attribute__((weak));
 extern void loop1() __attribute__((weak));
 
@@ -106,4 +107,9 @@ void yield(void);
 
 #ifdef __cplusplus
 }
+#endif
+
+#ifdef __cplusplus
+/* Last, because it uses the declarations above. */
+#include "CH32H4Core.h"
 #endif
