@@ -21,14 +21,35 @@ extern "C" {
 
 void yield(void) {
 #ifdef CH32H4_USB
+    /* Re-entrancy guard, and it is not optional.
+     *
+     * Adafruit_USBD_CDC::write(), ::available() and ::operator bool() all call
+     * yield() themselves while they wait for the host. yield() here calls
+     * TinyUSB_Device_FlushCDC(), which goes back into the CDC object. Without
+     * this flag those two call each other until the stack is gone: the
+     * observed failure was a trap at mepc=0x200C0002, twenty-two kilobytes
+     * below the top of a sixteen-kilobyte stack, having run down through the
+     * V3F's stack, .bss and .data into the RAM_LOAD region and executed it.
+     *
+     * Giving up on re-entry is safe. The outer call is already doing the work,
+     * and the USB interrupt runs the device task independently, so nothing is
+     * lost -- only repeated. */
+    static volatile bool in_yield = false;
+    if (in_yield) {
+        return;
+    }
+    in_yield = true;
+
     /* Weak in Adafruit's API, and only strong once the device stack is linked
-     * in, so this is a null check rather than a guess. */
+     * in, so these are null checks rather than guesses. */
     if (TinyUSB_Device_Task) {
         TinyUSB_Device_Task();
     }
     if (TinyUSB_Device_FlushCDC) {
         TinyUSB_Device_FlushCDC();
     }
+
+    in_yield = false;
 #endif
 }
 

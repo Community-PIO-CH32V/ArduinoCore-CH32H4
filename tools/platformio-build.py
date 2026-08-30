@@ -277,6 +277,19 @@ if usb_enabled:
         join(ADAFRUIT_DIR, "arduino"),
         src_filter=["+<*>", "-<ports/>"]))
 
+# The framework compiles Adafruit_TinyUSB itself, so the library dependency
+# finder must not compile it a second time when a sketch includes
+# <Adafruit_TinyUSB.h>. Left to the LDF it walks the whole src/ tree, including
+# every other vendor's portable backend -- typec_stm32.c reaching for
+# typec/tcd.h is the first thing that stops it -- and anything that did build
+# would be a duplicate symbol.
+if usb_enabled:
+    env_section = "env:" + env["PIOENV"]
+    ignored = platform.config.get(env_section, "lib_ignore", [])
+    if "Adafruit TinyUSB Library" not in ignored:
+        ignored.append("Adafruit TinyUSB Library")
+    platform.config.set(env_section, "lib_ignore", ignored)
+
 libs.append(env.BuildLibrary(
     join("$BUILD_DIR", "FrameworkArduino"),
     CORE_DIR))
