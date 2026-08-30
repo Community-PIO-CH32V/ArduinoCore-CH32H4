@@ -4,6 +4,10 @@
 #ifdef CH32H4_ETHERNET
 
 #include <errno.h>
+
+/* The name this interface gives DHCP. Not const: eth_set_hostname() replaces
+ * the pointer, and lwIP only stores it. */
+const char *ch32h4_eth_hostname = "ch32h417";
 /* Ethernet MAC and on-chip 100M PHY, bridged to lwip.
  *
  * The MAC is a Synopsys DWMAC -- the same IP STM32F4/F7 carry -- so the
@@ -44,7 +48,6 @@
 #include "lwip/netif.h"
 #include "netif/ethernet.h"
 
-#include "shared/netutils/netutils.h"
 
 /* On-chip PHY's SMI address. Fixed in silicon, not a board choice. */
 #define PHY_ADDRESS (1)
@@ -713,7 +716,9 @@ int eth_init(eth_t *self) {
     ip_addr_t none = { 0 };
     netif_add(&self->netif, &none, &none, &none, self,
         eth_netif_init, ethernet_input);
-    netif_set_hostname(&self->netif, mod_network_hostname_data);
+    /* The DHCP hostname. A sketch changes it with eth_set_hostname() before
+     * eth_init(); the default is what shows up in a router's client list. */
+    netif_set_hostname(&self->netif, ch32h4_eth_hostname);
     netif_set_default(&self->netif);
 
     NVIC_SetPriority(ETH_IRQn, 1);

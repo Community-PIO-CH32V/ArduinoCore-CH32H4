@@ -319,10 +319,10 @@ if usb_enabled:
 if net_enabled:
     lwip_env = env.Clone()
     lwip_env.Append(CCFLAGS=["-w"])
-    for sub in ("core", join("core", "ipv4")):
-        libs.append(lwip_env.BuildLibrary(
-            join("$BUILD_DIR", "FrameworkLwIP_" + sub.replace("\\", "_").replace("/", "_")),
-            join(LWIP_DIR, sub)))
+    # `core` only: BuildLibrary recurses, so naming core/ipv4 as well compiles
+    # every file in it twice and the link fails on multiple definitions.
+    libs.append(lwip_env.BuildLibrary(
+        join("$BUILD_DIR", "FrameworkLwIP_core"), join(LWIP_DIR, "core")))
     # netif/: only ethernet.c and the ARP glue are wanted. The rest is PPP,
     # SLIP and 6LoWPAN, none of which this board has an interface for.
     for src, name in (

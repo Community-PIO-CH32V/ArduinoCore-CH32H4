@@ -23,6 +23,11 @@ extern eth_t eth_instance;
  * Returns 0, or a negative errno. */
 int eth_init(eth_t *self);
 
+/* The name this interface gives DHCP, and so what appears in a router's
+ * client list. Set it before eth_init(); lwIP stores the pointer, so the
+ * string has to outlive the interface. */
+extern const char *ch32h4_eth_hostname;
+
 int eth_start(eth_t *self);
 int eth_stop(eth_t *self);
 bool eth_is_active(eth_t *self);
