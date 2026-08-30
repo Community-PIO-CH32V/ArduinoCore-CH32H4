@@ -20,6 +20,12 @@
 /* Defined by the Ticker library when a sketch links it. */
 extern "C" void ch32h4_ticker_update(void) __attribute__((weak));
 
+/* Defined by lwIP_Ethernet. lwIP's timers -- DHCP renewal, TCP
+ * retransmission, ARP ageing -- have nothing else driving them under NO_SYS,
+ * so a stack that is never pumped appears to work and then quietly stops
+ * renewing its lease. */
+extern "C" void ch32h4_net_update(void) __attribute__((weak));
+
 extern "C" {
 
 void yield(void) {
@@ -68,6 +74,9 @@ void yield(void) {
      * null. */
     if (ch32h4_ticker_update) {
         ch32h4_ticker_update();
+    }
+    if (ch32h4_net_update) {
+        ch32h4_net_update();
     }
 }
 
