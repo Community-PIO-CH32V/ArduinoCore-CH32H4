@@ -47,7 +47,7 @@ EXTI dispatch. See "Known gaps" for why that placement still matters.
 | | Milestone | State |
 |---|---|---|
 | **M1** | Boot, clocks, single ELF, core Arduino API | **working**, 43 hardware tests |
-| M2 | TinyUSB, `Serial` as USB CDC | **CDC working**; Adafruit_TinyUSB next |
+| M2 | Adafruit TinyUSB, `Serial` as USB CDC | **working** |
 | M3 | Wire, SPI, EEPROM, Servo, Tone, I2S, ADCInput, Ticker | planned |
 | M4 | `setup1()`/`loop1()` on the V3F, IPC FIFO, HSEM mutexes | planned |
 | M5 | SD, SDFS, FatFS | planned |
@@ -59,6 +59,21 @@ EXTI dispatch. See "Known gaps" for why that placement still matters.
 ```sh
 git clone --recursive https://github.com/Community-PIO-CH32V/arduino-core-ch32h4.git
 ```
+
+### One thing to know about the TinyUSB submodule
+
+`libraries/Adafruit_TinyUSB_Arduino` is checked out on a **fork branch**
+(`ch32h417`) that upstream Adafruit does not have. Upstream bundles TinyUSB
+0.20, which has neither `OPT_MCU_CH32H417` nor the USBFS device driver for this
+part, so the library cannot build for this silicon at all. The fork swaps in
+0.21 from [maxgerhardt/tinyusb](https://github.com/maxgerhardt/tinyusb)
+(branch `ch32h417-v2`) and adds an `ARDUINO_ARCH_CH32H4` branch to its
+`tusb_config.h` dispatcher.
+
+That branch still needs pushing to a fork, and `.gitmodules` updating to point
+at it. Until then a fresh `git submodule update --init` checks out upstream and
+the build stops with *"TinyUSB Arduino Library does not support your core
+yet"* — which is the dispatcher saying exactly this.
 
 `--recursive` matters: `system/ch32h417lib` carries the vendor SDK and
 `ArduinoCore-API` the upstream API. `python tools/check_tree.py` says so plainly

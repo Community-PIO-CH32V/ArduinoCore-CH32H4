@@ -11,6 +11,9 @@
 #include "system_ch32h417.h"
 #ifdef CH32H4_USB
 #include "ch32h4_usb.h"
+/* hooks.cpp -- goes through Adafruit's TinyUSB_Device_Init so the device
+ * object owns the descriptor. */
+bool ch32h4_usb_begin(void);
 #endif
 
 /* wiring_time.c */
@@ -93,7 +96,7 @@ void ch32h4_v5f_main(void) {
      * touches it, and so enumeration overlaps whatever setup() does rather
      * than waiting behind it. It refuses to start on the internal RC -- USB
      * cannot meet spec from an RC oscillator -- and says so. */
-    if (ch32h4_usb_init()) {
+    if (ch32h4_usb_begin()) {
         ch32h4_console_puts("V5F: usb up");
     } else {
         ch32h4_console_puts("V5F: usb DOWN (needs the crystal)");
@@ -110,11 +113,10 @@ void ch32h4_v5f_main(void) {
     setup();
     for (;;) {
         loop();
-#ifdef CH32H4_USB
-        /* Pump the device stack once per iteration. It also runs from the USB
-         * interrupt, so a sketch that blocks in loop() cannot starve it -- but
-         * calling it here keeps the common case off the interrupt path. */
-        ch32h4_usb_task();
-#endif
+        /* Pump USB (and anything else yield() grows to cover) once per
+         * iteration. The stack also runs from the USB interrupt, so a sketch
+         * that blocks in loop() cannot starve it -- but calling it here keeps
+         * the common case off the interrupt path. */
+        yield();
     }
 }

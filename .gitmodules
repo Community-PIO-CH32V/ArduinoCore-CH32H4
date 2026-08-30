@@ -4,7 +4,17 @@
 [submodule "ArduinoCore-API"]
 	path = ArduinoCore-API
 	url = https://github.com/arduino/ArduinoCore-API.git
-[submodule "system/tinyusb"]
-	path = system/tinyusb
-	url = https://github.com/maxgerhardt/tinyusb.git
-	branch = ch32h417-v2
+# NOTE: this points at upstream Adafruit, but the checked-out commit is on a
+# local `ch32h417` branch that upstream does not have. It replaces the bundled
+# TinyUSB 0.20 with 0.21 from maxgerhardt/tinyusb (branch ch32h417-v2), which
+# is the only version carrying OPT_MCU_CH32H417 and the USBFS dcd for this
+# part, and adds an ARDUINO_ARCH_CH32H4 branch to the tusb_config dispatcher.
+#
+# Push that branch to a fork and change the url here. Until then a fresh
+# `git submodule update --init` will check out upstream and the build will
+# fail with "TinyUSB Arduino Library does not support your core yet", which is
+# the dispatcher telling you exactly this.
+[submodule "libraries/Adafruit_TinyUSB_Arduino"]
+	path = libraries/Adafruit_TinyUSB_Arduino
+	url = https://github.com/adafruit/Adafruit_TinyUSB_Arduino.git
+	branch = ch32h417

@@ -251,7 +251,7 @@ static void handleCommand(const String &cmd) {
     Serial1.print("usb_active=");
     Serial1.println(ch32h4_usb_active() ? 1 : 0);
     Serial1.print("usb_connected=");
-    Serial1.println((bool)Serial ? 1 : 0);
+    Serial1.println(TinyUSBDevice.mounted() ? 1 : 0);
 
   } else if (cmd == "usbwrite") {
     /* Push a known string out of the CDC port for the host to collect. */

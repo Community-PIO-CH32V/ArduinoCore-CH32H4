@@ -20,6 +20,7 @@ image at CH32_V5F_START_ADDR. See docs/superpowers/specs/ for why that works
 here when both prior ports to this silicon needed two.
 """
 
+import sys
 from os.path import isdir, join
 
 from SCons.Script import DefaultEnvironment
@@ -32,7 +33,13 @@ FRAMEWORK_DIR = platform.get_package_dir("framework-arduinoch32h4")
 assert isdir(FRAMEWORK_DIR)
 
 SDK_DIR = join(FRAMEWORK_DIR, "system", "ch32h417lib")
-TINYUSB_DIR = join(FRAMEWORK_DIR, "system", "tinyusb", "src")
+# Adafruit_TinyUSB_Arduino is the USB stack, and our fork of it bundles the
+# TinyUSB that knows this part -- OPT_MCU_CH32H417 and the USBFS dcd, neither
+# of which is in upstream Adafruit's 0.20. There is deliberately only ONE
+# TinyUSB in the build: a second copy alongside it would give two of every
+# symbol and, worse, would drift.
+ADAFRUIT_DIR = join(FRAMEWORK_DIR, "libraries", "Adafruit_TinyUSB_Arduino", "src")
+TINYUSB_DIR = ADAFRUIT_DIR
 CORE_DIR = join(FRAMEWORK_DIR, "cores", "ch32h4")
 variant = board.get("build.variant")
 VARIANT_DIR = join(FRAMEWORK_DIR, "variants", variant)
@@ -59,18 +66,35 @@ machine_flags = [
 exceptions = str(board.get("build.exceptions", "disabled")) == "enabled"
 exc_flags = ["-fexceptions"] if exceptions else ["-fno-exceptions"]
 
+# The USB stack. Adafruit TinyUSB, or nothing.
+#
+#   tinyusb  (default) Adafruit_TinyUSB_Arduino, which owns the descriptor and
+#                      provides HID, MSC, MIDI and vendor classes on top of the
+#                      CDC that backs `Serial`.
+#   none               no USB at all. `Serial` falls back to USART1, and the
+#                      TinyUSB sources are not compiled.
+usbstack = str(board.get("build.usbstack", "tinyusb")).lower()
+if usbstack not in ("tinyusb", "none"):
+    sys.stderr.write("Error: board_build.usbstack must be 'tinyusb' or 'none',"
+                     " got %r\n" % usbstack)
+    env.Exit(1)
+usb_enabled = usbstack == "tinyusb"
+
 # Which peripheral `Serial` refers to.
 #
-# USB CDC by default: it needs no extra wiring and is what a user plugging the
-# board in expects to find. `Serial1` is always USART1 on PA9/PA10, into the
+# USB CDC when there is USB, because that is what someone plugging the board
+# into a PC expects to find. `Serial1` is always USART1 on PA9/PA10, into the
 # WCH-Link's VCP.
 #
 # The swap is worth keeping. A fault during static initialisation happens
 # before USB has enumerated, so a board that only speaks CDC cannot report one
 # -- and the porting notes for this silicon are emphatic that silence is the
 # worst diagnostic there is.
-serial_iface = str(board.get("build.serial", "usb")).lower()
-usb_enabled = serial_iface == "usb" or str(board.get("build.usb", "enabled")) == "enabled"
+serial_iface = str(board.get("build.serial", "usb" if usb_enabled else "uart")).lower()
+if serial_iface == "usb" and not usb_enabled:
+    sys.stderr.write("Error: board_build.serial = usb needs"
+                     " board_build.usbstack = tinyusb\n")
+    env.Exit(1)
 
 env.Append(
     ASFLAGS=machine_flags,
@@ -132,8 +156,22 @@ env.Append(
         ("F_CPU", board.get("build.f_cpu")),
         ("CH32_V5F_START_ADDR", V5F_START_ADDR),
     ] + (["CH32H4_EXCEPTIONS"] if exceptions else [])
-      + (["CH32H4_USB", ("CFG_TUSB_MCU", "OPT_MCU_CH32H417"),
-          ("CFG_TUSB_OS", "OPT_OS_NONE")] if usb_enabled else [])
+      + (["CH32H4_USB", "USE_TINYUSB",
+          # Adafruit_USBD_Device builds the descriptor from these.
+          #
+          # NOT the board's hwids: those are 1A86:8010, the WCH-LinkE probe's
+          # own identifiers, and the probe sits on the same host. A device
+          # sharing them inherits the probe's driver binding -- it enumerates
+          # correctly and never becomes a COM port, with no error anywhere.
+          # 1209:0001 is pid.codes' generic prototype pair; a shipping board
+          # should carry its own allocation.
+          ("USB_VID", board.get("build.usb_vid", "0x1209")),
+          ("USB_PID", board.get("build.usb_pid", "0x0001")),
+          ("USB_MANUFACTURER", env.StringifyMacro(
+              board.get("build.usb_manufacturer", board.get("vendor", "WCH")))),
+          ("USB_PRODUCT", env.StringifyMacro(
+              board.get("build.usb_product", board.get("name", "CH32H417")))),
+          ] if usb_enabled else [])
       + ([("CH32H4_SERIAL_IS_USB", 1)] if serial_iface == "usb" else []),
 
     CPPPATH=[
@@ -146,7 +184,10 @@ env.Append(
         VARIANT_DIR,
         join(SDK_DIR, "Core"),
         join(SDK_DIR, "Peripheral", "inc"),
-    ] + ([TINYUSB_DIR] if usb_enabled else []),
+    ] + ([
+        ADAFRUIT_DIR,
+        join(ADAFRUIT_DIR, "arduino"),
+    ] if usb_enabled else []),
 
     LIBSOURCE_DIRS=[join(FRAMEWORK_DIR, "libraries")],
 )
@@ -184,12 +225,13 @@ libs.append(sdk_env.BuildLibrary(
     join("$BUILD_DIR", "FrameworkCH32SDKCore"),
     join(SDK_DIR, "Core")))
 
-# TinyUSB. Built in its own environment for the same reason the vendor SDK is:
-# it is third-party code, and its warnings would bury ours.
+# TinyUSB, from inside the Adafruit fork. Built in its own environment for the
+# same reason the vendor SDK is: third-party code whose warnings would bury
+# ours.
 #
-# Only the device stack and the USBFS driver are compiled -- the host stack,
-# the other portable backends and the class drivers we do not enable would all
-# be dead weight, and some of them do not compile for this target at all.
+# Only the device stack and the USBFS driver are compiled. The host stack and
+# the other vendors' portable backends are dead weight here, and several of
+# them do not compile for this target at all.
 if usb_enabled:
     tusb_env = env.Clone()
     tusb_env.Append(CCFLAGS=["-w"])
@@ -197,11 +239,43 @@ if usb_enabled:
         (join(TINYUSB_DIR, "tusb.c"), "tusb"),
         (join(TINYUSB_DIR, "common", "tusb_fifo.c"), "tusb_fifo"),
         (join(TINYUSB_DIR, "device", "usbd.c"), "tusb_usbd"),
+        # Every class driver Adafruit can expose. Each is internally gated by
+        # its own CFG_TUD_* count, so the ones a sketch does not use compile to
+        # nothing -- but they must be present, because usbd.c's driver table
+        # references them unconditionally once the count is non-zero.
         (join(TINYUSB_DIR, "class", "cdc", "cdc_device.c"), "tusb_cdc"),
+        (join(TINYUSB_DIR, "class", "msc", "msc_device.c"), "tusb_msc"),
+        (join(TINYUSB_DIR, "class", "hid", "hid_device.c"), "tusb_hid"),
+        (join(TINYUSB_DIR, "class", "midi", "midi_device.c"), "tusb_midi"),
+        (join(TINYUSB_DIR, "class", "vendor", "vendor_device.c"), "tusb_vendor"),
         (join(TINYUSB_DIR, "portable", "wch", "dcd_ch32_usbfs.c"), "tusb_dcd"),
     ):
         env.Append(PIOBUILDFILES=tusb_env.StaticObject(
             join("$BUILD_DIR", "FrameworkTinyUSB", name + ".o"), src))
+
+# Adafruit_TinyUSB_Arduino, ARDUINO LAYER ONLY.
+#
+# The library bundles a complete TinyUSB of its own -- src/class, src/device,
+# src/portable, src/tusb.c -- and that copy does not know this part: no
+# OPT_MCU_CH32H417, no dcd_ch32_usbfs. So it is repointed at the fork in
+# system/tinyusb, which does, by compiling only src/arduino and putting
+# system/tinyusb/src ahead of it on the include path so `#include "tusb.h"`
+# resolves to the fork. Compiling both copies would give two of every TinyUSB
+# symbol.
+#
+# src/arduino/ports is excluded as well: its ch32 port is guarded on
+# ARDUINO_ARCH_CH32 / CH32V20x / CH32V30x and targets the older USB IPs. The
+# core supplies the three port functions instead, in ch32h4_usb_adafruit.cpp.
+#
+# It is compiled unconditionally rather than left to the library dependency
+# finder because TinyUSB is the USB stack here: usbd.c's driver table
+# references mscd_*, hidd_* and friends as soon as their CFG_TUD_* counts are
+# non-zero, and the callbacks behind them live in this layer.
+if usb_enabled:
+    libs.append(env.BuildLibrary(
+        join("$BUILD_DIR", "FrameworkAdafruitTinyUSB"),
+        join(ADAFRUIT_DIR, "arduino"),
+        src_filter=["+<*>", "-<ports/>"]))
 
 libs.append(env.BuildLibrary(
     join("$BUILD_DIR", "FrameworkArduino"),

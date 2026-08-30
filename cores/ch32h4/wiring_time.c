@@ -94,6 +94,10 @@ __itcm_func unsigned long micros(void) {
 void delay(unsigned long ms) {
     const uint32_t start = s_millis;
     while ((uint32_t)(s_millis - start) < ms) {
+        /* Arduino guarantees yield() runs while a sketch waits, and on this
+         * core that is where the USB device task lives. A delay() that did not
+         * yield would drop the USB connection for its duration. */
+        yield();
         /* WFI with interrupts MASKED hangs this core: the RISC-V spec allows
          * resumption on a pending interrupt regardless of mstatus.MIE, and the
          * QingKe does not implement that. Interrupts are enabled here, so this

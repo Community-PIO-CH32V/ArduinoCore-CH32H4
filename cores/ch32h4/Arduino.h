@@ -34,23 +34,28 @@ using namespace arduino;
 
 #include "HardwareSerial.h"
 
-#ifdef CH32H4_USB
-#include "ch32h4_usb.h"
-#include "SerialUSB.h"
-#endif
-
 /* `Serial`.
  *
- * A macro rather than a reference, so the concrete type survives and a sketch
- * can still reach SerialUSB::baud() or CH32H4Serial::begin(baud, config)
- * through it. Every Arduino core that offers this choice does it this way.
+ * With USB in the build this is Adafruit's CDC device. Adafruit_USBD_CDC.h
+ * does `#define SerialTinyUSB Serial` itself under USE_TINYUSB, so the core
+ * must NOT define `Serial` as well -- doing so gave a conflicting declaration
+ * of Adafruit_USBD_CDC. Including the library here is what makes `Serial` work
+ * in a sketch that never mentions TinyUSB, which is the whole point of USB
+ * being the default.
  *
- * Default: USB CDC, which is what someone plugging the board into a PC
- * expects to find. Set board_build.serial = uart to put it back on USART1 --
- * worth doing while debugging anything that can fault before USB enumerates. */
-#if defined(CH32H4_SERIAL_IS_USB) && defined(CH32H4_USB)
-#define Serial SerialUSB
+ * Set board_build.serial = uart to put `Serial` back on USART1. That is worth
+ * doing while debugging anything that can fault before USB has enumerated,
+ * since a CDC-only board cannot report such a fault at all.
+ *
+ * `Serial1` is USART1 on PA9/PA10 either way. */
+#if defined(CH32H4_USB) && defined(CH32H4_SERIAL_IS_USB)
+#include "ch32h4_usb.h"
+#include "Adafruit_TinyUSB.h"
 #else
+#ifdef CH32H4_USB
+#include "ch32h4_usb.h"
+#include "Adafruit_TinyUSB.h"
+#endif
 #define Serial Serial1
 #endif
 
@@ -93,6 +98,11 @@ float ch32h4_vdda_volts(void);
 
 /* Free heap across both regions -- DTCM first, then the shared half. */
 size_t ch32h4_heap_free(void);
+
+/* Runs whenever a sketch is waiting: inside delay(), inside a blocking Stream
+ * read, inside a USB write with a full FIFO. This is where the USB device task
+ * runs, so anything that blocks must reach it. */
+void yield(void);
 
 #ifdef __cplusplus
 }
