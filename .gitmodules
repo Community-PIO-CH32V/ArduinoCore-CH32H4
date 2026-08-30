@@ -18,3 +18,6 @@
 	path = libraries/Adafruit_TinyUSB_Arduino
 	url = https://github.com/adafruit/Adafruit_TinyUSB_Arduino.git
 	branch = ch32h417
+[submodule "system/lwip"]
+	path = system/lwip
+	url = https://github.com/lwip-tcpip/lwip.git

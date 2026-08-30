@@ -243,6 +243,26 @@ OpenOCD is still the right tool for *debugging* -- halting cpu.1 and reading
 `mcause`/`mepc` is what found the vector-table bug, and nothing else would
 have. Just do not flash with it, and expect to replug afterwards.
 
+**Recovering a wedged probe.** Nothing over the wire works: `wlink reset dm`,
+`reset halt` and `reset run` all return `0x55` themselves, because the latch is
+in the probe's USB protocol layer, below anything wlink can ask it to do. So
+there is no automating this.
+
+What does work, in increasing order of annoyance:
+
+1. **Hold the board's NRST down while flashing.** The WCH-Link has NRST fitted,
+   so this is a wire that is already there. This is the cheapest recovery and
+   it is what got the bench back the last two times.
+2. Unplug the WCH-Link's own USB from the host, wait, plug it back.
+3. Both at once -- probe USB out *and* board power out -- then probe first.
+
+Power-cycling the board **alone** does not clear it, which is worth knowing
+before spending a trip to the bench: the latch is in the probe.
+
+Expect this every few dozen flash cycles. `tests/hw/conftest.py` reports it as
+a TOOL FAILURE with its own exit status precisely so it never gets mistaken
+for a firmware regression -- which it looks exactly like.
+
 ---
 
 ## Exceptions: what it takes to make a throw work under -nostartfiles

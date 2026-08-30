@@ -1,5 +1,6 @@
 #include "ch32h4_console.h"
 #include "ch32h417.h"
+#include <stdbool.h>
 
 void ch32h4_console_init(uint32_t baud) {
     GPIO_InitTypeDef gpio = {0};

@@ -16,7 +16,11 @@
  */
 ENTRY( _start_v3f )
 
-__stack_size_v3f = 2048;
+/* 8 KB, not the 2 KB this was while the V3F only ever ran the boot stub.
+ * setup1()/loop1() are ordinary user code and can call anything -- printf
+ * alone can want a kilobyte. DTCM has room: the heap gives up 6 KB out of
+ * roughly 240. */
+__stack_size_v3f = 8192;
 __stack_size_v5f = 16384;
 
 MEMORY
@@ -259,6 +263,28 @@ SECTIONS
         . = ALIGN(8);
         _eusbram = .;
     } >USB_RAM
+
+    /* ---- Ethernet -------------------------------------------------------- */
+
+    /* Descriptors and MAC frame buffers, in the shared region.
+     *
+     * The Ethernet DMA is on the system bus and cannot reach DTCM, so this
+     * cannot live in .bss -- which also means the startup code's .bss clear
+     * does not reach it, and eth_init() zeroes it explicitly using these
+     * symbols. Descriptors want 32-byte alignment because the DMA reads them
+     * as bursts.
+     *
+     * 28 KB holds 16 descriptors plus 12 RX and 4 TX frame buffers. The RX
+     * ring is what absorbs a burst while the sketch is busy elsewhere, so
+     * shrinking it trades heap for dropped frames. */
+    .ethram (NOLOAD) : {
+        . = ALIGN(32);
+        _sethram = .;
+        *(.ethram)
+        *(.ethram.*)
+        . = ALIGN(32);
+        _eethram = .;
+    } >ETH_RAM
 
     /* ---- Cross-core state ----------------------------------------------- */
 

@@ -64,8 +64,17 @@ using namespace arduino;
  * Define either and the V3F runs it after the V5F has finished constructing
  * the sketch's globals; define neither and the V3F sleeps, which is what a
  * single-core sketch wants and costs it nothing. */
+/* extern "C", like setup() and loop() in ArduinoCore-API's Common.h.
+ *
+ * Without it a sketch's `void setup1()` is a C++ symbol -- _Z6setup1v -- while
+ * main_v3f.c, which is C, looks for the unmangled name. The weak reference
+ * then stays null, the V3F decides the sketch has no second-core code and goes
+ * to sleep, and the sketch's loop1() is silently never called. Nothing
+ * anywhere reports it. */
+extern "C" {
 extern void setup1() __attribute__((weak));
 extern void loop1() __attribute__((weak));
+}
 
 #endif /* __cplusplus */
 
