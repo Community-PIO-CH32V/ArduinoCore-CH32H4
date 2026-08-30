@@ -61,6 +61,57 @@ bool ch32h4_pwm_find_active(pin_size_t pin, ch32h4_pwm_af_t *out);
  * to validate its configuration before touching hardware. */
 bool ch32h4_pin_has_pwm(pin_size_t pin);
 
+/* ---- SPI ---------------------------------------------------------------- */
+
+/* One row per (peripheral, pin) an SPI signal can use. Signals are listed
+ * separately because a pin's alternate function differs between them.
+ *
+ * SPI1 is on HB2; SPI2, SPI3 and SPI4 are on HB1. That split is the OPPOSITE
+ * way round from I2C, where 1-3 are on HB1 and only I2C4 is on HB2, and it is
+ * exactly the kind of thing that produces a peripheral whose registers read
+ * back as zeroes with no error at all. ch32h4_spi_clock_enable() owns it so no
+ * caller has to remember. */
+typedef struct {
+    uint8_t id;    /* 1-4 */
+    uint8_t pin;
+    uint8_t af;
+} ch32h4_periph_pin_t;
+
+extern const ch32h4_periph_pin_t g_spi_sck_map[];
+extern const size_t g_spi_sck_map_len;
+extern const ch32h4_periph_pin_t g_spi_miso_map[];
+extern const size_t g_spi_miso_map_len;
+extern const ch32h4_periph_pin_t g_spi_mosi_map[];
+extern const size_t g_spi_mosi_map_len;
+
+/* The alternate function for `pin` on SPI `id`, or false if that pin cannot
+ * carry that signal for that peripheral. */
+bool ch32h4_spi_sck_af(uint8_t id, pin_size_t pin, uint8_t *af);
+bool ch32h4_spi_miso_af(uint8_t id, pin_size_t pin, uint8_t *af);
+bool ch32h4_spi_mosi_af(uint8_t id, pin_size_t pin, uint8_t *af);
+
+/* Which SPI peripheral this trio of pins can all serve, or 0. */
+uint8_t ch32h4_spi_find(pin_size_t sck, pin_size_t miso, pin_size_t mosi);
+
+/* ---- I2C ---------------------------------------------------------------- */
+
+/* SCL and SDA are paired here rather than listed separately, because the
+ * silicon pairs them: a peripheral's SCL on one pad implies its SDA on a
+ * specific other pad, and mixing pairs does not work. */
+typedef struct {
+    uint8_t id;    /* 1-4 */
+    uint8_t scl;
+    uint8_t sda;
+    uint8_t af;
+} ch32h4_i2c_pin_t;
+
+extern const ch32h4_i2c_pin_t g_i2c_map[];
+extern const size_t g_i2c_map_len;
+
+/* Which I2C peripheral serves this SCL/SDA pair, and on which alternate
+ * function. Returns 0 if the pair is not one the silicon offers. */
+uint8_t ch32h4_i2c_find(pin_size_t scl, pin_size_t sda, uint8_t *af);
+
 #ifdef __cplusplus
 }
 #endif

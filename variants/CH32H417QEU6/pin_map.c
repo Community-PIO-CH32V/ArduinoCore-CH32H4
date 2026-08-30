@@ -162,3 +162,87 @@ const ch32h4_pwm_af_t g_pwm_af_map[] = {
 };
 
 const size_t g_pwm_af_map_len = sizeof(g_pwm_af_map) / sizeof(g_pwm_af_map[0]);
+
+/* ---- SPI ----------------------------------------------------------------
+ *
+ * Entries that collide with something this board already uses are listed last
+ * for their peripheral, so a search that takes the first match never picks
+ * them: SPI2_SCK on PA9 is the console's UART TX, and on PA12 it is USB D+.
+ *
+ * Only PA5-PA7 and PE2-PE6 are on the 3.3 V rail. Everything else sits on
+ * VIO18 and idles well below 3.3 V, which a 3.3 V peripheral may not read as a
+ * high. See PIN_IS_3V3_DOMAIN in pins_arduino.h.
+ */
+const ch32h4_periph_pin_t g_spi_sck_map[] = {
+    { 1, PA5,  5 },   /* 3.3 V domain */
+    { 1, PB3,  5 },
+    { 1, PF5,  5 },
+    { 1, PF7,  3 },
+    { 2, PB13, 5 },
+    { 2, PB10, 5 },
+    { 2, PC2,  5 },
+    { 2, PD3,  5 },
+    { 2, PE14, 5 },
+    { 2, PA9,  5 },   /* also USART1 TX -- the console */
+    { 2, PA12, 5 },   /* also USB D+ */
+    { 3, PB3,  6 },
+    { 3, PC10, 6 },
+    { 3, PA14, 1 },
+    { 4, PE2,  5 },   /* 3.3 V domain */
+    { 4, PE12, 5 },
+};
+const size_t g_spi_sck_map_len = sizeof(g_spi_sck_map) / sizeof(g_spi_sck_map[0]);
+
+const ch32h4_periph_pin_t g_spi_miso_map[] = {
+    { 1, PA6,  5 },   /* 3.3 V domain */
+    { 1, PB4,  5 },
+    { 1, PF3,  5 },
+    { 1, PF9,  3 },
+    { 2, PB14, 5 },
+    { 2, PC2,  5 },
+    { 3, PC11, 6 },
+    { 3, PB4,  6 },
+    { 3, PC9,  5 },
+    { 4, PE5,  5 },   /* 3.3 V domain */
+    { 4, PE13, 5 },
+};
+const size_t g_spi_miso_map_len = sizeof(g_spi_miso_map) / sizeof(g_spi_miso_map[0]);
+
+const ch32h4_periph_pin_t g_spi_mosi_map[] = {
+    { 1, PA7,  5 },   /* 3.3 V domain */
+    { 1, PB5,  5 },
+    { 1, PD7,  5 },
+    { 1, PF8,  3 },
+    { 2, PB15, 5 },
+    { 2, PC3,  5 },
+    { 2, PC1,  5 },
+    { 3, PC12, 6 },
+    { 3, PB5,  7 },
+    { 3, PB2,  7 },
+    { 3, PD6,  5 },
+    { 3, PA13, 1 },
+    { 4, PE6,  5 },   /* 3.3 V domain */
+    { 4, PE14, 5 },
+};
+const size_t g_spi_mosi_map_len = sizeof(g_spi_mosi_map) / sizeof(g_spi_mosi_map[0]);
+
+/* ---- I2C ----------------------------------------------------------------
+ *
+ * SCL and SDA are paired because the silicon pairs them.
+ *
+ * Note that I2C pins are open-drain and this part has NO internal pull-up in
+ * that mode -- the F1-style encoding does not offer one -- so every one of
+ * these needs real resistors. A driver should report a missing resistor as a
+ * missing resistor, not as a missing device.
+ */
+const ch32h4_i2c_pin_t g_i2c_map[] = {
+    { 1, PB6,  PB7,  4 },   /* 3.3 V domain; the board's SSD1306 is here */
+    { 1, PB8,  PB9,  4 },   /* also SWCLK/SWDIO -- taking these loses debug */
+    { 2, PB10, PB11, 4 },
+    { 2, PC0,  PC1,  9 },
+    { 3, PA8,  PC9,  4 },
+    { 3, PA14, PA13, 7 },
+    { 4, PD12, PD13, 4 },
+    { 4, PF12, PF13, 2 },
+};
+const size_t g_i2c_map_len = sizeof(g_i2c_map) / sizeof(g_i2c_map[0]);

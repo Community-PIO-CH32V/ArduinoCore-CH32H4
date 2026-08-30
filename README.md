@@ -48,7 +48,7 @@ EXTI dispatch. See "Known gaps" for why that placement still matters.
 |---|---|---|
 | **M1** | Boot, clocks, single ELF, core Arduino API | **working**, 43 hardware tests |
 | M2 | Adafruit TinyUSB, `Serial` as USB CDC | **working** |
-| M3 | Wire, SPI, EEPROM, Servo, Tone, I2S, ADCInput, Ticker | planned |
+| M3 | Wire, SPI, EEPROM, Servo | **building**; Tone, I2S, ADCInput, Ticker next |
 | M4 | `setup1()`/`loop1()` on the V3F, IPC FIFO, HSEM mutexes | planned |
 | M5 | SD, SDFS, FatFS | planned |
 | M6 | lwIP, on-chip Ethernet, the `lwip_*` library structure | planned |
