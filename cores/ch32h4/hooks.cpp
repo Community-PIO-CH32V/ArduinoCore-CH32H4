@@ -17,6 +17,9 @@
 #include "Adafruit_TinyUSB.h"
 #endif
 
+/* Defined by the Ticker library when a sketch links it. */
+extern "C" void ch32h4_ticker_update(void) __attribute__((weak));
+
 extern "C" {
 
 void yield(void) {
@@ -59,6 +62,13 @@ void yield(void) {
 
     in_yield = false;
 #endif
+
+    /* Software timers, if the sketch linked the Ticker library. Weak, so a
+     * sketch that does not use it pays nothing and the symbol resolves to
+     * null. */
+    if (ch32h4_ticker_update) {
+        ch32h4_ticker_update();
+    }
 }
 
 /* Called from ch32h4_v5f_main(), which is C.

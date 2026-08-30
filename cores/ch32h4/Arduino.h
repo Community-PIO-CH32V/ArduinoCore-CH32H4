@@ -93,6 +93,7 @@ void analogWriteFrequency(uint32_t hz);
  * these twelve timers needs one. */
 void analogWriteStop(pin_size_t pin);
 
+
 /* Measures VDDA against the internal reference on ADC1_IN17, nominally
  * 1.20 V. Returns volts, or 0.0f if the conversion failed. */
 float ch32h4_vdda_volts(void);
