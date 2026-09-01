@@ -331,6 +331,15 @@ if net_enabled:
         env.Append(PIOBUILDFILES=lwip_env.StaticObject(
             join("$BUILD_DIR", "FrameworkLwIP_netif", name + ".o"), src))
 
+    # apps/: one of them. SNTP is not optional in the way the rest are --
+    # certificate validity is checked against the clock, and a board with no
+    # battery has no idea what time it is until something tells it. Named
+    # individually rather than by building apps/, which would drag in httpd,
+    # mdns, MQTT and the rest.
+    env.Append(PIOBUILDFILES=lwip_env.StaticObject(
+        join("$BUILD_DIR", "FrameworkLwIP_apps", "sntp.o"),
+        join(LWIP_DIR, "apps", "sntp", "sntp.c")))
+
 libs.append(env.BuildLibrary(
     join("$BUILD_DIR", "FrameworkArduino"),
     CORE_DIR))

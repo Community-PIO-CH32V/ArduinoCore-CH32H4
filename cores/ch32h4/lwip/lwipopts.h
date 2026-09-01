@@ -98,10 +98,47 @@ extern "C" {
 void ch32h4_lwip_assert_core_locked(void);
 unsigned long ch32h4_lwip_now_ms(void);
 uint32_t ch32h4_lwip_rand(void);
+
+/* SNTP hands the time here; see the SNTP block below. */
+void ch32h4_sntp_set_time(uint32_t sec, uint32_t us);
 #ifdef __cplusplus
 }
 #endif
 #endif
+
+/* ---- SNTP ---------------------------------------------------------------
+ *
+ * The clock the whole system hangs off. File timestamps come from it through
+ * FatFs' get_fattime(), and TLS certificate validity is checked against it --
+ * a board that thinks it is 2000 rejects every certificate ever issued, with
+ * an error that says nothing about the clock.
+ *
+ * SNTP_SET_SYSTEM_TIME_US, not SNTP_SET_SYSTEM_TIME: the microsecond form is
+ * what lwIP calls when it has the fraction, and taking it costs nothing. */
+#define SNTP_SET_SYSTEM_TIME_US(sec, us)  ch32h4_sntp_set_time(sec, us)
+
+/* Resolve pool.ntp.org and friends by name, which is what anyone configures.
+ * Costs the DNS resolver, which is already on. */
+#define SNTP_SERVER_DNS             1
+
+/* Take the NTP servers DHCP offers, when it offers any. Many home routers do
+ * and it is the least surprising default -- a board on a network with its own
+ * time server should use it rather than reaching out to the public pool. Both
+ * halves are needed: the DHCP client has to ask for the option, and SNTP has
+ * to look at what came back. */
+#define LWIP_DHCP_GET_NTP_SRV       1
+#define SNTP_GET_SERVERS_FROM_DHCP  1
+#define SNTP_MAX_SERVERS            2
+
+/* Poll, rather than listen: this is a client on a small board, and the
+ * unicast poll mode is the only one that works behind NAT anyway. */
+#define SNTP_UPDATE_DELAY           3600000   /* an hour, the RFC's minimum */
+
+/* lwIP's default checks the response's stratum and mode. Keep it: an answer
+ * from a server advertising itself as unsynchronised is worse than no answer,
+ * because it looks like success. */
+#define SNTP_SUPPRESS_DELAY_CHECK   0
+
 
 /* lwIP's timers need a millisecond clock. */
 #define sys_now  ch32h4_lwip_now_ms

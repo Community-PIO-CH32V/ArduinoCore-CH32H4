@@ -7,6 +7,9 @@
  */
 #include <Arduino.h>
 #include <LwipEthernet.h>
+extern "C" {
+#include "ch32h4_rtc.h"
+}
 
 EthernetServer echoServer(7000);
 EthernetUDP udp;
@@ -170,6 +173,48 @@ static void handle(char *cmd) {
 
   } else if (!strncmp(cmd, "udpsend ", 8)) {
     udpSend(cmd + 8);
+
+  } else if (!strncmp(cmd, "ntpsync", 7)) {
+    /* ntpsync [server] -- default the DHCP-offered server, then pool.ntp.org.
+       Deliberately starts the RTC from an UNSET state each time, so a pass
+       cannot come from a clock that was already right. */
+    const char *server = (cmd[7] == ' ') ? cmd + 8 : nullptr;
+
+    /* Clear the clock first, by selecting a different source and coming back:
+       changing RTCSEL resets the backup domain, which resets the counter. A
+       sync test against a clock that is already right proves nothing -- it
+       passes in three milliseconds without a datagram leaving the board. */
+    ch32h4_rtc_begin(CH32H4_RTC_SRC_LSI);
+    Serial1.print("rtc_begin=");
+    Serial1.println(ch32h4_rtc_begin(CH32H4_RTC_SRC_LSE) ? 1 : 0);
+    Serial1.print("rtc_was_set="); Serial1.println(ch32h4_rtc_is_set() ? 1 : 0);
+
+    uint32_t t0 = millis();
+    bool started = NTP.begin(server);
+    Serial1.print("ntp_begin="); Serial1.println(started ? 1 : 0);
+    if (!started) { Serial1.print("> "); return; }
+
+    bool ok = NTP.waitAnswer(20000);
+    Serial1.print("ntp_answer="); Serial1.println(ok ? 1 : 0);
+    Serial1.print("ntp_synced="); Serial1.println(NTP.synced() ? 1 : 0);
+    Serial1.print("ntp_ms="); Serial1.println(millis() - t0);
+    if (ok) {
+      struct timeval tv = {};
+      gettimeofday(&tv, nullptr);
+      Serial1.print("ntp_unix="); Serial1.println((uint32_t)tv.tv_sec);
+      struct tm tmv;
+      time_t now = tv.tv_sec;
+      if (gmtime_r(&now, &tmv)) {
+        char buf[32];
+        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tmv);
+        Serial1.print("ntp_iso="); Serial1.println(buf);
+      }
+    }
+
+  } else if (!strcmp(cmd, "ntpstat")) {
+    Serial1.print("ntp_running="); Serial1.println(NTP.running() ? 1 : 0);
+    Serial1.print("ntp_synced="); Serial1.println(NTP.synced() ? 1 : 0);
+    Serial1.print("ntp_last_ms="); Serial1.println(NTP.lastSyncMillis());
 
   } else if (!strcmp(cmd, "heapinfo")) {
     Serial1.print("heap_free="); Serial1.println((uint32_t)ch32h4_heap_free());

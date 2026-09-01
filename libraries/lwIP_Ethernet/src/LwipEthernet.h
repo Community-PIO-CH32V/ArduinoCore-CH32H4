@@ -88,6 +88,7 @@ extern LwipEthernetClass Ethernet;
 #include "EthernetClient.h"
 #include "EthernetServer.h"
 #include "EthernetUdp.h"
+#include "NTP.h"
 
 /* The names the Arduino Ethernet library uses. EthernetUDP is already spelled
  * that way; this is here so `EthernetUdp` compiles too, which some sketches

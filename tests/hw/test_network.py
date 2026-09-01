@@ -15,6 +15,19 @@ import time
 import pytest
 
 
+def _kv(out):
+    """key=value pairs out of a reply. Every line is stripped first: the
+    console prompt is "> " with no newline after it, so a stray leading space
+    at the head of a line is normal here."""
+    d = {}
+    for line in out.splitlines():
+        for part in line.strip().split():
+            if "=" in part:
+                k, _, v = part.partition("=")
+                d[k.strip()] = v.strip()
+    return d
+
+
 def _board_ip(banner: str) -> str:
     # Every line is stripped first. The console prompt is "> " with no newline
     # after it, so a stray leading space at the head of a line is normal here
@@ -237,3 +250,46 @@ def test_the_stack_did_not_leak(net):
     # Eight connections leaking a context each would be thousands of bytes.
     assert before - after < 2048, (
         f"{before - after} bytes went missing over 8 connections")
+
+
+def test_sntp_sets_the_clock_from_the_network(net):
+    """A real NTP round trip, from a clock that was deliberately cleared first.
+
+    Clearing matters. NTP.waitSynced() returns immediately when the clock is
+    already known -- which is right for a sketch and useless for a test, since
+    it passes in three milliseconds without a datagram leaving the board. The
+    sketch resets the counter by selecting a different RTC source and back,
+    then waits for an actual answer.
+
+    Needs a route to the internet. Skips without one rather than failing: a
+    bench with no default route is a missing precondition, not a broken stack.
+    """
+    out = net["b"].command("ntpsync pool.ntp.org", timeout=40.0)
+    d = _kv(out)
+    assert d.get("rtc_begin") == "1", ("the LSE would not start", out)
+    assert d.get("rtc_was_set") == "0", ("the clock was not cleared, so this "
+                                         "would pass without a sync", out)
+    if d.get("ntp_begin") != "1" or d.get("ntp_answer") != "1":
+        pytest.skip(f"no NTP answer -- is there a route to the internet? {out}")
+
+    board = int(d["ntp_unix"])
+    host = int(time.time())
+    assert abs(board - host) < 10, (
+        f"board says {board} ({d.get('ntp_iso')}), host says {host}", out)
+    # A real round trip takes tens of milliseconds at least. Anything
+    # instantaneous means the clock was already set and nothing was measured.
+    assert int(d["ntp_ms"]) > 10, ("suspiciously fast -- did a packet really "
+                                   "go out?", out)
+
+
+def test_sntp_refuses_to_start_with_no_server(net):
+    """No server configured and none offered by DHCP is an error, not a
+    silent poll of address zero forever."""
+    out = net["b"].command("ntpsync", timeout=30.0)
+    d = _kv(out)
+    if d.get("ntp_begin") == "1":
+        # This network's DHCP does offer one, which is also correct.
+        assert d.get("ntp_answer") == "1", ("DHCP offered a server but no "
+                                            "answer came back", out)
+    else:
+        assert d.get("ntp_begin") == "0", out
