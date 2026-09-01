@@ -44,11 +44,29 @@ typedef struct {
     uint32_t csd[4];
 } ch32h4_sd_t;
 
+/* The last identification's command trace: the command index, the interrupt
+ * flag word it finished with, and its short response. Cleared at the start of
+ * every identification, so a dump after a failed begin() describes that
+ * attempt. A card that will not identify is close to intractable without
+ * this. */
+#define CH32H4_SD_LOG_MAX 24
+typedef struct {
+    uint8_t cmd;
+    uint16_t flags;
+    uint32_t resp;
+} ch32h4_sd_log_entry_t;
+extern ch32h4_sd_log_entry_t ch32h4_sd_log[CH32H4_SD_LOG_MAX];
+extern uint8_t ch32h4_sd_log_n;
+
 /* One controller, so one card. */
 extern ch32h4_sd_t ch32h4_sd;
 
 /* width is 1 or 4; freq is a ceiling, and the driver reports what it reached.
  * Safe to call again -- it deinitialises first. */
+/* Raw controller registers, for diagnosing a card that will not identify:
+ * 0 CONTROL, 1 CLK_DIV, 2 STATUS, 3 INT_FG, 4 RCC->HBRSTR, 5 RCC->HBPCENR. */
+uint32_t ch32h4_sd_debug(uint8_t which);
+
 int ch32h4_sd_begin(uint8_t width, uint32_t freq);
 void ch32h4_sd_end(void);
 

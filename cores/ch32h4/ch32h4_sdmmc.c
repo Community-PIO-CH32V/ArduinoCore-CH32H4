@@ -117,17 +117,12 @@ static uint8_t sd_dma_buf[2][SD_BOUNCE_BLOCKS * SD_BLOCK_SIZE]
     __attribute__((aligned(16), section(".sdram")));
 static uint8_t sd_dma_half;
 
-#if SD_TRACE
-static uint32_t sd_log[24][3];
-static int sd_log_n;
-
-static void sd_log_dump(void) {
-    for (int i = 0; i < sd_log_n; i++) {
-        Serial1.printf("  CMD%u fg=%04x r=%08x\n", ...);
-    }
-    sd_log_n = 0;
-}
-#endif
+/* The command trace. Always compiled -- it is 24 entries of three words, and
+ * a card that will not identify is close to intractable without it. Recorded
+ * rather than printed at the point of the command: printing between commands
+ * changes the spacing on the bus, which is the very thing worth measuring. */
+ch32h4_sd_log_entry_t ch32h4_sd_log[CH32H4_SD_LOG_MAX];
+uint8_t ch32h4_sd_log_n;
 
 /* --- controller --- */
 
@@ -197,16 +192,46 @@ static void sd_pin_af(GPIO_TypeDef *port, uint16_t mask) {
     GPIO_Init(port, &init);
 }
 
+/* Released to a PULL-UP, not to floating.
+ *
+ * CMD and every DAT line on an SD bus idle high, held there by pull-ups. A
+ * breakout board usually has them; bare wiring to a header often does not, and
+ * this core cannot tell which it has. Floating the pins in end() leaves those
+ * lines undriven and undefined, and a card that sees noise on CMD while it is
+ * unclocked does not reliably come back.
+ *
+ * The internal pull-ups are weak -- tens of kilohms against the 10k to 50k the
+ * spec wants -- so this is not a substitute for real ones at speed. It is
+ * enough to keep the bus in a defined state while nothing is driving it. */
 static void sd_pin_release(GPIO_TypeDef *port, uint16_t mask) {
     GPIO_InitTypeDef init = {0};
     init.GPIO_Pin = mask;
-    init.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+    init.GPIO_Mode = GPIO_Mode_IPU;
     init.GPIO_Speed = GPIO_Speed_Low;
     GPIO_Init(port, &init);
 }
 
 static void sd_controller_reset(uint8_t width) {
     RCC_HBPeriphClockCmd(RCC_HBPeriph_SDMMC, ENABLE);
+    /* Read back after every RCC write in this function.
+     *
+     * RCC_HBPeriphClockCmd and RCC_HBPeriphResetCmd are both read-modify-
+     * writes with no read-back of their own, so nothing pushes the store out
+     * and the access that follows can be dropped. The reset DE-ASSERT below is
+     * the one that actually matters: lose it and the block stays held in
+     * reset, so the CONTROL write is ignored, the controller never runs a
+     * command, and CMD0 completes no flag at all.
+     *
+     * What that looks like is worth writing down, because it does not look
+     * like a clocking problem. begin() reports a timeout, and the command
+     * trace is EMPTY -- zero entries, not a failed CMD0 -- which is what says
+     * the command never reached the bus rather than the card refusing it.
+     * begin() then fails on every subsequent call and only a board reset
+     * clears it, because only a board reset releases the block.
+     *
+     * MicroPython never hits this because it initialises the controller once.
+     * An Arduino sketch calling SD.begin() twice does. */
+    (void)RCC->HBPCENR;
 
     /* SWP_TBYP disables SWPMI's internal transceiver, which releases its
      * signals to the GPIO mux. That matters here because SWPMI shares pads
@@ -221,10 +246,13 @@ static void sd_controller_reset(uint8_t width) {
      * afterwards rather than being gated again, since nothing says the bit
      * survives its block being gated. */
     RCC_HB1PeriphClockCmd(RCC_HB1Periph_SWPMI, ENABLE);
+    (void)RCC->HB1PCENR;
     SWPMI->OR |= (1u << 0);
 
     RCC_HBPeriphResetCmd(RCC_HBPeriph_SDMMC, ENABLE);
+    (void)RCC->HBRSTR;
     RCC_HBPeriphResetCmd(RCC_HBPeriph_SDMMC, DISABLE);
+    (void)RCC->HBRSTR;
 
     /* CONTROL comes out of reset as 0x0015: ALL_CLR and RST_LGC asserted, one
      * data line. Clearing those two is what takes the controller out of reset,
@@ -280,16 +308,12 @@ static int sd_cmd(uint8_t idx, uint32_t arg, uint32_t resp) {
         }
     }
 
-#if SD_TRACE
-    /* Recorded rather than printed: printing between commands changes the
-     * spacing on the bus, which is the very thing worth measuring. */
-    if (sd_log_n < (int)(sizeof(sd_log) / sizeof(sd_log[0]))) {
-        sd_log[sd_log_n][0] = idx;
-        sd_log[sd_log_n][1] = fg;
-        sd_log[sd_log_n][2] = SDMMC->RESPONSE3;
-        sd_log_n++;
+    if (ch32h4_sd_log_n < CH32H4_SD_LOG_MAX) {
+        ch32h4_sd_log[ch32h4_sd_log_n].cmd = idx;
+        ch32h4_sd_log[ch32h4_sd_log_n].flags = fg;
+        ch32h4_sd_log[ch32h4_sd_log_n].resp = SDMMC->RESPONSE3;
+        ch32h4_sd_log_n++;
     }
-#endif
 
     if (resp == SD_RESP_NONE) {
         /* Nothing to wait for beyond the command leaving the pin; CMDDONE is
@@ -370,6 +394,8 @@ static uint32_t sd_capacity_blocks(const uint32_t csd[4]) {
 
 static int sd_card_identify(ch32h4_sd_t *self) {
     int ret;
+
+    ch32h4_sd_log_n = 0;
 
     self->rca = 0;
     self->card_type = CH32H4_SD_CARD_NONE;
@@ -801,8 +827,7 @@ void ch32h4_sd_end(void) {
      * of that wedges the card: it stops responding to CMD0 as well, so the
      * NEXT begin() times out in ACMD41 and every one after that does too,
      * until the board is power-cycled. Reproduced by looping bulk-write then
-     * re-init -- it survived two rounds and failed on the third, which is what
-     * a race on the tail of a write looks like.
+     * re-init -- it survived two rounds and failed on the third.
      *
      * Bounded, because a card that never releases DAT0 must not hang a sketch
      * in a teardown path. Tearing down anyway is then the best available
@@ -811,9 +836,17 @@ void ch32h4_sd_end(void) {
 
     self->initialised = false;
     SDMMC->CLK_DIV = 0;
+
+    /* Read back after each of these, for the reason spelled out in
+     * sd_controller_reset(): they are read-modify-writes with no read-back of
+     * their own, and a dropped one here leaves the block held in reset with
+     * nothing to say so. */
     RCC_HBPeriphResetCmd(RCC_HBPeriph_SDMMC, ENABLE);
+    (void)RCC->HBRSTR;
     RCC_HBPeriphResetCmd(RCC_HBPeriph_SDMMC, DISABLE);
+    (void)RCC->HBRSTR;
     RCC_HBPeriphClockCmd(RCC_HBPeriph_SDMMC, DISABLE);
+    (void)RCC->HBPCENR;
 
     sd_pin_release(SD_PORT_CK, SD_PIN_CK);
     sd_pin_release(SD_PORT_CMD, SD_PIN_CMD);
@@ -822,6 +855,18 @@ void ch32h4_sd_end(void) {
         sd_pin_release(SD_PORT_D1, SD_PIN_D1);
         sd_pin_release(SD_PORT_D2, SD_PIN_D2);
         sd_pin_release(SD_PORT_D3, SD_PIN_D3);
+    }
+}
+
+uint32_t ch32h4_sd_debug(uint8_t which) {
+    switch (which) {
+        case 0: return SDMMC->CONTROL;
+        case 1: return SDMMC->CLK_DIV;
+        case 2: return SDMMC->STATUS;
+        case 3: return SDMMC->INT_FG;
+        case 4: return RCC->HBRSTR;
+        case 5: return RCC->HBPCENR;
+        default: return 0;
     }
 }
 

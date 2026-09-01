@@ -281,7 +281,8 @@ def _sync(sketch: str) -> str:
     return banner
 
 
-BOARD_FIXTURES = ("board", "sd_board", "ethernet_board", "dualcore_board")
+BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
+                  "dualcore_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -369,6 +370,19 @@ def sd_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("sdtest")
+
+
+@pytest.fixture(scope="session")
+def fs_board():
+    """The filesystem sketch: FatFs, the FS API and the classic SD shim.
+
+    Separate from sd_board because that one deliberately has no filesystem in
+    it -- nearly every way an SD card fails, fails in the block layer, and a
+    FatFs on top would collapse all of them into one "mount failed".
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("sdfstest")
 
 
 @pytest.fixture(scope="session")
