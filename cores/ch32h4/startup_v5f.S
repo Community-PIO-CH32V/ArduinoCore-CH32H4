@@ -193,75 +193,54 @@ handle_reset_v5f:
 
     la sp, _estack_v5f
 
-    /* Prefetch and interrupt nesting. These differ from the V3F's: this core
-       uses 0x1237B3E0 with nesting level 7 and 0x0F, against the V3F's
-       0x123703E1, level 1 and 0x07. */
-    li t0, 0x1237B3E0
-    csrw 0xBC0, t0
-    li t0, 0x07
-    csrw 0xBC1, t0
-    li t0, 0x0F
-    csrw 0x804, t0
+    /* CSR bit flags live in ch32h4_csr.h so both cores share one definition.
+     * Only this core's composed register values are spelled out here. */
+#include "ch32h4_csr.h"
 
-    /* FPU on, interrupts on, and STAY IN MACHINE MODE.
-     *
-     * WCH ships 0x6088, which leaves MPP=00 and returns into User mode, where
-     * every M-mode CSR is unreachable. On the V3F that produced a board that
-     * emitted nothing at all, with no fault and no error -- see
-     * docs/hazards.md.
-     *
-     * 0x7888 = FS=11 (FPU on) | MPP=11 (Machine mode) | MPIE | MIE. */
-    li t0, 0x7888
+#define CORECFGR_V5F (CORECFGR_FADD_DIV | CORECFGR_FMUL_DIV | CORECFGR_FMAC_DIV | \
+                      CORECFGR_FDIV_DIV | CORECFGR_NLP_EN | CORECFGR_WCH_13_12 | \
+                      CORECFGR_WCH_9_8 | CORECFGR_CSTA_FAULT_IE | CORECFGR_WCH_6 | \
+                      CORECFGR_IE_REMAP_EN)
+#define INTSYSCR_V5F  (INTSYSCR_PMTCFG_3 | INTSYSCR_INESTEN | INTSYSCR_HWSTKEN)
+
+    li t0, CORECFGR_V5F
+    csrw 0xBC0, t0
+    li t0, INESTCR_NEST_LVL_8
+    csrw 0xBC1, t0
+    li t0, INTSYSCR_V5F
+    csrw 0x804, t0
+    li t0, MSTATUS_RUN
     csrw mstatus, t0
 
-    /* Mode 3: vectored, absolute addresses in the table. */
     la t0, _vector_base_v5f
-    ori t0, t0, 3
+    ori t0, t0, MTVEC_MODE_VECT
     csrw mtvec, t0
 
-    /* Turn the instruction cache on, over a PMP-bounded window.
-     *
-     * It is off out of reset -- cache_strtg_ctlr (CSR 0xBC2) bit 1 ic_disable,
-     * reset value 1 -- and it is worth a measured 145x for code executing from
-     * flash, which is clocked at HCLK/2 = 50 MHz against this core's 400 MHz.
-     *
-     * The sequence is WCH's, from EVT/EXAM/CPU/ICache. The part that is not
-     * obvious, and that costs you the core if you get it wrong: the final
-     * instruction is a csrC, and it clears bits 24 and 25 as well as bit 1.
-     * Those are ic_code_strtg and ic_sram_strtg, the blanket "cache everything
-     * in 0x00000000-0x1fffffff / 0x20000000-0x3fffffff" enables, and they RESET
-     * TO 1. Clearing only ic_disable leaves them on, so the cache tries to
-     * cover all of flash and all of the TCM/SRAM window -- including the ITCM
-     * this core's vector table and hot code live in -- and the core traps in
-     * startup. Caching is scoped by the PMP entry instead. */
+    /* Turn the instruction cache on, scoped to the flash code and rodata by a
+       PMP entry. It is off out of reset and it is worth a measured 145x for
+       code executing from flash.
 
-    /* PMP channel 1, TOR: pmpaddr0 is the base, pmpaddr1 the top. Both are
+       The sequence is WCH's, from EVT/EXAM/CPU/ICache, and every value in it
+       has a trap in it: the csrc clears two blanket region enables as well as
+       ic_disable, and IC_Str is not the bit the manual says. ch32h4_csr.h
+       carries the reasoning for each, with the measurements.
+
+       PMP channel 1, TOR: pmpaddr0 is the base, pmpaddr1 the top, both
        address >> 2. */
     la t0, _cache_beg
     srli t0, t0, 2
     csrw pmpaddr0, t0
-
     la t0, _cache_end
     srli t0, t0, 2
     csrw pmpaddr1, t0
 
-    /* cache_pmp_ovr: bit 4 = ic_pmp1cache_strtg -- instructions matched by PMP
-       channel 1 may be cached. The manual notes this OVERRIDES the region
-       policy in 0xBC2 for addresses the channel covers. */
-    li t0, 0x10
+    li t0, CACHE_PMP1_STRTG
     csrw 0xbc3, t0
-
-    /* pmpcfg0 byte 1 = channel 1: locked, TOR, read + execute. Byte 0 is zero,
-       so channel 0 contributes only its address as the TOR base. */
-    li t0, 0xAD00
+    li t0, PMPCFG0_V5F
     csrw 0x3a0, t0
-
-    /* Flush: opcache_ctlr, idx_mode 1, opcode 00 = invalidate. */
-    li t0, 0x4
+    li t0, OPCACHE_INVAL
     csrw 0xbd0, t0
-
-    /* Enable. See the comment above for why this clears three bits. */
-    li t0, 0x03000002
+    li t0, CACHE_V5F_CSRC
     csrc 0xbc2, t0
 
     la t0, ch32h4_v5f_main

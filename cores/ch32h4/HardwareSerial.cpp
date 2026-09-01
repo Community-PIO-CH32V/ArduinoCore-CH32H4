@@ -1,4 +1,5 @@
 #include "Arduino.h"
+#include "ch32h4_fault.h"
 #include "ch32h4_irq.h"
 
 void CH32H4Serial::begin(unsigned long baud, uint16_t config) {
@@ -54,10 +55,29 @@ size_t CH32H4Serial::write(uint8_t c) {
     if (!_running) {
         return 0;
     }
+    /* The same semaphore ch32h4_console_puts() takes. Two drivers share this
+     * peripheral and two cores share both drivers, and nothing in the USART
+     * serialises them -- see the comment on CH32H4_HSEM_CONSOLE. */
+    ch32h4_console_lock();
     while (USART_GetFlagStatus(_usart, USART_FLAG_TXE) == RESET) {
     }
     USART_SendData(_usart, c);
+    ch32h4_console_unlock();
     return 1;
+}
+
+size_t CH32H4Serial::write(const uint8_t *buf, size_t n) {
+    if (!_running || buf == nullptr) {
+        return 0;
+    }
+    /* Taken once for the whole buffer. The lock is recursive per core, so the
+     * per-byte write() below nests without a second take. */
+    ch32h4_console_lock();
+    for (size_t i = 0; i < n; i++) {
+        write(buf[i]);
+    }
+    ch32h4_console_unlock();
+    return n;
 }
 
 int CH32H4Serial::available() {
@@ -108,5 +128,7 @@ CH32H4Serial Serial1(USART1);
 /* The attribute belongs on the declaration -- see ch32h4_irq.h. */
 extern "C" void CH32H4_IRQ_HANDLER(USART1_IRQHandler);
 extern "C" void USART1_IRQHandler(void) {
+    ch32h4_irq_enter(&ch32h4_irq_usart1_count);
     Serial1._isr();
+    ch32h4_irq_exit();
 }

@@ -11,6 +11,7 @@
 
 #include "ch32h417.h"
 #include "ch32h4_clock.h"
+#include "ch32h4_fault.h"
 #include "ch32h4_irq.h"
 #include "ch32h4_usb.h"
 #include "tusb.h"
@@ -106,13 +107,43 @@ bool ch32h4_usb_init(void) {
  * running, or the next one. */
 static volatile bool s_in_task;
 
+/* Claim the device stack, or report that someone else already has it.
+ *
+ * The test-and-set is done with interrupts masked. Without that, a caller can
+ * read the flag as clear, take the USB interrupt before it writes, and come
+ * back to set a flag the interrupt has already set and cleared -- harmless
+ * here, but the same window widens the moment anything nests.
+ *
+ * Callers that touch TinyUSB from thread context MUST hold this. Adafruit's
+ * TinyUSB_Device_Task() and TinyUSB_Device_FlushCDC() both go straight into
+ * the device stack with no guard of their own, so yield() wraps them in this
+ * rather than calling them bare. */
+bool ch32h4_usb_lock(void) {
+    if (!s_usb_up) {
+        return false;
+    }
+    uint32_t prev;
+    __asm volatile("csrrci %0, mstatus, 8" : "=r"(prev));
+    bool got = !s_in_task;
+    if (got) {
+        s_in_task = true;
+    }
+    if (prev & 8u) {
+        __asm volatile("csrsi mstatus, 8");
+    }
+    return got;
+}
+
+void ch32h4_usb_unlock(void) {
+    s_in_task = false;
+}
+
 void ch32h4_usb_task(void) {
-    if (!s_usb_up || s_in_task) {
+    if (!ch32h4_usb_lock()) {
         return;
     }
-    s_in_task = true;
     tud_task();
-    s_in_task = false;
+    ch32h4_usb_unlock();
 }
 
 /* The device stack runs from the interrupt as well as from loop().
@@ -128,12 +159,13 @@ void ch32h4_usb_task(void) {
  * USB stack: the worst that happens is that the work is late, not fatal. */
 void CH32H4_IRQ_HANDLER(USBFS_IRQHandler);
 void USBFS_IRQHandler(void) {
+    ch32h4_irq_enter(&ch32h4_irq_usbfs_count);
     tud_int_handler(0);
-    if (!s_in_task) {
-        s_in_task = true;
+    if (ch32h4_usb_lock()) {
         tud_task();
-        s_in_task = false;
+        ch32h4_usb_unlock();
     }
+    ch32h4_irq_exit();
 }
 
 /* The chip's 96-bit unique ID, as a hex string.

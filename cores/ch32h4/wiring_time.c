@@ -1,4 +1,5 @@
 #include "Arduino.h"
+#include "ch32h4_fault.h"
 #include "ch32h4_irq.h"
 
 /* SysTick CTLR bits, reference manual 4.6.1.1. */
@@ -45,10 +46,12 @@ void ch32h4_systick_init(void) {
  * an ordinary function that returns with `ret` instead of `mret`. */
 void CH32H4_IRQ_HANDLER(SysTick0_Handler);
 void SysTick0_Handler(void) {
+    ch32h4_irq_enter(&ch32h4_irq_systick_count);
     /* Read-modify-write, not a store: the status register holds a bit for
      * each core's timer and this must not clear the other's. */
     SysTick0->ISR &= ~(1u << 0);
     s_millis++;
+    ch32h4_irq_exit();
 }
 
 __itcm_func unsigned long millis(void) {

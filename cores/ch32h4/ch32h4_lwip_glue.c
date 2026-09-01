@@ -34,4 +34,29 @@ void ch32h4_lwip_assert_core_locked(void) {
     }
 }
 
+/* xorshift32, seeded from millis() on first use.
+ *
+ * lwIP uses this for DNS transaction IDs and ephemeral ports. Seeded rather
+ * than constant so two boards on one LAN do not issue the same query IDs in
+ * the same order, and reseeded never -- xorshift32 has a full 2^32-1 period,
+ * which is orders of magnitude more than a stream of DNS lookups consumes.
+ *
+ * The hardware RNG is deliberately not used here: it is the mbedTLS entropy
+ * source (M7), and DNS must work on a build where TLS is never initialised.
+ * A zero seed sticks at zero forever -- the one value xorshift cannot recover
+ * from -- so it is excluded explicitly. */
+uint32_t ch32h4_lwip_rand(void) {
+    static uint32_t state = 0;
+    if (state == 0) {
+        state = (uint32_t)ch32h4_lwip_now_ms() * 2654435761u;
+        if (state == 0) {
+            state = 0x1234567u;
+        }
+    }
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return state;
+}
+
 #endif /* CH32H4_ETHERNET */

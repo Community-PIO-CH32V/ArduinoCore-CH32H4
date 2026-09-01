@@ -21,6 +21,24 @@ extern "C" {
 /* PA9 TX / PA10 RX, AF7. Safe to call more than once. */
 void ch32h4_console_init(uint32_t baud);
 
+/* USART1 has two drivers on it -- these functions and HardwareSerial -- and
+ * two cores using them. Nothing about the peripheral serialises that: both
+ * paths poll TXE and store to DATAR, so two writers produce output interleaved
+ * mid-word ("V35F: alive core_id=1"), which is not merely ugly. It destroys
+ * the evidence at exactly the moment you need it, and a garbled post-mortem
+ * reads as a different fault every boot.
+ *
+ * So every writer takes this. It is a hardware semaphore, so it works across
+ * cores, and it is recursive per core, so puthex() calling puts() calling
+ * putc() takes it once. HardwareSerial::write() takes it too.
+ *
+ * The spin is bounded. A core that dies holding the semaphore must not take
+ * the console down with it -- the whole point of this driver is to still work
+ * when things are broken. */
+#define CH32H4_HSEM_CONSOLE  0u
+void ch32h4_console_lock(void);
+void ch32h4_console_unlock(void);
+
 void ch32h4_console_putc(char c);
 
 /* Translates '\n' to "\r\n". */

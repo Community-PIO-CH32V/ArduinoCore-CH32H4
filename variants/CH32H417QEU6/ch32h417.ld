@@ -21,7 +21,11 @@ ENTRY( _start_v3f )
  * alone can want a kilobyte. DTCM has room: the heap gives up 6 KB out of
  * roughly 240. */
 __stack_size_v3f = 8192;
-__stack_size_v5f = 16384;
+/* 32 KB, not the 16 KB this started as. lwIP's receive path is a deep C call
+ * chain, and with the USB device task running from yield() on top of it 16 KB
+ * overflowed: libhal measured 16656 bytes and went to 28 KB, and MicroPython
+ * gives the V5F 32 KB with an 8 KB margin for exactly this reason. */
+__stack_size_v5f = 32768;
 
 MEMORY
 {
@@ -40,11 +44,31 @@ MEMORY
        only what has been measured as hot. */
     ITCM (xrw)      : ORIGIN = 0x200A0000, LENGTH = 128K
 
-    /* DTCM: zero-wait at the V5F core clock. .data, .bss, the V5F stack and the
+    /* The hardware interrupt stack. Reserved, never allocated.
+     *
+     * With HWSTKEN set in intsyscr the V5F saves the caller-saved registers to
+     * memory on every trap entry, at the address in hw_popdm_addr (CSR 0xBC4).
+     * That register's [31:20] field is read-only, so the region is always in
+     * the TCM window, and on this part it reads 0x200C0000 out of reset -- the
+     * DTCM base. (The QingKeV5 manual documents the reset value as 0x200A0000;
+     * that is not what this silicon reports. Measured, not assumed.)
+     *
+     * Nothing announces this. The first version of this file put .loadcode
+     * here, and a dump of 0x200C0000 taken before and after the first
+     * interrupts showed saved registers landing on top of it -- a return
+     * address and a live USART1 base among them. .load only runs once, during
+     * the V3F's startup, so it survived; anything else here would not have.
+     *
+     * 512 bytes is what WCH's own V5F linker script leaves free at this
+     * address, and it matches eight nesting levels of a 64-byte frame. */
+    HW_STACK (rw)   : ORIGIN = 0x200C0000, LENGTH = 512
+
+    RAM_LOAD (xrw)  : ORIGIN = 0x200C0200, LENGTH = 512
+
+    /* DTCM: zero-wait at the V5F core clock. .data, .bss, both stacks and the
        fast half of the heap. The V3F reaches it with HCLK waits, which is fine
        for the stub. */
-    RAM_LOAD (xrw)  : ORIGIN = 0x200C0000, LENGTH = 512
-    DTCM (xrw)      : ORIGIN = 0x200C0200, LENGTH = 256K - 512
+    DTCM (xrw)      : ORIGIN = 0x200C0400, LENGTH = 256K - 1K
 
     /* Shared SRAM: the only memory both cores reach at speed, and the only
        memory the USB controller's own bus master can reach at all. (DMA1/2
@@ -58,7 +82,16 @@ MEMORY
     ETH_RAM (xrw)   : ORIGIN = 0x20102000, LENGTH = 28K    /* M6 */
     SD_RAM (rw)     : ORIGIN = 0x20109000, LENGTH = 8K     /* M5 */
     XCORE_RAM (xrw) : ORIGIN = 0x2010B000, LENGTH = 8K     /* M4 */
-    SHARED (xrw)    : ORIGIN = 0x2010D000, LENGTH = 512K - 52K
+
+    /* The V3F's vector table, in RAM for the same reason the V5F's is: in
+     * mtvec mode 3 the trap hardware reads an absolute address out of the
+     * table, and that read from flash returns garbage. The V3F got away with a
+     * table in flash for as long as it never took a trap -- it wakes the V5F
+     * and sleeps -- but the moment setup1()/loop1() run it does, and the board
+     * lockup-resets with no fault record at all. WCH's own V3F linker script
+     * puts .vector in shared SRAM; so does this. */
+    V3F_VECTOR (xrw): ORIGIN = 0x2010D000, LENGTH = 1K
+    SHARED (xrw)    : ORIGIN = 0x2010D400, LENGTH = 512K - 52K - 1K
 }
 
 SECTIONS
@@ -71,11 +104,18 @@ SECTIONS
         . = ALIGN(4);
     } >FLASH_V3F
 
+    .v3f_vectoralign : {
+        . = ALIGN(4);
+        _v3f_vector_lma = .;
+    } >FLASH_V3F
+
     .v3f_vector : {
         . = ALIGN(64);
+        _v3f_vector_start = .;
         KEEP(*(.vector_v3f))
         . = ALIGN(4);
-    } >FLASH_V3F
+        _v3f_vector_end = .;
+    } >V3F_VECTOR AT>FLASH_V3F
 
     .v3f_text : {
         . = ALIGN(4);
@@ -334,6 +374,10 @@ SECTIONS
     /* NOLOAD on both stacks, or a section that merely advances the location
        counter becomes PROGBITS at a RAM load address and objcopy pads the .bin
        out to it. That produced a 514 MB firmware.bin in the libhal port. */
+    /* Directly below the V5F's stack, with no guard between them: an
+       overflow on either lands in the other. Sized generously for that reason
+       -- this core runs a stub and setup1()/loop1(), and 8 KB is far more than
+       either needs. */
     .v3f_stack (NOLOAD) : {
         . = ALIGN(16);
         . = . + __stack_size_v3f;

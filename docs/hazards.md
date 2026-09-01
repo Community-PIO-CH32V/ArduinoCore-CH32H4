@@ -290,3 +290,261 @@ chased further, since the correct cache configuration is required anyway.
 `__gnu_cxx::__verbose_terminate_handler` is also overridden, which keeps the
 43 KB C++ name demangler out of the image -- libstdc++'s documented
 customisation point.
+
+---
+
+## `IC_Str` is pmpcfg bit 5, not the bit 6 the manual gives
+
+**Symptom.** None. The board boots, enumerates USB, gets a DHCP lease, passes
+every functional test, and runs **143x slower** than it should.
+
+**Cause.** The instruction cache is scoped by a PMP entry: `IC_Str` in
+`pmp<i>cfg` is what makes the `cache_pmp_ovr` policy apply to that region.
+Table 4-3 of the QingKeV5 Microprocessor Manual puts `IC_Str` at **bit 6** and
+marks bit 5 reserved. WCH's own `EVT/EXAM/CPU/ICache` writes `0xAD00`, which
+sets **bit 5** and leaves bit 6 clear. The manual and the vendor's example
+disagree, and the silicon follows the example.
+
+Measured, with the same loop compiled into flash and into ITCM:
+
+| `pmpcfg0` | flash | ITCM | ratio |
+|---|---|---|---|
+| `0xAD00` (bit 5) | 140,491 cyc | 160,908 cyc | **0.87x** |
+| `0xCD00` (bit 6) | 20,095,779 cyc | 166,976 cyc | **143x** |
+
+**Why it is dangerous.** Nothing reads back differently. `pmpcfg0`,
+`cache_pmp_ovr` and `cache_strtg_ctlr` all return exactly what was written in
+both cases, so no amount of register inspection distinguishes a cache that is
+covering the region from one that is not. Only a cycle count does.
+
+**How it was found.** By benchmarking, after a manual-driven "correction" from
+bit 5 to bit 6 was made and nothing failed.
+
+**Fix.** `PMPCFG_IC_STR = (1 << 5)` in `cores/ch32h4/ch32h4_csr.h`, and
+`test_instruction_cache_is_on` in `tests/hw/test_acceptance.py` now *gates* on
+the ratio rather than merely recording it.
+
+---
+
+## `hw_popdm_addr` resets to the DTCM base, and 512 bytes there are not yours
+
+**Symptom.** None, until something else is put at `0x200C0000`.
+
+**Cause.** With `HWSTKEN` set in `intsyscr` -- WCH's own startup sets it, and so
+does this core -- the V5F saves the caller-saved registers to *memory* on every
+trap entry, at the address in `hw_popdm_addr` (CSR `0xBC4`). The manual gives
+its reset value as `0x200A0000`. **This silicon reports `0x200C0000`**, which
+is the DTCM base, and is consistent with the register's own description
+("points to the DTCM area") and with WCH's V5F linker script, which starts its
+first region at `0x200C0000 + 512` and never says why.
+
+This port's linker script had `.loadcode` at `0x200C0000`. Dumping that address
+before and after the first interrupts showed saved registers landing on top of
+it -- a return address, and a live USART1 base among them. `.load` only runs
+once, during the V3F's startup, so it survived; anything else there would not
+have.
+
+**Fix.** A reserved `HW_STACK` region of 512 bytes at the DTCM base, and
+`hw_popdm_addr` is left at its reset value rather than written.
+
+**The lesson.** The manual's reset values for this family are not reliable.
+Read the register back before building on the documented number -- it costs one
+`csrr` and one print.
+
+---
+
+## The V3F's vector table was in flash, and 60 of its entries were zero
+
+**Symptom.** Single-core sketches are fine indefinitely. The moment a sketch
+defines `setup1()`/`loop1()`, the board lockup-resets about 25 times a second
+with no fault record at all -- `rst=0x80000000 lockup` and nothing else.
+
+**Cause.** Two problems, both dormant for as long as the V3F never took a trap.
+
+1. `.v3f_vector` was linked into `FLASH_V3F`. In `mtvec` mode 3 the trap
+   hardware reads an absolute address out of the table, and that read from
+   flash returns garbage -- the same hazard already documented above for the
+   V5F, and fixed there but not here. WCH's own V3F linker script puts
+   `.vector` in RAM.
+2. The 60 unused entries were `.word 0`. A zero entry in mode 3 means "jump to
+   address 0", and address 0 on this part is `_start_v3f`, so a stray interrupt
+   silently re-ran startup. On the console that is indistinguishable from a
+   watchdog reboot.
+
+The V3F got away with both because in a single-core sketch it wakes the V5F and
+sleeps, and never traps.
+
+**Fix.** `.v3f_vector` is linked into a `V3F_VECTOR` region in shared SRAM and
+copied there by `_load_base_v3f`, alongside the V5F's table. Every unused entry
+points at `Stray_IRQ_v3f`, which records `mcause`/`mepc`/`mtval`/`sp`/`ra` into
+`.xcore` and resets, so the next boot prints what happened.
+
+---
+
+## `yield()` and the USB interrupt both ran `tud_task()`, with only one locking
+
+**Symptom.** A hang inside an interrupt handler, minutes to hours in, under
+combined USB and network load.
+
+**Cause.** `ch32h4_usb.c` runs `tud_task()` from the USBFS interrupt as well as
+from `yield()` -- it has to, or a sketch that blocks in `loop()` lets TinyUSB's
+event FIFO fill, and a full FIFO is a `TU_ASSERT` that kills the stack. The
+interrupt took an `s_in_task` guard. `yield()` called Adafruit's
+`TinyUSB_Device_Task()`, which is a one-line wrapper around `tud_task()` and
+takes nothing, and `TinyUSB_Device_FlushCDC()`, likewise. So the interrupt
+could land inside a `tud_task()` started by `yield()`, see the guard clear, and
+re-enter the event queue on top of it.
+
+**Fix.** `ch32h4_usb_lock()` / `ch32h4_usb_unlock()`, a test-and-set with
+interrupts masked, exported from `ch32h4_usb.c`. `yield()` holds it across both
+Adafruit calls; the interrupt takes it and gives up if it is held.
+
+---
+
+## A fault handler that spins wedges the probe; one that resets can lock you out too
+
+**Symptom.** After a firmware fault, `wlink` returns
+`underlying protocol error: 0x55` for every operation, including `erase`. The
+only way back is holding NRST down through a flash or erase.
+
+**Cause.** A core spinning with interrupts disabled stops answering the debug
+module. But simply resetting instead is not enough on its own: a fault that
+reproduces on every boot resets several times a second, and the probe never
+gets a window in which to attach.
+
+**Fix.** Both halves. The fault handler records to `.xcore` and resets rather
+than spinning -- and `ch32h4_fault_log.boot_faults` counts consecutive
+crash-reboots, so after `CH32H4_FAULT_REBOOT_LIMIT` the V3F prints the record
+and *stops waking the V5F*. The board stays talkable and reflashable. The V5F
+clears the count once it reaches runtime-ready.
+
+---
+
+## `.xcore` survives a reflash, so a magic word is not enough to trust it
+
+**Symptom.** A boot report claiming `boot_faults=628260155`, and interrupt
+counters in the billions, on a board that had just been flashed.
+
+**Cause.** `.xcore` is `NOLOAD`, which is the point -- it is how a fault record
+survives the reset that follows it. But it also survives a *reflash*, so a new
+build whose variables sit at different offsets reads the previous image's bytes
+through the new layout, and finds the validity magic exactly where it expects
+it.
+
+**Fix.** Two things, because neither is sufficient alone. The magic has the
+record's `sizeof` folded into it, so a changed struct invalidates the region.
+And everything read out of `.xcore` is range-checked against what it can
+legitimately be, because adding a *variable* changes offsets without changing
+any `sizeof`.
+
+---
+
+## USART1 has two drivers and two cores, and nothing serialised them
+
+**Symptom.** Console output interleaved mid-word: `V35F: alive core_id=1`,
+`F: waitin5F: usb up`. Worse than cosmetic -- it destroys the post-mortem at
+exactly the moment it matters, and makes a reproducible fault look like a
+different one on every boot.
+
+**Cause.** `ch32h4_console_*` (raw, polling) and `HardwareSerial` both poll
+`TXE` and store to `DATAR` on USART1, and both cores use both. Nothing in the
+peripheral serialises that.
+
+**Fix.** `CH32H4_HSEM_CONSOLE`, a hardware semaphore taken by every writer.
+Recursive per core -- HSEM records the taking core as owner and refuses a
+second take from it, so the depth is counted in software, in `.xcore` because
+`.bss` is shared. `HardwareSerial::write(const uint8_t*, size_t)` is overridden
+rather than inherited from `Print`'s byte loop, so a whole `print()` goes out
+under one take. The spin is bounded: a core that dies holding the semaphore
+must not take the console with it.
+
+---
+
+## A call to address 0 links cleanly, and address 0 is the other core's reset vector
+
+**Symptom.** A sketch boots, prints its banner, reaches its prompt, and then the
+board lockup-resets several times a second. No fault record. No `=== TRAP ===`.
+The console shows a complete, clean boot every time, so it reads as a reset
+loop with no cause -- and it only happens with *some* sketches.
+
+**Cause.** `static String line;` inside a sketch's `loop()`. Any function-local
+static with a non-trivial destructor is enough. GCC constructs it under a guard
+and then emits a call to `__cxa_atexit` to register the destructor. Under
+`-nostartfiles` nothing provided `__cxa_atexit`, and the reference resolved to
+**zero**:
+
+```
+b150:  sb    a5,-1968(gp)     # set the guard
+b154:  auipc ra,0x0
+b158:  jalr  zero             # 0 <_start_v3f>
+```
+
+Address 0 on this part is `_start_v3f`. So the V5F did not fault -- it jumped
+into the *V3F's reset vector* and re-ran the other core's startup, which resets
+`sp` to `_estack_v3f`, re-copies `.data` and re-zeroes `.bss` underneath a
+running system. That corrupts the V3F's stack, so the V3F then returns through
+a garbage `ra` and takes an instruction access fault of its own. The V3F's
+symptoms are downstream of the V5F's jump, which is why this looked like a
+dual-core bug for a long time. It has nothing to do with the second core.
+
+The linker said nothing: no undefined symbol, no warning, and no entry in
+`nm -u`.
+
+**Fix.** `cores/ch32h4/ch32h4_cxx.cpp` defines `__cxa_atexit`, `atexit`,
+`__dso_handle`, `__cxa_pure_virtual` and `__cxa_deleted_virtual`. Doing nothing
+and returning success is correct for the first two: those destructors run at
+`exit()`, and a sketch never exits.
+
+**The guard.** `test_nothing_calls_address_zero` in `tests/test_link_matrix.py`
+disassembles every sketch and fails on any call whose resolved target is 0. It
+generalises to the next such symbol, whatever that turns out to be -- and there
+will be one.
+
+Two functions are allowlisted, because they use the weak-symbol idiom on
+purpose: `yield()` (`ch32h4_ticker_update`, `ch32h4_net_update`) and
+`ch32h4_v3f_main()` (`setup1`, `loop1`). An undefined weak symbol *is* address
+zero, so the call is emitted with a zero target and the `if` in front of it
+makes the instruction unreachable. Keeping that list short and explicit is the
+point: a call to zero anywhere else is one nothing null-checks.
+
+---
+
+## `HSEM_FastTake()` returns success exactly when it did nothing
+
+**Symptom.** `CH32H4.mutexTryLock()` inverted:
+
+```
+mutex_first=0            # should be 1 -- it was free
+mutex_second=1           # should be 0 -- this core already held it
+mutex_after_unlock=0     # should be 1
+```
+
+**Cause.** Reading `HSEM->RLRX[n]` *is* the take -- one bus read locks the
+semaphore if it was free and records the owner. The read returns the state
+**before** the take, so zero is what success looks like. Measured on the V5F
+with the semaphore free:
+
+```
+RLRX read 1 -> 0x00000000   (was free: this read acquired it)
+RLRX read 2 -> 0x80000100   (already ours)
+RX          -> 0x80000100
+release
+RLRX read 3 -> 0x00000000   (acquired again)
+```
+
+The SDK's helper compares that value against `(coreid << 8) | (1 << 31)` and
+calls a match `READY`. So it reports success exactly when the take was a
+**no-op because this core already held the semaphore**, and reports failure on
+the read that actually acquired it. Its own doc comment says
+`READY - Take success`.
+
+**Why it did not show sooner.** `ch32h4_console_lock()` spins
+`while (!try_lock())`. With the inverted helper the first read acquired the
+semaphore and was reported as a failure, so the loop went round once more, the
+second read reported success, and the lock was in fact held. It worked by
+accident. Under contention it did not: the other core's value never matches
+ours, so the loop spun out its entire bounded guard -- about a second -- and
+then printed anyway.
+
+**Fix.** `ch32h4_mutex_try_lock()` reads `HSEM->RLRX[id]` directly and succeeds
+on zero. `HSEM_FastTake()` is not used.

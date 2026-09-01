@@ -1,5 +1,9 @@
 #include <Arduino.h>
 #include <LwipEthernet.h>
+extern "C" {
+#include "ch32h4_fault.h"
+#include "ch32h4_console.h"
+}
 
 void setup() {
   Serial1.begin(115200);
@@ -31,12 +35,39 @@ void setup() {
 }
 
 void loop() {
-  static String line;
+  static unsigned long last_hb = 0;
+  if ((unsigned long)(millis() - last_hb) >= 1000) {
+    last_hb = millis();
+    ch32h4_console_puts("hb ");
+    ch32h4_console_putu(millis());
+    ch32h4_console_puts(" eth=");
+    ch32h4_console_putu(ch32h4_irq_eth_count);
+    ch32h4_console_puts(" phase=");
+    ch32h4_console_putu(ch32h4_eth_phase);
+    ch32h4_console_puts("\n");
+
+    /* The same line out of the USB CDC, and a drain of whatever the host
+     * sent. Without this the USB stack is idle, yield()'s TinyUSB path has
+     * nothing to do, and the two stacks never contend. */
+    Serial.print("usb hb ");
+    Serial.print(millis());
+    Serial.print(" eth=");
+    Serial.print(ch32h4_irq_eth_count);
+    Serial.print(" usbfs=");
+    Serial.println(ch32h4_irq_usbfs_count);
+  }
+  while (Serial.available()) {
+    Serial.write((uint8_t)Serial.read());
+  }
+
+  static char line[64];
+  static int len = 0;
   while (Serial1.available()) {
     char c = (char)Serial1.read();
     if (c == '\n' || c == '\r') {
-      if (line.length()) {
-        if (line == "netstat") {
+      if (len) {
+        line[len] = '\0';
+        if (strcmp(line, "netstat") == 0) {
           Serial1.print("status="); Serial1.println(Ethernet.status());
           Serial1.print("link="); Serial1.println((int)Ethernet.linkStatus());
           Serial1.print("ip="); Serial1.println(Ethernet.localIP());
@@ -47,9 +78,11 @@ void loop() {
           Serial1.print("link_changes="); Serial1.println(s->link_changes);
         }
         Serial1.print("> ");
-        line = "";
+        len = 0;
       }
-    } else { line += c; }
+    } else if (len < (int)sizeof(line) - 1) {
+      line[len++] = c;
+    }
   }
   yield();
 }

@@ -13,7 +13,44 @@
  * broke may have been in the middle of one.
  */
 #include "ch32h417.h"
+#include "ch32h4_fault.h"
 #include "ch32h4_irq.h"
+#include "ch32h4_xcore.h"
+
+/* The fault record itself, in shared RAM. See ch32h4_fault.h. */
+volatile ch32h4_fault_log_t ch32h4_fault_log CH32H4_XCORE;
+volatile ch32h4_fault_log_t ch32h4_fault_log_v3f CH32H4_XCORE;
+
+/* Interrupt trace. Nesting is tracked by a balanced +/- in each handler body:
+ * an interrupt landing on top of another sees the outer one's + not yet undone,
+ * so the count is the true C-level nesting depth.
+ *
+ * These live in .xcore (shared, NOLOAD, not cleared by the V3F's xcore_init)
+ * so they survive the reset that follows a fault: the fault handler's own
+ * entry usually cannot run when the stack is already gone, so it cannot record
+ * them itself. The V3F prints and resets them on the next boot. */
+volatile uint32_t ch32h4_irq_eth_count      CH32H4_XCORE;
+volatile uint32_t ch32h4_irq_systick_count  CH32H4_XCORE;
+volatile uint32_t ch32h4_eth_last_frame     CH32H4_XCORE;
+volatile uint32_t ch32h4_eth_last_tx        CH32H4_XCORE;
+volatile uint32_t ch32h4_eth_phase          CH32H4_XCORE;
+volatile uint32_t ch32h4_irq_usbfs_count    CH32H4_XCORE;
+volatile uint32_t ch32h4_irq_usart1_count   CH32H4_XCORE;
+volatile uint32_t ch32h4_irq_max_nesting    CH32H4_XCORE;
+volatile uint32_t ch32h4_irq_nesting        CH32H4_XCORE;
+volatile uint32_t ch32h4_trace_magic        CH32H4_XCORE;
+
+void ch32h4_irq_enter(volatile uint32_t *counter) {
+    (*counter)++;
+    uint32_t d = ++ch32h4_irq_nesting;
+    if (d > ch32h4_irq_max_nesting) {
+        ch32h4_irq_max_nesting = d;
+    }
+}
+
+void ch32h4_irq_exit(void) {
+    ch32h4_irq_nesting--;
+}
 
 /* Reprogramming a peripheral the console may already own is fine here: this
  * function never returns, so there is nothing left to interfere with. */
@@ -72,21 +109,37 @@ static void puthex_raw(uint32_t v) {
     }
 }
 
-/* Overrides the weak HardFault_Handler in startup_v5f.S. The attribute is on
- * the declaration -- see ch32h4_irq.h. */
-void CH32H4_IRQ_HANDLER(HardFault_Handler);
-void HardFault_Handler(void) {
-    /* Stop the world. Without this SysTick keeps firing into the spin loop at
-     * the bottom, each one nesting on the last until the hardware stack
-     * overflows and the part resets -- so the dump scrolls past and the board
-     * appears to boot-loop instead of halting. */
+/* The fault handler runs on a PRIVATE stack, not the one the fault just
+ * overflowed. The "WCH-Interrupt-fast" prologue saves 80 bytes of FPU state to
+ * the CURRENT sp -- exactly what a stack overflow has destroyed -- so the
+ * naked entry below switches to this fixed buffer before any C code runs, and
+ * hands the original sp to fault_dump() for the call-chain walk. */
+uint8_t ch32h4_fault_stack[512] __attribute__((aligned(16)));
+uint32_t ch32h4_fault_sp;
+
+void ch32h4_fault_dump(void) {
     __disable_irq();
 
-    uint32_t mcause, mepc, mtval, mstatus;
-    __asm volatile("csrr %0, mcause"  : "=r"(mcause));
-    __asm volatile("csrr %0, mepc"    : "=r"(mepc));
-    __asm volatile("csrr %0, mtval"   : "=r"(mtval));
-    __asm volatile("csrr %0, mstatus" : "=r"(mstatus));
+    /* Finish the record the naked entry started. It could write the CSRs and
+     * nothing else -- it runs with no usable stack and no guarantee gp is
+     * intact -- so the interrupt trace is copied here, where ordinary loads
+     * and stores are available again. Leaving these fields alone was worth a
+     * replayed post-mortem full of eight-digit garbage that read exactly like
+     * an interrupt storm. */
+    ch32h4_fault_log.irq_eth         = ch32h4_irq_eth_count;
+    ch32h4_fault_log.irq_systick     = ch32h4_irq_systick_count;
+    ch32h4_fault_log.irq_usbfs       = ch32h4_irq_usbfs_count;
+    ch32h4_fault_log.irq_usart1      = ch32h4_irq_usart1_count;
+    ch32h4_fault_log.irq_max_nesting = ch32h4_irq_max_nesting;
+
+    /* Printed from the record, not re-read from the CSRs. __disable_irq() above
+     * has already changed mstatus, so a fresh read reports an mstatus the fault
+     * never had -- and the replayed record and the live dump then disagree
+     * about the same fault. */
+    const uint32_t mcause  = ch32h4_fault_log.mcause;
+    const uint32_t mepc    = ch32h4_fault_log.mepc;
+    const uint32_t mtval   = ch32h4_fault_log.mtval;
+    const uint32_t mstatus = ch32h4_fault_log.mstatus;
 
     raw_uart_bringup();
 
@@ -98,15 +151,66 @@ void HardFault_Handler(void) {
     puthex_raw(mtval);
     puts_raw(" mstatus=");
     puthex_raw(mstatus);
+    puts_raw("\nsp=");
+    puthex_raw(ch32h4_fault_sp);
+
+    puts_raw("\nstack:");
+    for (uint32_t i = 0; i < 24; i++) {
+        uint32_t w = ((volatile uint32_t *)ch32h4_fault_sp)[i];
+        if ((w >= 0x00000000u && w < 0x00100000u)
+            || (w >= 0x08000000u && w < 0x08100000u)
+            || (w >= 0x20000000u && w < 0x20180000u)) {
+            puts_raw(" ");
+            puthex_raw(w);
+        }
+    }
     puts_raw("\n");
 
-    /* mcause 2 is an illegal instruction, which on this part most often means
-     * an M-mode CSR was touched from User mode -- see docs/hazards.md. */
     if ((mcause & 0x7FFFFFFFu) == 2u) {
-        puts_raw("illegal instruction: an M-mode CSR from User mode?\n");
+        puts_raw("illegal instruction\n");
     }
 
-    puts_raw("halted\n");
-    for (;;) {
+    /* Let the last characters clear the shift register. NVIC_SystemReset()
+     * takes effect immediately, and a reset mid-frame truncates the very line
+     * that says what went wrong. */
+    for (volatile uint32_t i = 0; i < 200000u; i++) {
     }
+    NVIC_SystemReset();
+}
+
+/* Naked: no prologue, so nothing is written to the stack the fault may have
+ * destroyed. Three things happen, in an order chosen so each still happens if
+ * the next cannot:
+ *
+ *   1. Record the CSRs into the shared fault log. PC-relative, no gp, no C, no
+ *      stack -- so it survives a stack that has run off the end of its region.
+ *      The V3F prints the record on the next boot.
+ *   2. Switch sp to a private buffer and hand the faulting sp to the C dumper,
+ *      which prints "=== TRAP ===" now rather than one reset later. It needs
+ *      its own stack because the "WCH-Interrupt-fast" prologue saves 80 bytes
+ *      of FPU state to the CURRENT sp -- exactly what an overflow destroyed.
+ *   3. ch32h4_fault_dump() resets. Spinning here instead wedges the probe with
+ *      a 0x55 protocol error, which needs NRST held down through a flash to
+ *      recover, so a fault must never end in a loop. */
+__attribute__((naked))
+void HardFault_Handler(void) {
+    __asm volatile(
+        "la   t0, ch32h4_fault_log   ;"
+        "csrr t1, mcause             ;"
+        "sw   t1, 4(t0)              ;"
+        "csrr t1, mepc               ;"
+        "sw   t1, 8(t0)              ;"
+        "csrr t1, mtval              ;"
+        "sw   t1, 12(t0)             ;"
+        "csrr t1, mstatus            ;"
+        "sw   t1, 16(t0)             ;"
+        "sw   sp, 20(t0)             ;"
+        "li   t1, %0                 ;"
+        "sw   t1, 0(t0)              ;"
+        "la   t0, ch32h4_fault_sp    ;"
+        "sw   sp, 0(t0)              ;"
+        "la   sp, ch32h4_fault_stack ;"
+        "addi sp, sp, %1             ;"
+        "j    ch32h4_fault_dump      ;"
+        :: "i"(CH32H4_FAULT_LOG_MAGIC), "i"(sizeof(ch32h4_fault_stack)));
 }

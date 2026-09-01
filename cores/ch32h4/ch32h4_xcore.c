@@ -110,13 +110,32 @@ bool ch32h4_mutex_try_lock(uint8_t id) {
         return false;
     }
     hsem_setup();
-    /* FastTake is the two-step take collapsed into one read: the hardware
-     * records this core as the owner if the semaphore was free. A read-check-
-     * write in software would have exactly the race the block exists to
-     * remove. */
-    /* The SDK's ErrorStatus is {NoREADY, READY}, not the {ERROR, SUCCESS} the
-     * name suggests. */
-    return HSEM_FastTake((HSEM_ID_TypeDef)id) == READY;
+
+    /* Reading RLRX is the take: one bus read locks the semaphore if it was
+     * free and records this core as the owner, with none of the race a
+     * read-check-write in software would have.
+     *
+     * The read returns the semaphore's state BEFORE the take, so zero -- free
+     * -- is what "you now own it" looks like. Anything else is bit 31 set plus
+     * the owning core, meaning someone already had it, possibly us.
+     *
+     * NOT HSEM_FastTake(). That helper compares the returned value against
+     * `(coreid << 8) | (1 << 31)` and calls a match READY, so it reports
+     * success exactly when the take was a NO-OP because this core already held
+     * the semaphore, and reports failure on the read that actually acquired
+     * it. Its own doc comment says "READY - Take success". Measured on the
+     * V5F, semaphore free at the start:
+     *
+     *     RLRX read 1 -> 0x00000000   (acquired)
+     *     RLRX read 2 -> 0x80000100   (already ours)
+     *     RX          -> 0x80000100
+     *     release, RLRX read 3 -> 0x00000000
+     *
+     * With the helper, ch32h4_console_lock() came out inverted: it took the
+     * semaphore on the first read, called that a failure, and looped -- which
+     * happened to work, because the second read reported success. Under
+     * contention it instead spun out its entire guard and printed anyway. */
+    return HSEM->RLRX[id] == 0u;
 }
 
 void ch32h4_mutex_lock(uint8_t id) {

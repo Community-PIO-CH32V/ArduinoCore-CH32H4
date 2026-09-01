@@ -23,6 +23,13 @@ bool ch32h4_usb_active(void);
  * USB interrupt, so a sketch that blocks cannot starve it. */
 void ch32h4_usb_task(void);
 
+/* The device-stack lock. Anything touching TinyUSB from thread context has to
+ * hold it, because the USBFS interrupt runs tud_task() as well. ch32h4_usb_lock
+ * returns false when the stack is already busy -- give up rather than wait,
+ * the holder is doing the same work. */
+bool ch32h4_usb_lock(void);
+void ch32h4_usb_unlock(void);
+
 /* The chip's unique ID is 8 bytes here, despite the SDK's STM32-shaped layout
  * implying 12 -- bytes 8..11 read as erased flash. */
 #define CH32H4_UID_BYTES  8

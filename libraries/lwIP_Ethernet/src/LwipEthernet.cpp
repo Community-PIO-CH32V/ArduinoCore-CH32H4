@@ -2,9 +2,11 @@
 
 extern "C" {
 #include "lwip/dhcp.h"
+#include "lwip/dns.h"
 #include "lwip/init.h"
 #include "lwip/netif.h"
 #include "lwip/timeouts.h"
+#include "ch32h4_fault.h"
 }
 
 /* eth_link_status()'s encoding, which is the driver's, not Arduino's:
@@ -177,10 +179,45 @@ void LwipEthernetClass::macAddress(uint8_t *mac) {
 }
 
 void LwipEthernetClass::update() {
-    /* lwIP's timers: DHCP renewal, TCP retransmission, ARP ageing. Nothing
-     * else drives them under NO_SYS, so a sketch that never reaches here has a
-     * stack that appears to work and then quietly stops renewing its lease. */
-    sys_check_timeouts();
+    /* Re-entrancy guard. netif->input() below runs the socket callbacks, and a
+     * callback that calls delay() or a blocking read comes straight back here
+     * through yield(). eth_rx_process() has its own guard for the descriptor
+     * ring, but sys_check_timeouts() walks a list it is mutating and must not
+     * be re-entered, so the whole pump is guarded. */
+    static bool in_update;
+    if (in_update) {
+        return;
+    }
+    in_update = true;
+
+    /* Received frames are handled on every call. Twelve descriptors hold about
+     * 1.5 ms of a saturated 100 Mbit link, so a hook that arrives late has
+     * little margin; the drain costs one flag read when there is nothing to
+     * do. */
+    ch32h4_eth_phase = 9;
+    eth_lwip_lock();
+    eth_rx_process();
+    eth_lwip_unlock();
+    ch32h4_eth_phase = 10;
+
+    /* The timer sweep -- DHCP renewal, TCP retransmission, ARP ageing -- and
+     * the link re-check only need doing once a millisecond. lwIP's timers have
+     * nothing to do more often than that, and the periodic link poll is one
+     * MDIO read per second (eth_poll rate-limits itself). */
+    static uint32_t last_ms;
+    uint32_t now = millis();
+    if (now != last_ms) {
+        last_ms = now;
+        ch32h4_eth_phase = 11;
+        eth_lwip_lock();
+        sys_check_timeouts();
+        ch32h4_eth_phase = 12;
+        eth_poll();
+        eth_lwip_unlock();
+        ch32h4_eth_phase = 13;
+    }
+
+    in_update = false;
 }
 
 /* The hook the core's yield() calls. Weak there, strong here, so linking this

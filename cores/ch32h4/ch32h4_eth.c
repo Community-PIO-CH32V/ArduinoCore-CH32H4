@@ -36,6 +36,7 @@ const char *ch32h4_eth_hostname = "ch32h417";
 #include <string.h>
 
 #include "Arduino.h"
+#include "ch32h4_fault.h"
 #include "ch32h4_irq.h"
 
 #include "ch32h417.h"
@@ -315,6 +316,7 @@ static int eth_mac_init(eth_t *self) {
     // 6. Descriptors.
     ETH_DMATxDescChainInit(eth_tx_desc, &eth_tx_buf[0][0], ETH_TX_DESC_NUM);
     ETH_DMARxDescChainInit(eth_rx_desc, &eth_rx_buf[0][0], ETH_RX_DESC_NUM);
+    __asm volatile("fence" ::: "memory");
     eth_rx_cur = eth_rx_desc;
     eth_tx_cur = eth_tx_desc;
 
@@ -393,10 +395,12 @@ static void eth_dhcp_start_if_needed(eth_t *self) {
     if (!netif_is_up(netif) || !ip4_addr_isany_val(*netif_ip4_addr(netif))) {
         return;
     }
-    if (netif_dhcp_data(netif) != NULL) {
-        dhcp_stop(netif);
+    /* Only start when DHCP is not already running. dhcp_start() is idempotent,
+     * but a stop-then-start every poll cycle reset the state machine (and the
+     * DISCOVER backoff) once a second, so a lease could never complete. */
+    if (netif_dhcp_data(netif) == NULL) {
+        dhcp_start(netif);
     }
-    dhcp_start(netif);
 }
 
 /* Reconcile our idea of the link with the PHY's.
@@ -475,6 +479,22 @@ void eth_poll(void) {
 static void eth_rx_frame(eth_t *self, const uint8_t *buf, size_t len) {
     struct netif *netif = &self->netif;
 
+    /* Record which frame we are about to hand to lwIP, so a lockup anywhere in
+     * the receive path still leaves the frame type readable by the V3F after
+     * the reset. EtherType at bytes 12..13; for ARP the opcode at 20..21, for
+     * IP the protocol at byte 23. */
+    uint16_t ethertype = (len >= 14) ? (uint16_t)((buf[12] << 8) | buf[13]) : 0;
+    uint8_t detail = 0;
+    if (ethertype == 0x0806 && len >= 22) {
+        detail = (uint8_t)((buf[20] << 8) | buf[21]);  /* 1=request 2=reply */
+    } else if (ethertype == 0x0800 && len >= 24) {
+        detail = buf[23];
+    }
+    ch32h4_eth_phase = 1;
+    ch32h4_eth_last_frame = ((uint32_t)ethertype << 16)
+                          | ((uint32_t)detail << 8)
+                          | (len & 0xFFu);
+
     struct pbuf *p = pbuf_alloc(PBUF_RAW, len, PBUF_POOL);
     if (p == NULL) {
         self->stats.rx_dropped++;
@@ -535,7 +555,9 @@ static void eth_rx_drain(eth_t *self) {
 
         // Hand the descriptor back before moving on.
         eth_rx_cur->Status = ETH_DMARxDesc_OWN;
+        __asm volatile("fence" ::: "memory");
         eth_rx_cur = (ETH_DMADESCTypeDef *)eth_rx_cur->Buffer2NextDescAddr;
+        ch32h4_eth_phase = 4;
     }
 
     /* Demand-poll unconditionally. If the DMA suspended for want of a
@@ -577,6 +599,7 @@ void eth_rx_process(void) {
 
 static err_t eth_netif_output(struct netif *netif, struct pbuf *p) {
     eth_t *self = netif->state;
+    ch32h4_eth_phase = 2;
 
     if (!self->link_up) {
         return ERR_IF;
@@ -615,14 +638,21 @@ static err_t eth_netif_output(struct netif *netif, struct pbuf *p) {
         return ERR_BUF;
     }
 
+    ch32h4_eth_last_tx = p->tot_len;
     eth_tx_cur->ControlBufferSize = len & ETH_DMATxDesc_TBS1;
     eth_tx_cur->Status |= ETH_DMATxDesc_FS | ETH_DMATxDesc_LS | ETH_DMATxDesc_OWN;
+
+    /* Make the descriptor writes visible to the DMA before kicking it: without
+     * a fence the demand poll can run while OWN is still in the core's write
+     * buffer, and the DMA reads a stale descriptor. */
+    __asm volatile("fence" ::: "memory");
 
     /* Clear TBUS before poking the demand poll. If the DMA suspended for want
      * of a descriptor, the status bit is latched, and it will not resume while
      * the bit is still set. */
     ETH->DMASR = ETH_DMASR_TBUS;
     ETH->DMATPDR = 0;
+    ch32h4_eth_phase = 3;
 
     self->stats.tx_frames++;
     eth_tx_cur = (ETH_DMADESCTypeDef *)eth_tx_cur->Buffer2NextDescAddr;
@@ -633,13 +663,23 @@ static err_t eth_netif_output(struct netif *netif, struct pbuf *p) {
 /******************************************************************************/
 // Interrupt
 
+/* The attribute belongs on the declaration -- see ch32h4_irq.h -- and it is
+ * the same "WCH-Interrupt-fast" entry every other handler on this part uses.
+ * A plain __attribute__((interrupt)) here would software-save the registers
+ * the hardware stack has already saved: correct, but silently different from
+ * every neighbouring handler for no stated reason. */
 void CH32H4_IRQ_HANDLER(ETH_IRQHandler);
 void ETH_IRQHandler(void) {
+    ch32h4_irq_enter(&ch32h4_irq_eth_count);
     eth_irq_handler();
+    ch32h4_eth_phase = 6;
+    ch32h4_irq_exit();
+    ch32h4_eth_phase = 7;
 }
 
 void eth_irq_handler(void) {
     eth_t *self = &eth_instance;
+    ch32h4_eth_phase = 5;
     uint32_t status = ETH->DMASR;
 
     /* This handler does no work beyond acknowledging the hardware and setting

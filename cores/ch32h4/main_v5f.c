@@ -6,6 +6,8 @@
  */
 #include "ch32h4_clock.h"
 #include "ch32h4_console.h"
+#include "ch32h4_fault.h"
+#include <stdbool.h>
 #include "ch32h4_xcore.h"
 #include "ch32h417.h"
 #include "system_ch32h417.h"
@@ -33,11 +35,14 @@ extern void (*__init_array_end[])(void);
 __attribute__((weak)) void setup(void) { }
 __attribute__((weak)) void loop(void) { }
 
+static bool s_boot_confirmed;
+
 static void run_static_constructors(void) {
     for (void (**p)(void) = __init_array_start; p < __init_array_end; p++) {
         (*p)();
     }
 }
+
 
 void ch32h4_v5f_main(void) {
     /* Guard: only the V5F belongs here.
@@ -112,6 +117,20 @@ void ch32h4_v5f_main(void) {
 
     setup();
     for (;;) {
+        /* Declare the boot a success only after the system has actually stayed
+         * up for a while.
+         *
+         * Clearing this at runtime-ready looked right and was useless: in the
+         * failure it was meant to catch, this core reaches runtime-ready every
+         * time and the V3F crashes afterwards, so the count was reset on every
+         * pass round a 25 Hz reboot loop and the circuit breaker never tripped.
+         * A crash loop cannot survive three seconds, so three seconds is the
+         * test. */
+        if (!s_boot_confirmed && millis() > 3000u) {
+            s_boot_confirmed = true;
+            ch32h4_fault_log.boot_faults = 0;
+        }
+
         loop();
         /* Pump USB (and anything else yield() grows to cover) once per
          * iteration. The stack also runs from the USB interrupt, so a sketch

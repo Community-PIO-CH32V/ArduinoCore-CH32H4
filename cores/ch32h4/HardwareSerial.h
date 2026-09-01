@@ -24,6 +24,10 @@ public:
     int read() override;
     void flush() override;
     size_t write(uint8_t c) override;
+    /* Overridden, not inherited from Print's byte loop: the whole buffer goes
+     * out under one console lock, so a print() from this core cannot be cut in
+     * half by the other core printing through ch32h4_console_puts(). */
+    size_t write(const uint8_t *buf, size_t n) override;
     using Print::write;
 
     operator bool() override { return _running; }

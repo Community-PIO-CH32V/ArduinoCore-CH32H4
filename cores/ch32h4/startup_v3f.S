@@ -27,9 +27,14 @@
 _start_v3f:
     j handle_reset_v3f
 
-/* The V3F's own vector table. Interrupt handling on this core arrives with
- * setup1()/loop1() in M4; until then the table only has to be valid, so the
- * fault entries trap visibly rather than running into whatever follows. */
+/* The V3F's own vector table. It is linked into RAM and copied there by
+ * _load_base_v3f -- see the linker script for why a table in flash locks the
+ * core up the first time it traps.
+ *
+ * Every unused entry points at Stray_IRQ_v3f, NOT at zero. A zero entry in
+ * mode 3 means "jump to address 0", and address 0 on this part is _start_v3f:
+ * a stray interrupt silently re-ran startup, which on the console is
+ * indistinguishable from a watchdog reboot. */
     .section .vector_v3f, "ax", @progbits
     .global _vector_base_v3f
     .align  6
@@ -40,16 +45,55 @@ _vector_base_v3f:
     .word   NMI_Handler_v3f
     .word   HardFault_Handler_v3f
     .rept   60
-    .word   0
+    .word   Stray_IRQ_v3f
     .endr
 
     .section .text.v3f, "ax", @progbits
 
     .weak   NMI_Handler_v3f
     .weak   HardFault_Handler_v3f
+    .weak   Stray_IRQ_v3f
     .align  2
 NMI_Handler_v3f:
 HardFault_Handler_v3f:
+Stray_IRQ_v3f:
+    /* Record and reset. Nothing is printed here: this core may be mid-line on
+     * the shared UART, or the V5F may own it, so a print would produce
+     * interleaved noise at exactly the moment clarity matters. The record goes
+     * to .xcore, which is NOLOAD and survives the reset, and the next boot
+     * prints it before waking anything.
+     *
+     * Reset rather than spin. A core spinning here wedges the WCH-Link with a
+     * 0x55 protocol error, and the only way back is holding NRST down through
+     * an erase. */
+    la t0, ch32h4_fault_log_v3f
+    csrr t1, mcause
+    sw t1, 4(t0)
+    csrr t1, mepc
+    sw t1, 8(t0)
+    csrr t1, mtval
+    sw t1, 12(t0)
+    csrr t1, mstatus
+    sw t1, 16(t0)
+    sw sp, 20(t0)
+    /* ra and the top of the stack, in the record's otherwise-unused counter
+       fields. A bad PC is only ever half the story -- where it was returning
+       to is the other half. */
+    sw ra, 24(t0)
+    lw t1, 0(sp)
+    sw t1, 28(t0)
+    lw t1, 4(sp)
+    sw t1, 32(t0)
+    lw t1, 8(sp)
+    sw t1, 36(t0)
+    lw t1, 12(sp)
+    sw t1, 40(t0)
+    li t1, 0xF01DFA11          /* CH32H4_FAULT_LOG_MAGIC */
+    sw t1, 0(t0)
+    /* PFIC->CFGR = KEY3 | SYSRESET. */
+    li t0, 0xE000E048
+    li t1, 0xBEEF0080
+    sw t1, 0(t0)
 1:  j 1b
 
     .global handle_reset_v3f
@@ -78,36 +122,32 @@ handle_reset_v3f:
 2:
     call _load_base_v3f
 
-    /* Prefetch and interrupt-nesting configuration. These values are
-       V3F-specific: the V5F uses 0x1237B3E0 with nesting level 7 and 0x0F
-       here, this core 0x123703E1, level 1 and 0x07. WCH's two startup files
-       differ from each other in exactly these registers plus the PLL. */
-    li t0, 0x123703E1
-    csrw 0xBC0, t0
-    li t0, 0x01
-    csrw 0xBC1, t0
+    /* CSR bit flags live in ch32h4_csr.h so both cores share one definition.
+     * Only this core's composed register values are spelled out here. This core
+     * runs at 100 MHz and handles no sketch interrupts, so it gets one
+     * preemption bit, 2-level nesting and the V3F's corecfgr flavour. */
+#include "ch32h4_csr.h"
 
-    /* Interrupt nesting and the hardware stack. */
-    li t0, 0x07
+#define CORECFGR_V3F (CORECFGR_FADD_DIV | CORECFGR_FMUL_DIV | CORECFGR_FMAC_DIV | \
+                      CORECFGR_FDIV_DIV | CORECFGR_WCH_9_8 | CORECFGR_CSTA_FAULT_IE | \
+                      CORECFGR_WCH_6 | CORECFGR_IE_REMAP_EN | CORECFGR_WCH_0)
+#define INTSYSCR_V3F  (INTSYSCR_PMTCFG_1 | INTSYSCR_INESTEN | INTSYSCR_HWSTKEN)
+
+    li t0, CORECFGR_V3F
+    csrw 0xBC0, t0
+    li t0, INESTCR_NEST_LVL_2
+    csrw 0xBC1, t0
+    li t0, INTSYSCR_V3F
     csrw 0x804, t0
 
-    /* FPU on, interrupts on, and STAY IN MACHINE MODE.
-     *
-     * WCH's own startup writes 0x6088 here, which leaves MPP=00 -- so the mret
-     * below drops into User mode, where every M-mode CSR is unreachable.
-     * __disable_irq() and friends then link cleanly and take an
-     * illegal-instruction trap (mcause=2) the first time they run, which lands
-     * in a fault handler that cannot print yet. The board says nothing at all.
-     *
-     * 0x7888 = FS=11 (FPU on) | MPP=11 (stay in Machine mode) | MPIE | MIE.
-     * Both cores have a hardware single-precision FPU (misa = 0x40901127) and
-     * the ABI is ilp32f, so FS is not optional either. */
-    li t0, 0x7888
+    /* FPU on, interrupts on, and STAY IN MACHINE MODE (see MSTATUS_MPP_M in
+     * ch32h4_csr.h for why WCH's 0x6088 here would leave the board silent). */
+    li t0, MSTATUS_RUN
     csrw mstatus, t0
 
     /* Mode 3: vectored, absolute addresses in the table. */
     la t0, _vector_base_v3f
-    ori t0, t0, 3
+    ori t0, t0, MTVEC_MODE_VECT
     csrw mtvec, t0
 
     la t0, ch32h4_v3f_main
@@ -153,6 +193,19 @@ _load_base_v3f:
     li  s3, 0x8
     and s2, s2, s3
     beqz s2, 1b
+
+    /* This core's own vector table, into shared SRAM. It has to land before
+       mtvec is programmed, which happens right after this routine returns. */
+    la a0, _v3f_vector_lma
+    la a1, _v3f_vector_start
+    la a2, _v3f_vector_end
+    bgeu a1, a2, 3f
+1:  lw t0, (a0)
+    sw t0, (a1)
+    addi a0, a0, 4
+    addi a1, a1, 4
+    bltu a1, a2, 1b
+3:
 
     /* The V5F's vector table, into ITCM. It must be in RAM before that core
        takes its first interrupt -- see the comment in the linker script. */

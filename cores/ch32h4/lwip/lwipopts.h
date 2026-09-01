@@ -8,6 +8,8 @@
  */
 #pragma once
 
+#include <stdint.h>
+
 #define NO_SYS                      1
 #define LWIP_TIMERS                 1
 #define SYS_LIGHTWEIGHT_PROT        0
@@ -89,6 +91,7 @@ extern "C" {
 #endif
 void ch32h4_lwip_assert_core_locked(void);
 unsigned long ch32h4_lwip_now_ms(void);
+uint32_t ch32h4_lwip_rand(void);
 #ifdef __cplusplus
 }
 #endif
@@ -96,3 +99,10 @@ unsigned long ch32h4_lwip_now_ms(void);
 
 /* lwIP's timers need a millisecond clock. */
 #define sys_now  ch32h4_lwip_now_ms
+
+/* DNS transaction IDs and ephemeral ports need a source of randomness. Not
+ * decorative: an off-path attacker who guesses the ID and source port can
+ * answer a query before the real server. The bar is "not a counter", so this
+ * is a xorshift32 seeded from the timebase -- NOT the hardware RNG, which is
+ * the mbedTLS entropy source and must not be a hard dependency of DNS. */
+#define LWIP_RAND()  ch32h4_lwip_rand()

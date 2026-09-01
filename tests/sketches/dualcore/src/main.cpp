@@ -73,6 +73,21 @@ static void handle(const String &cmd) {
     Serial1.print("fifo_pushed_before_full=");
     Serial1.println(pushed);
 
+  } else if (cmd == "hsemraw") {
+    /* What the read-to-lock register actually returns, step by step. */
+    HSEM_ReleaseOneSem((HSEM_ID_TypeDef)6, 0);
+    uint32_t r1 = HSEM->RLRX[6];   /* take from free */
+    uint32_t r2 = HSEM->RLRX[6];   /* take when already ours */
+    uint32_t rx = HSEM->RX[6];
+    HSEM_ReleaseOneSem((HSEM_ID_TypeDef)6, 0);
+    uint32_t r3 = HSEM->RLRX[6];   /* take from free again */
+    HSEM_ReleaseOneSem((HSEM_ID_TypeDef)6, 0);
+    Serial1.print("coreid="); Serial1.println(NVIC_GetCurrentCoreID());
+    Serial1.print("r1=0x"); Serial1.println(r1, HEX);
+    Serial1.print("r2=0x"); Serial1.println(r2, HEX);
+    Serial1.print("rx=0x"); Serial1.println(rx, HEX);
+    Serial1.print("r3=0x"); Serial1.println(r3, HEX);
+
   } else if (cmd == "mutextest") {
     /* Hardware semaphore: taking it twice from the same core must still be
        exclusive -- HSEM records the owner, so a second FastTake fails. */

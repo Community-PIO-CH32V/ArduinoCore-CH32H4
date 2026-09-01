@@ -5,6 +5,7 @@
  */
 #include "ch32h4_clock.h"
 #include "ch32h4_console.h"
+#include "ch32h4_fault.h"
 #include "ch32h4_xcore.h"
 #include "ch32h417.h"
 
@@ -40,13 +41,178 @@ static void vio18_init(void) {
     PWR->CTLR = ctlr;
 }
 
+/* Print why the part reset. A lockup (a fault inside the fault handler) and an
+ * independent-watchdog timeout both present as a clean reboot with no "TRAP"
+ * line, and nothing downstream can tell the two apart -- so they are decoded
+ * here, at the first moment the console can speak. */
+CH32H4_V3F_TEXT
+static void print_reset_cause(uint32_t rst) {
+    uint32_t flags = rst & 0xFC000000u;   /* RSTSCKR[31:26] */
+    ch32h4_console_puts("rst=");
+    ch32h4_console_puthex(flags);
+    if (flags & RCC_LOCKUPRSTF) ch32h4_console_puts(" lockup");
+    if (flags & RCC_WWDGRSTF)   ch32h4_console_puts(" wwdg");
+    if (flags & RCC_IWDGRSTF)   ch32h4_console_puts(" iwdg");
+    if (flags & RCC_SFTRSTF)    ch32h4_console_puts(" soft");
+    if (flags & RCC_PORRSTF)    ch32h4_console_puts(" por");
+    if (flags & RCC_PINRSTF)    ch32h4_console_puts(" pin");
+    if (flags == 0)             ch32h4_console_puts(" none");
+    ch32h4_console_puts("\n");
+    RCC->RSTSCKR |= RCC_RMVF;          /* arm for the next reset */
+}
+
 CH32H4_V3F_TEXT
 void ch32h4_v3f_main(void) {
+    /* Read the reset cause before anything (SystemInit, drivers) can disturb
+     * the latch. */
+    uint32_t reset_cause = RCC->RSTSCKR;
+
     vio18_init();
     ch32h4_clock_init();
     ch32h4_console_init(115200);
 
     ch32h4_console_puts("\nCH32H4 Arduino core\n");
+    print_reset_cause(reset_cause);
+
+    /* Everything below reads .xcore, which is NOLOAD. On a cold power-up it
+     * holds whatever the SRAM came up with, and printing that gives a boot
+     * report of eight-digit nonsense indistinguishable from a real crash --
+     * which is how a power-cycle comes to look like a firmware bug. The magic
+     * word says the region has been through here at least once. */
+    if (ch32h4_trace_magic != CH32H4_TRACE_MAGIC) {
+        ch32h4_trace_magic           = CH32H4_TRACE_MAGIC;
+        ch32h4_fault_log.magic       = 0;
+        ch32h4_fault_log.boot_faults = 0;
+        ch32h4_fault_log_v3f.magic   = 0;
+        ch32h4_irq_eth_count     = 0;
+        ch32h4_irq_systick_count = 0;
+        ch32h4_irq_usbfs_count   = 0;
+        ch32h4_irq_usart1_count  = 0;
+        ch32h4_irq_max_nesting   = 0;
+        ch32h4_irq_nesting       = 0;
+        ch32h4_eth_last_frame    = 0;
+        ch32h4_eth_last_tx       = 0;
+        ch32h4_eth_phase         = 0;
+    }
+
+    /* A magic word cannot police this region on its own. .xcore is NOLOAD and
+     * survives a reflash, so a new build whose variables sit at different
+     * offsets reads the old image's bytes through the new layout and finds the
+     * magic exactly where it expects it -- which is how boot_faults came to
+     * report 577168213 crashes in a row. Everything read out of here is
+     * therefore also range-checked against what it can legitimately be. */
+    if (ch32h4_fault_log.boot_faults > CH32H4_FAULT_REBOOT_LIMIT) {
+        ch32h4_fault_log.boot_faults = 0;
+    }
+
+    /* A lockup leaves no record at all -- it is a fault taken inside the fault
+     * handler, so the handler never gets to write one. It is also the failure
+     * most likely to be reproducible on every boot, and therefore the one most
+     * likely to reset the part faster than a probe can attach. Count it from
+     * the reset cause instead. */
+    if (reset_cause & RCC_LOCKUPRSTF) {
+        ch32h4_fault_log.boot_faults++;
+    }
+
+    /* This core's own trap record, from Stray_IRQ_v3f. An interrupt with no
+     * handler used to jump to address 0 -- which is _start_v3f -- and silently
+     * re-run startup, so the console showed a clean reboot and nothing else. */
+    if (ch32h4_fault_log_v3f.magic == CH32H4_FAULT_LOG_MAGIC) {
+        ch32h4_console_puts("v3f trap: mcause=");
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.mcause);
+        ch32h4_console_puts(" mepc=");
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.mepc);
+        ch32h4_console_puts(" mtval=");
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.mtval);
+        ch32h4_console_puts(" mstatus=");
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.mstatus);
+        ch32h4_console_puts(" sp=");
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.sp);
+        ch32h4_console_puts(" ra=");
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.irq_eth);
+        ch32h4_console_puts(" stack=");
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.irq_systick);
+        ch32h4_console_putc(',');
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.irq_usbfs);
+        ch32h4_console_putc(',');
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.irq_usart1);
+        ch32h4_console_putc(',');
+        ch32h4_console_puthex(ch32h4_fault_log_v3f.irq_max_nesting);
+        ch32h4_console_puts("\n");
+        ch32h4_console_flush();
+        ch32h4_fault_log_v3f.magic = 0;
+        ch32h4_fault_log.boot_faults++;
+    }
+
+    /* If the V5F faulted last run, and the fault was bad enough that the fault
+     * handler itself faulted (a lockup), the only trace is this record. Print
+     * it now, before waking the V5F again, and clear it for next time. */
+    if (ch32h4_fault_log.magic == CH32H4_FAULT_LOG_MAGIC) {
+        ch32h4_console_puts("v5f fault: mcause=");
+        ch32h4_console_puthex(ch32h4_fault_log.mcause);
+        ch32h4_console_puts(" mepc=");
+        ch32h4_console_puthex(ch32h4_fault_log.mepc);
+        ch32h4_console_puts(" mtval=");
+        ch32h4_console_puthex(ch32h4_fault_log.mtval);
+        ch32h4_console_puts(" mstatus=");
+        ch32h4_console_puthex(ch32h4_fault_log.mstatus);
+        ch32h4_console_puts(" sp=");
+        ch32h4_console_puthex(ch32h4_fault_log.sp);
+        ch32h4_console_puts("\n");
+        ch32h4_console_puts("irq eth=");
+        ch32h4_console_putu(ch32h4_fault_log.irq_eth);
+        ch32h4_console_puts(" systick=");
+        ch32h4_console_putu(ch32h4_fault_log.irq_systick);
+        ch32h4_console_puts(" usbfs=");
+        ch32h4_console_putu(ch32h4_fault_log.irq_usbfs);
+        ch32h4_console_puts(" usart1=");
+        ch32h4_console_putu(ch32h4_fault_log.irq_usart1);
+        ch32h4_console_puts(" max_nesting=");
+        ch32h4_console_putu(ch32h4_fault_log.irq_max_nesting);
+        ch32h4_console_puts(" boot_faults=");
+        ch32h4_console_putu(ch32h4_fault_log.boot_faults + 1u);
+        ch32h4_console_puts("\n");
+        ch32h4_console_flush();
+        ch32h4_fault_log.magic = 0;
+        ch32h4_fault_log.boot_faults++;
+    }
+
+    /* The interrupt trace, from the V5F's last run. On a lockup the fault
+     * handler never runs (its own entry needs the stack that is already gone),
+     * so the counters are what say which interrupt was storming. Read them
+     * before the wake, then reset them for the coming run. Nothing is printed
+     * when the V5F never got as far as its first tick -- an all-zero line
+     * every boot is noise that trains you to skip the one that matters. */
+    if (ch32h4_irq_systick_count != 0) {
+        ch32h4_console_puts("irq eth=");
+        ch32h4_console_putu(ch32h4_irq_eth_count);
+        ch32h4_console_puts(" systick=");
+        ch32h4_console_putu(ch32h4_irq_systick_count);
+        ch32h4_console_puts(" usbfs=");
+        ch32h4_console_putu(ch32h4_irq_usbfs_count);
+        ch32h4_console_puts(" usart1=");
+        ch32h4_console_putu(ch32h4_irq_usart1_count);
+        ch32h4_console_puts(" max_nesting=");
+        ch32h4_console_putu(ch32h4_irq_max_nesting);
+        ch32h4_console_puts("\n");
+        ch32h4_console_puts("last_frame=");
+        ch32h4_console_puthex(ch32h4_eth_last_frame);
+        ch32h4_console_puts(" last_tx=");
+        ch32h4_console_putu(ch32h4_eth_last_tx);
+        ch32h4_console_puts(" phase=");
+        ch32h4_console_putu(ch32h4_eth_phase);
+        ch32h4_console_puts("\n");
+    }
+
+    ch32h4_irq_eth_count     = 0;
+    ch32h4_irq_systick_count = 0;
+    ch32h4_irq_usbfs_count   = 0;
+    ch32h4_irq_usart1_count  = 0;
+    ch32h4_irq_max_nesting   = 0;
+    ch32h4_irq_nesting       = 0;
+    ch32h4_eth_last_frame    = 0;
+    ch32h4_eth_last_tx       = 0;
+    ch32h4_eth_phase         = 0;
 
     /* Say which reference we got, loudly. On the internal RC the board runs
      * and looks healthy, but the Ethernet PLL never locks and USB is out of
@@ -79,6 +245,32 @@ void ch32h4_v3f_main(void) {
     }
 
     ch32h4_console_puts("boot ok\n");
+
+    /* Stop relaunching a core that faults on every boot.
+     *
+     * The fault handler resets rather than spinning, because a core
+     * spinning with interrupts off wedges the WCH-Link with a 0x55
+     * protocol error that only NRST-held-through-an-erase clears. But a
+     * fault that reproduces every time then resets several times a second,
+     * and a part in that state is exactly as unreachable -- the probe never
+     * gets a window in which to attach.
+     *
+     * So after CH32H4_FAULT_REBOOT_LIMIT of them this core keeps the
+     * console and leaves the V5F asleep. The board stays talkable and
+     * reflashable, and the record above says what went wrong. The V5F
+     * clears the count itself once it reaches runtime-ready. */
+    if (ch32h4_fault_log.boot_faults >= CH32H4_FAULT_REBOOT_LIMIT) {
+        ch32h4_console_puts("V3F: the V5F has faulted ");
+        ch32h4_console_putu(ch32h4_fault_log.boot_faults);
+        ch32h4_console_puts(" boots running. NOT waking it.\n");
+        ch32h4_console_puts("V3F: reflash, or reset twice to try again.\n");
+        ch32h4_console_flush();
+        /* Two resets clears it: this store lands before the next boot
+         * reads it, so a plain reset here is the escape hatch. */
+        ch32h4_fault_log.boot_faults = 0;
+        for (;;) {
+        }
+    }
 
     /* XCORE_RAM is NOLOAD, so nothing has initialised it. Clear the ready
      * flag and both FIFO rings before the wake -- this is the only moment at
