@@ -83,7 +83,12 @@ def build(sketch: str):
                      + r.stdout[-4000:] + r.stderr[-4000:])
 
 
+_flash_count = 0
+
+
 def flash(sketch: str):
+    global _flash_count
+    _flash_count += 1
     exe = _find_wlink()
     if exe is None:
         tool_failure("wlink not found. Set $WLINK, or drop wlink.exe 0.1.2 in "
@@ -211,7 +216,18 @@ class Board:
     def command(self, line: str, timeout: float = 3.0) -> str:
         self._ensure()
         ser = _serial()
+
+        # Drain, wait, drain again. reset_input_buffer() only discards
+        # what has already arrived, and the trailing space of the
+        # previous prompt is often still in flight -- it then lands at
+        # the head of the first reply line, and a parser doing
+        # startswith("millis=") silently finds nothing. That produced a
+        # flake roughly one run in three, in whichever test happened to
+        # run first after a reflash.
         ser.reset_input_buffer()
+        time.sleep(0.02)
+        ser.reset_input_buffer()
+
         ser.write((line + "\n").encode())
         ser.flush()
         deadline = time.time() + timeout
@@ -265,6 +281,62 @@ def _sync(sketch: str) -> str:
     return banner
 
 
+BOARD_FIXTURES = ("board", "sd_board", "ethernet_board", "dualcore_board")
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Report how many times the board was reprogrammed.
+
+    Four sketches means four flashes if the grouping above is working, and a
+    dozen if it silently stops working -- which costs minutes and wears the
+    part, while every test still passes. Nothing else would notice.
+    """
+    if _flash_count:
+        terminalreporter.write_line(
+            f"board reprogrammed {_flash_count} time(s)")
+
+
+def pytest_collection_modifyitems(items):
+    """Group tests by which sketch they need, so each is flashed once.
+
+    pytest collects files alphabetically, which interleaves the four sketches
+    -- coretest, dualcore, coretest, ethernet, coretest, sdtest, coretest --
+    and every switch is an erase, a flash and a reset. That is around a dozen
+    reflashes for a suite that needs four, it takes minutes, and it puts wear
+    on the part for nothing.
+
+    The order within a group is left exactly as collected; only the groups are
+    gathered. `board` goes first because most tests want it, so the common case
+    of running a subset never pays for a switch at all.
+    """
+    order = {name: i for i, name in enumerate(BOARD_FIXTURES)}
+
+    def key(item):
+        for name in BOARD_FIXTURES:
+            if name in getattr(item, "fixturenames", ()):
+                return order[name]
+        return len(order)          # needs no board: leave it at the end
+
+    items.sort(key=key)
+
+
+@pytest.fixture(autouse=True)
+def _firmware_in_place(request):
+    """Re-flash, if another fixture displaced this test's sketch, BEFORE the
+    test body starts.
+
+    Board.command() would do it lazily anyway, but then the flash lands in the
+    middle of whatever the test is doing -- and test_millis_matches_the_host_clock
+    measures the board against the host's wall clock, so a ten-second reflash
+    between its two readings made the board look like it had lost 9 seconds.
+    Doing it here keeps every board-switching cost outside the measurement.
+    """
+    for name in BOARD_FIXTURES:
+        if name in request.fixturenames:
+            request.getfixturevalue(name)._ensure()
+            break
+
+
 @pytest.fixture(scope="session")
 def board():
     """The general-purpose test sketch. Almost every test wants this one."""
@@ -284,6 +356,19 @@ def ethernet_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("ethernet")
+
+
+@pytest.fixture(scope="session")
+def sd_board():
+    """The SD block-layer sketch.
+
+    Needs a card wired to the SDMMC default mapping: CK on PC12, CMD on PD2,
+    D0 on PC8. Its tests skip rather than fail without one -- an unwired bench
+    is a missing precondition, not a broken driver.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("sdtest")
 
 
 @pytest.fixture(scope="session")

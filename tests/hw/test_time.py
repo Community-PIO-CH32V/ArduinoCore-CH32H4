@@ -3,6 +3,7 @@ import time
 
 def _num(out, key):
     for line in out.splitlines():
+        line = line.strip()          # a prompt fragment can precede the reply
         if line.startswith(key + "="):
             return int(line.split("=", 1)[1].strip())
     raise AssertionError(f"{key} not in {out!r}")

@@ -326,6 +326,18 @@ SECTIONS
         _eethram = .;
     } >ETH_RAM
 
+    /* The SDMMC controller's own DMA reaches the shared region and not DTCM,
+       the same limit the USB and Ethernet masters have. Its bounce buffers
+       have to be 16-byte aligned, so the section is too. */
+    .sdram (NOLOAD) : {
+        . = ALIGN(16);
+        _ssdram = .;
+        *(.sdram)
+        *(.sdram.*)
+        . = ALIGN(16);
+        _esdram = .;
+    } >SD_RAM
+
     /* ---- Cross-core state ----------------------------------------------- */
 
     /* The shared region is the only memory both cores reach at speed, and the
