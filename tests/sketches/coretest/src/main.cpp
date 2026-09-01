@@ -12,6 +12,9 @@
  * that was reporting a loose wire.
  */
 #include <Arduino.h>
+extern "C" {
+#include "ch32h4_rng.h"
+}
 
 /* The test protocol deliberately runs on Serial1 -- USART1, into the
  * WCH-Link's VCP -- and NOT on `Serial`.
@@ -258,6 +261,43 @@ static void handleCommand(const String &cmd) {
     Serial.println("hello-from-usb");
     Serial.flush();
     Serial1.println("usb_wrote=1");
+
+  } else if (cmd == "rngtest") {
+    /* Distinct values in N draws, raw against whitened. A uniform 32-bit
+       source gives essentially N distinct in both columns; the raw source
+       does not, which is the whole reason the whitening exists. */
+    const int N = 600;
+    static uint32_t seen[600];
+    int rawDistinct = 0, mixDistinct = 0;
+
+    for (int i = 0; i < N; i++) {
+      uint32_t v = ch32h4_rng_raw_unsafe();
+      bool dup = false;
+      for (int j = 0; j < rawDistinct; j++) if (seen[j] == v) { dup = true; break; }
+      if (!dup) seen[rawDistinct++] = v;
+    }
+    for (int i = 0; i < N; i++) {
+      uint32_t v = ch32h4_rng_u32();
+      bool dup = false;
+      for (int j = 0; j < mixDistinct; j++) if (seen[j] == v) { dup = true; break; }
+      if (!dup) seen[mixDistinct++] = v;
+    }
+    Serial1.print("rng_ok="); Serial1.println(ch32h4_rng_ok() ? 1 : 0);
+    Serial1.print("rng_n="); Serial1.println(N);
+    Serial1.print("rng_raw_distinct="); Serial1.println(rawDistinct);
+    Serial1.print("rng_mixed_distinct="); Serial1.println(mixDistinct);
+
+  } else if (cmd == "rngbytes") {
+    /* A byte-level sanity check: every value should appear, roughly evenly.
+       An all-zero or constant buffer is what a dead peripheral produces. */
+    uint8_t buf[1024];
+    ch32h4_rng_bytes(buf, sizeof(buf));
+    int hist[16] = {0};
+    for (unsigned i = 0; i < sizeof(buf); i++) hist[buf[i] >> 4]++;
+    int lo = hist[0], hi = hist[0];
+    for (int i = 1; i < 16; i++) { if (hist[i] < lo) lo = hist[i]; if (hist[i] > hi) hi = hist[i]; }
+    Serial1.print("rng_nibble_min="); Serial1.println(lo);
+    Serial1.print("rng_nibble_max="); Serial1.println(hi);
 
   } else if (cmd == "heapinfo") {
     Serial1.print("heap_free=");
