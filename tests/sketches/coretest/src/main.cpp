@@ -14,6 +14,7 @@
 #include <Arduino.h>
 extern "C" {
 #include "ch32h4_rng.h"
+#include "ch32h4_rtc.h"
 }
 
 /* The test protocol deliberately runs on Serial1 -- USART1, into the
@@ -261,6 +262,43 @@ static void handleCommand(const String &cmd) {
     Serial.println("hello-from-usb");
     Serial.flush();
     Serial1.println("usb_wrote=1");
+
+  } else if (cmd.startsWith("rtcstart")) {
+    /* rtcstart [lse|lsi|hse] -- default LSE, which is the crystal on this
+       board. Selecting a DIFFERENT source than the one already running resets
+       the backup domain and so restarts the clock from its epoch. */
+    ch32h4_rtc_src_t src = CH32H4_RTC_SRC_LSE;
+    if (cmd.indexOf("lsi") > 0) src = CH32H4_RTC_SRC_LSI;
+    else if (cmd.indexOf("hse") > 0) src = CH32H4_RTC_SRC_HSE;
+    bool ok = ch32h4_rtc_begin(src);
+    Serial1.print("rtc_begin="); Serial1.println(ok ? 1 : 0);
+    Serial1.print("rtc_source="); Serial1.println((int)ch32h4_rtc_source());
+    Serial1.print("rtc_hz="); Serial1.println(ch32h4_rtc_hz());
+    Serial1.print("rtc_is_set="); Serial1.println(ch32h4_rtc_is_set() ? 1 : 0);
+
+  } else if (cmd.startsWith("rtcset ")) {
+    time_t t = (time_t)strtoul(cmd.substring(7).c_str(), nullptr, 10);
+    struct timeval tv = { t, 0 };
+    Serial1.print("rtc_set="); Serial1.println(settimeofday(&tv, nullptr) == 0 ? 1 : 0);
+    Serial1.print("rtc_is_set="); Serial1.println(ch32h4_rtc_is_set() ? 1 : 0);
+
+  } else if (cmd == "rtcget") {
+    /* Through the C library, not the driver: that is the integration that
+       matters, since FatFs and mbedtls both go through time(). */
+    struct timeval tv = {};
+    int rc = gettimeofday(&tv, nullptr);
+    Serial1.print("rtc_gettimeofday_rc="); Serial1.println(rc);
+    Serial1.print("rtc_unix="); Serial1.println((uint32_t)tv.tv_sec);
+    Serial1.print("rtc_usec="); Serial1.println((uint32_t)tv.tv_usec);
+    Serial1.print("rtc_time_t="); Serial1.println((uint32_t)time(nullptr));
+    struct tm tmv;
+    time_t now = tv.tv_sec;
+    if (gmtime_r(&now, &tmv)) {
+      char buf[32];
+      strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tmv);
+      Serial1.print("rtc_iso="); Serial1.println(buf);
+    }
+    Serial1.print("rtc_ticks="); Serial1.println(ch32h4_rtc_ticks());
 
   } else if (cmd == "rngtest") {
     /* Distinct values in N draws, raw against whitened. A uniform 32-bit

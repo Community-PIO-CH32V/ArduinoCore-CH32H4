@@ -9,6 +9,7 @@
 #include <SD.h>
 #include <SDFS.h>
 extern "C" {
+#include "ch32h4_rtc.h"
 #include "ch32h4_sdmmc.h"
 }
 
@@ -252,6 +253,39 @@ static void handle(char *cmd) {
   } else if (!strcmp(cmd, "sdrawend")) {
     ch32h4_sd_end();
     Serial1.print("sd_ready="); Serial1.println(ch32h4_sd_ready() ? 1 : 0);
+
+  } else if (!strncmp(cmd, "fstime ", 7)) {
+    /* Start the RTC, set it from the host, write a file, and report the
+       timestamp the directory entry actually got. This is the whole point of
+       having an RTC: FatFs stamps through get_fattime(), which goes through
+       time(), which goes through the clock. */
+    time_t t = (time_t)strtoul(cmd + 7, nullptr, 10);
+    Serial1.print("rtc_begin=");
+    Serial1.println(ch32h4_rtc_begin(CH32H4_RTC_SRC_LSE) ? 1 : 0);
+    struct timeval tv = { t, 0 };
+    Serial1.print("rtc_set="); Serial1.println(settimeofday(&tv, nullptr) == 0 ? 1 : 0);
+    Serial1.print("rtc_is_set="); Serial1.println(ch32h4_rtc_is_set() ? 1 : 0);
+
+    const char *path = "/ts.txt";
+    SDFS.remove(path);
+    File f = SDFS.open(path, "w");
+    if (!f) { Serial1.println("fs_time=open_failed"); Serial1.print("> "); return; }
+    f.print("stamp");
+    f.close();
+
+    Dir dir = SDFS.openDir("/");
+    while (dir.next()) {
+      if (dir.fileName() == "ts.txt") {
+        time_t ft = dir.fileTime();
+        Serial1.print("fs_file_time="); Serial1.println((uint32_t)ft);
+        struct tm tmv;
+        if (gmtime_r(&ft, &tmv)) {
+          char buf[32];
+          strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tmv);
+          Serial1.print("fs_file_iso="); Serial1.println(buf);
+        }
+      }
+    }
 
   } else if (!strcmp(cmd, "fsheap")) {
     Serial1.print("heap_free="); Serial1.println((uint32_t)ch32h4_heap_free());

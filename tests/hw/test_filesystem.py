@@ -7,6 +7,8 @@ particular means *append* in the classic library, and a shim that maps it to
 
 Needs a card on the SDMMC default mapping: CK PC12, CMD PD2, D0 PC8.
 """
+import time
+
 import pytest
 
 
@@ -136,3 +138,25 @@ def test_the_filesystem_did_not_leak(fsb):
     after = free()
     assert before - after < 2048, (
         f"{before - after} bytes went missing over 8 file round trips")
+
+
+def test_file_timestamps_come_from_the_rtc(fsb):
+    """A file written after the clock is set carries the real date.
+
+    FatFs stamps directory entries through get_fattime(), which goes through
+    time(), which goes through the RTC -- and none of those three knows about
+    the others. Without the clock every file on the card gets the same
+    hard-coded date, which looks fine in a listing and makes "newest file"
+    meaningless.
+    """
+    now = int(time.time())
+    d = _kv(fsb["b"].command(f"fstime {now}", timeout=30.0))
+    assert d["rtc_begin"] == "1", ("the LSE would not start", d)
+    assert d["rtc_is_set"] == "1", d
+
+    stamped = int(d["fs_file_time"])
+    # FAT stores seconds in two-second units, so the stamp can be one second
+    # behind. Anything more means it did not come from the clock.
+    assert 0 <= now - stamped <= 3, (
+        f"file stamped {stamped} ({d.get('fs_file_iso')}) for a write at "
+        f"{now}", d)
