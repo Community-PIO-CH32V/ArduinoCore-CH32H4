@@ -80,3 +80,16 @@ private:
 };
 
 extern LwipEthernetClass Ethernet;
+
+/* Including this header is all a sketch should have to do. The Arduino
+ * Ethernet library has always been one include for the interface, the client,
+ * the server and UDP, and a sketch ported from it must not have to learn that
+ * this core split them into four files. */
+#include "EthernetClient.h"
+#include "EthernetServer.h"
+#include "EthernetUdp.h"
+
+/* The names the Arduino Ethernet library uses. EthernetUDP is already spelled
+ * that way; this is here so `EthernetUdp` compiles too, which some sketches
+ * and a good deal of documentation use. */
+using EthernetUdp = EthernetUDP;

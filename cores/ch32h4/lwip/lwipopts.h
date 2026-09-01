@@ -32,6 +32,12 @@
 #define LWIP_DNS                    1
 #define LWIP_IGMP                   1
 
+/* SO_REUSEADDR. A server that restarts must be able to re-bind its port while
+ * the previous incarnation's connections are still in TIME_WAIT -- without
+ * this, re-running a sketch fails to bind for a couple of minutes and looks
+ * like a broken server rather than a working TCP stack. */
+#define SO_REUSE                    1
+
 /* Memory.
  *
  * These come out of the heap, which is ~700 KB here, so lwIP is not the thing

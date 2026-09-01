@@ -250,7 +250,12 @@ def _sync(sketch: str) -> str:
     # Wait for the sketch's prompt before handing the board over. Without this
     # the first command() answers with whatever tail of the banner was still
     # arriving, which looks like the board ignoring the command.
-    deadline = time.time() + 3.0
+    #
+    # Generous, because setup() is allowed to take its time: the Ethernet
+    # sketch waits up to fifteen seconds for a DHCP lease before it prints
+    # anything. This returns as soon as the prompt arrives, so a fast sketch
+    # pays nothing for the allowance.
+    deadline = time.time() + 20.0
     while time.time() < deadline:
         chunk = ser.read(ser.in_waiting or 1)
         if chunk:
@@ -266,6 +271,19 @@ def board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("coretest")
+
+
+@pytest.fixture(scope="session")
+def ethernet_board():
+    """The sketch with the TCP server, the TCP client and the UDP socket.
+
+    A third image, and worth it for the same reason as the second: none of the
+    Client/Server/UDP code can be exercised without a peer, and a loopback test
+    would prove the API compiles rather than that a frame reached the wire.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("ethernet")
 
 
 @pytest.fixture(scope="session")
