@@ -30,8 +30,11 @@ except ImportError:  # pragma: no cover
     serial = None
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SKETCH = ROOT / "tests" / "sketches" / "coretest"
-BUILD = SKETCH / ".pio" / "build" / "ch32h417"
+SKETCHES = ROOT / "tests" / "sketches"
+
+# Which sketch is on the chip right now. One image at a time, so a fixture for
+# a different sketch has to put its own back -- see Board._ensure().
+_flashed = None
 
 PORT = os.environ.get("CH32_PORT", "COM7")
 
@@ -72,15 +75,15 @@ def tool_failure(message: str):
     raise SystemExit(EXIT_TOOL_FAILURE)
 
 
-def build():
-    r = subprocess.run(["pio", "run", "-d", str(SKETCH)],
+def build(sketch: str):
+    r = subprocess.run(["pio", "run", "-d", str(SKETCHES / sketch)],
                        capture_output=True, text=True)
     if r.returncode != 0:
-        tool_failure("the test sketch does not build:\n"
+        tool_failure(f"the {sketch} sketch does not build:\n"
                      + r.stdout[-4000:] + r.stderr[-4000:])
 
 
-def flash():
+def flash(sketch: str):
     exe = _find_wlink()
     if exe is None:
         tool_failure("wlink not found. Set $WLINK, or drop wlink.exe 0.1.2 in "
@@ -94,7 +97,7 @@ def flash():
                      "0.1.2 x64 build fails with a driver error on Windows. "
                      "Use the x86 build.")
 
-    binary = BUILD / "firmware.bin"
+    binary = SKETCHES / sketch / ".pio" / "build" / "ch32h417" / "firmware.bin"
     if not binary.is_file():
         tool_failure(f"no {binary} -- did the build run?")
 
@@ -112,6 +115,22 @@ def flash():
                          "power-cycle the board.\n" + out[-2000:])
         if args[0] == "flash" and "Flash done" not in out:
             tool_failure("wlink did not report success:\n" + out[-2000:])
+
+
+_ser = None
+
+
+def _serial():
+    """One handle, opened once. Two fixtures sharing the port cannot each hold
+    their own -- the second open fails, and on Windows it fails with a message
+    about the port being in use that reads like the probe having gone away."""
+    global _ser
+    if _ser is None:
+        try:
+            _ser = serial.Serial(PORT, BAUD, timeout=0.2)
+        except Exception as exc:
+            tool_failure(f"cannot open {PORT}: {exc}. Override with $CH32_PORT.")
+    return _ser
 
 
 def reset():
@@ -132,36 +151,73 @@ def reset():
 
 
 class Board:
-    def __init__(self, banner: str, ser):
-        self.banner = banner
-        self.ser = ser
+    """A board running one particular sketch.
 
-    def reboot(self, timeout: float = 5.0):
-        """Reset and wait for the prompt again.
+    More than one sketch is under test, and the chip holds one image at a time,
+    so a Board is bound to its sketch and re-flashes on demand. Every call
+    checks first: if the other fixture used the board in between, this one puts
+    its own firmware back before doing anything. That keeps the tests
+    order-independent, which matters because pytest is free to run them in any
+    order and `-k` routinely does.
+    """
 
-        For tests that deliberately halt the board -- the fault handler stops
-        the world, by design -- so the ones after them still have a board to
-        talk to."""
-        self.ser.reset_input_buffer()
+    def __init__(self, sketch: str):
+        self.sketch = sketch
+        self._banner = ""
+
+    @property
+    def banner(self) -> str:
+        self._ensure()
+        return self._banner
+
+    @property
+    def ser(self):
+        self._ensure()
+        return _serial()
+
+    def _ensure(self):
+        """Put this board's firmware back if something else displaced it."""
+        global _flashed
+        if _flashed == self.sketch:
+            return
+        build(self.sketch)
+        flash(self.sketch)
+        self._banner = _sync(self.sketch)
+        _flashed = self.sketch
+
+    def reboot(self, timeout: float = 5.0) -> str:
+        """Reset, wait for the prompt again, and return the whole boot report.
+
+        For tests that deliberately crash the board -- the fault handler resets
+        by design -- so the ones after them still have a board to talk to. The
+        text is returned rather than discarded because the boot report is where
+        the V3F prints the reset cause and replays any fault record, and that
+        is the only evidence a test has that the previous run ended cleanly."""
+        self._ensure()
+        ser = _serial()
+        ser.reset_input_buffer()
         reset()
         deadline = time.time() + timeout
         seen = ""
         while time.time() < deadline:
-            chunk = self.ser.read(self.ser.in_waiting or 1)
+            chunk = ser.read(ser.in_waiting or 1)
             if chunk:
                 seen += chunk.decode(errors="replace")
             if seen.rstrip().endswith(">"):
-                return
+                self._banner = seen
+                return seen
         raise AssertionError(f"board did not come back after reset: {seen!r}")
 
     def command(self, line: str, timeout: float = 3.0) -> str:
-        self.ser.reset_input_buffer()
-        self.ser.write((line + "\n").encode())
-        self.ser.flush()
+        self._ensure()
+        ser = _serial()
+        ser.reset_input_buffer()
+        ser.write((line + "\n").encode())
+        ser.flush()
         deadline = time.time() + timeout
         out = ""
         while time.time() < deadline:
-            chunk = self.ser.read(self.ser.in_waiting or 1)
+            chunk = ser.read(ser.in_waiting or 1)
             if chunk:
                 out += chunk.decode(errors="replace")
                 if out.rstrip().endswith(">"):
@@ -169,20 +225,9 @@ class Board:
         return out
 
 
-@pytest.fixture(scope="session")
-def board():
-    if serial is None:
-        pytest.skip("pyserial is not installed")
-
-    build()
-    flash()
-
-    try:
-        ser = serial.Serial(PORT, BAUD, timeout=0.2)
-    except Exception as exc:
-        tool_failure(f"cannot open {PORT}: {exc}. Override with $CH32_PORT.")
-
-    # Now that someone is listening, reset again and catch the banner whole.
+def _sync(sketch: str) -> str:
+    """Reset with the port open, and return everything up to the prompt."""
+    ser = _serial()
     time.sleep(0.2)
     ser.reset_input_buffer()
     reset()
@@ -197,14 +242,14 @@ def board():
             break
     else:
         pytest.exit(
-            f"the board did not reach {BOOT_SENTINEL!r} within 5 s. Ending the "
-            "session rather than letting every test wait out its own timeout.\n"
-            f"--- what it did say ---\n{banner!r}",
+            f"{sketch}: the board did not reach {BOOT_SENTINEL!r} within 5 s. "
+            "Ending the session rather than letting every test wait out its "
+            f"own timeout.\n--- what it did say ---\n{banner!r}",
             returncode=1)
 
-    # Wait for the sketch's prompt before handing the board over. Without
-    # this the first command() answers with whatever tail of the banner was
-    # still arriving, which looks like the board ignoring the command.
+    # Wait for the sketch's prompt before handing the board over. Without this
+    # the first command() answers with whatever tail of the banner was still
+    # arriving, which looks like the board ignoring the command.
     deadline = time.time() + 3.0
     while time.time() < deadline:
         chunk = ser.read(ser.in_waiting or 1)
@@ -212,5 +257,26 @@ def board():
             banner += chunk.decode(errors="replace")
         if banner.rstrip().endswith(">"):
             break
+    return banner
 
-    return Board(banner, ser)
+
+@pytest.fixture(scope="session")
+def board():
+    """The general-purpose test sketch. Almost every test wants this one."""
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("coretest")
+
+
+@pytest.fixture(scope="session")
+def dualcore_board():
+    """The sketch that runs setup1()/loop1() on the V3F.
+
+    Separate from `board` because it is a different image, and worth the extra
+    flash: everything it covers -- the second core running at all, the FIFO,
+    the hardware semaphores -- was built blind and stayed broken for a long
+    time precisely because nothing here exercised it.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("dualcore")
