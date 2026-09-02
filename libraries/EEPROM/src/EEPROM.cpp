@@ -150,36 +150,55 @@ bool EEPROMClass::commit() {
     h.size = _size;
     h.check = checksum(_mirror, _size, serial);
 
-    FLASH_Unlock();
-
-    if (FLASH_ErasePage(addr) != FLASH_COMPLETE) {
-        FLASH_Lock();
+    if (!ch32h4_flash_erase(addr, CH32H4_EEPROM_PAGE_SIZE)) {
         return false;
     }
 
-    /* Header first, then payload. If the power goes between them the page
-     * fails its checksum and is ignored, which leaves the other page live --
-     * the old contents, not a corrupt mixture. */
-    const uint32_t *hw = (const uint32_t *)&h;
-    for (size_t i = 0; i < sizeof(EEPROMHeader) / 4; i++) {
-        if (FLASH_ProgramWord(addr + i * 4, hw[i]) != FLASH_COMPLETE) {
-            FLASH_Lock();
+    /* Programmed a PAGE at a time, not a word.
+     *
+     * This used to use FLASH_ProgramWord() and it did not work. The SDK's
+     * word programming leaves the first word of a run correct and the rest
+     * wrong on this silicon -- commit() returned true and the data did not
+     * survive, which nothing here noticed because the EEPROM had no hardware
+     * test at all. ch32h4_flash_write() uses the fast page program, which is
+     * the path that works; see ch32h4_flash.c for the two things about it
+     * that are not optional.
+     *
+     * The unit is 256 bytes, so the header shares its page with the first
+     * 240 bytes of payload and cannot be committed separately.
+     *
+     * ORDER STILL MATTERS, and it is now the reverse of what it was. Every
+     * page EXCEPT the first goes down first, and the page carrying the header
+     * goes last. A power cut therefore leaves a page whose magic never
+     * arrived, which findActivePage() ignores, so the other page stays live
+     * with the old contents -- rather than a page that announces itself valid
+     * and carries a partial payload.
+     */
+    const uint32_t prog = ch32h4_flash_prog_size();
+    const uint32_t total = (uint32_t)(sizeof(EEPROMHeader) + _size);
+    const uint32_t pages = (total + prog - 1u) / prog;
+
+    /* Assembled a page at a time out of the header and the mirror, so no
+     * buffer the size of the whole EEPROM is needed. Erased flash is left
+     * where there is nothing to write. */
+    uint8_t buf[256];
+    for (uint32_t page = pages; page-- > 0; ) {
+        const uint32_t off = page * prog;
+        memset(buf, 0xFF, sizeof(buf));
+
+        for (uint32_t i = 0; i < prog; i++) {
+            const uint32_t pos = off + i;
+            if (pos < sizeof(EEPROMHeader)) {
+                buf[i] = ((const uint8_t *)&h)[pos];
+            } else if (pos - sizeof(EEPROMHeader) < _size) {
+                buf[i] = _mirror[pos - sizeof(EEPROMHeader)];
+            }
+        }
+
+        if (!ch32h4_flash_write(addr + off, buf, prog)) {
             return false;
         }
     }
-
-    const uint32_t payload_addr = addr + sizeof(EEPROMHeader);
-    for (size_t i = 0; i < _size; i += 4) {
-        uint32_t word = 0xFFFFFFFFu;
-        const size_t n = ((_size - i) < 4) ? (_size - i) : 4;
-        memcpy(&word, _mirror + i, n);
-        if (FLASH_ProgramWord(payload_addr + i, word) != FLASH_COMPLETE) {
-            FLASH_Lock();
-            return false;
-        }
-    }
-
-    FLASH_Lock();
 
     _active = target;
     _serial = serial;

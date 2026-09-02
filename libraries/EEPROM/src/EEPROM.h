@@ -21,16 +21,31 @@
 
 #include <Arduino.h>
 
-/* The flash tail. Must match the end of FLASH_V5F in the variant's linker
- * script: they are two statements of one boundary and nothing checks them
- * against each other at build time. */
-#define CH32H4_EEPROM_BASE       0x080EC000u
+extern "C" {
+#include "ch32h4_flash.h"
+
+/* The region comes from the LINKER now, not from a constant here.
+ *
+ * It used to be a #define of 0x080EC000, with a comment saying it had to match
+ * the end of FLASH_V5F in the variant's linker script and that nothing checked
+ * the two against each other at build time. Since LittleFS went in, the linker
+ * places the filesystem and the EEPROM, ASSERTS that the two tile the flash
+ * tail exactly, and exports the boundaries -- so there is one definition of
+ * where this lives, and a build in which anything disagrees does not link.
+ *
+ * These are absolute symbols: the ADDRESS of _EEPROM_start is the value. */
+extern uint8_t _EEPROM_start;
+extern uint8_t _EEPROM_end;
+}
+
+#define CH32H4_EEPROM_BASE       ((uint32_t)(uintptr_t)&_EEPROM_start)
 #define CH32H4_EEPROM_PAGE_SIZE  0x2000u        /* erase granularity, DBMODE=1 */
 #define CH32H4_EEPROM_PAGES      2u
 #define CH32H4_EEPROM_MAX_SIZE   (CH32H4_EEPROM_PAGE_SIZE - 16u)
 
-/* Erased flash on this part. NOT 0xFFFFFFFF. */
-#define CH32H4_FLASH_ERASED_WORD 0xE339E339u
+/* CH32H4_FLASH_ERASED_WORD -- 0xE339E339, not 0xFFFFFFFF -- now comes from
+ * ch32h4_flash.h, so the blank check here and the one in the flash driver
+ * cannot drift apart. */
 
 class EEPROMClass {
 public:
