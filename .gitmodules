@@ -22,3 +22,6 @@
 [submodule "system/lwip"]
 	path = system/lwip
 	url = https://github.com/lwip-tcpip/lwip.git
+[submodule "system/mbedtls"]
+	path = system/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git

@@ -282,7 +282,7 @@ def _sync(sketch: str) -> str:
 
 
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
-                  "dualcore_board")
+                  "tls_board", "dualcore_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -383,6 +383,19 @@ def fs_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("sdfstest")
+
+
+@pytest.fixture(scope="session")
+def tls_board():
+    """The sketch built with board_build.tls = mbedtls.
+
+    Its own image because mbedtls is about 250 KB of flash: every other sketch
+    would pay for it, and the AES and DRBG tests need it while nothing else
+    does.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("tlstest")
 
 
 @pytest.fixture(scope="session")
