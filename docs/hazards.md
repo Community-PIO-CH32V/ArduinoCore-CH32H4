@@ -548,3 +548,179 @@ then printed anyway.
 
 **Fix.** `ch32h4_mutex_try_lock()` reads `HSEM->RLRX[id]` directly and succeeds
 on zero. `HSEM_FastTake()` is not used.
+
+---
+
+## An RCC reset de-assert can be dropped, and the block stays in reset
+
+**Symptom.** `SD.begin()` works once. The second call times out, and so does
+every one after it, until the board is reset. The command trace is **empty** --
+not a failed CMD0, none at all.
+
+**Cause.** `RCC_HBPeriphResetCmd` is a read-modify-write with no read-back of
+its own, exactly like `RCC_*PeriphClockCmd`. Nothing pushes the store out, and
+the access that follows can be dropped. In `sd_controller_reset()` the write
+that is lost is the reset **de-assert**, so the block stays held in reset, the
+`CONTROL` write goes nowhere, and the controller never runs a command.
+
+The first bring-up works because the block had never been reset. Only a board
+reset clears it, because only a board reset releases the block.
+
+**How it was found.** By bisection that ruled out the whole teardown path --
+reducing `ch32h4_sd_end()` to nothing but clearing a flag still reproduced it
+-- and then by the command trace being empty, which says the command never
+reached the bus rather than the card refusing it. That trace facility was in
+the MicroPython driver behind an `#if` this port had left non-compiling; it is
+now always built, because a card that will not identify is close to
+intractable without it.
+
+**Fix.** A read-back after every RCC write in `ch32h4_sdmmc.c`. The same
+applies anywhere else a peripheral is reset or gated at run time -- the console
+and RNG drivers already read back after the clock enable, and this is the same
+hazard on the reset register.
+
+---
+
+## Cutting SDCLK while a card is programming wedges the card
+
+**Symptom.** A loop of bulk-write then re-initialise survives two rounds and
+fails on the third. After that the card ignores CMD0 as well, so every
+`begin()` times out in ACMD41 until the board is power-cycled.
+
+**Cause.** A card holds DAT0 low while it writes, and the SD specification
+requires the clock to keep running until it lets go. `ch32h4_sd_end()` stopped
+SDCLK immediately.
+
+**Fix.** Wait for DAT0 -- bounded, because a card that never releases it must
+not hang a teardown -- before stopping the clock. `begin()` also retries
+identification once from a full controller reset, since a card left mid-command
+by an earlier session can ignore the first CMD0 and answer the second.
+
+**Note.** MicroPython does not hit this because it never re-initialises within
+a session. An Arduino sketch calling `SD.begin()` twice does, and that is
+ordinary.
+
+---
+
+## The RTC counter is unsigned seconds from 2000, not a Unix timestamp
+
+**Symptom.** None until 19 January 2038.
+
+**Cause.** WCH's own RTC example stores a Unix timestamp in the 32-bit counter
+and converts it with a signed `time_t` (openwch/ch32h417 issue 11).
+
+**Fix.** The counter holds **unsigned** seconds since 2000-01-01, which runs to
+2136 and needs no offset table, no overflow interrupt and no shadow copy. The
+signedness was the whole bug; fixing that is worth more than re-basing the
+epoch to buy a few decades. Conversion to and from the Unix epoch is one
+addition, in `ch32h4_rtc.c`.
+
+---
+
+## Every backup-domain write must be read back, and BDRST is asserted at power-on
+
+**Symptom.** The RTC cannot be started at all: every write to `BDCTLR` reads
+back as zero and nothing reports an error.
+
+**Cause.** Two things conspire.
+
+The backup domain runs from a far slower clock than the 400 MHz core, and a
+write that arrives while the previous one is still crossing is dropped
+silently. WCH's own example gestures at this with a bare NOP delay inserted
+only for the non-V3F cores. A fixed delay is a guess.
+
+And this part comes out of power-on with **BDRST already asserted**, unlike
+STM32 -- so every `BDCTLR` write is dropped until it is cleared. Since
+`RCC_LSEConfig()` writes a whole byte of `BDCTLR` including the `RTCSEL` field,
+merely starting the LSE counts as writing `RTCSEL = 00` and latches it there.
+After that the clock can never be selected.
+
+**Fix.** Read back until the value is there, pulse BDRST before selecting a
+source, and start the oscillator **before** writing `RTCSEL`. Losing the second
+half of the BDRST pulse leaves the domain held in reset, which no later write
+can recover -- so that pair is read back too. Every flag wait is bounded, where
+the SDK's `RTC_WaitForLastTask` and `RTC_WaitForSynchro` spin forever if no
+oscillator is driving the domain.
+
+**Measured**, over 20 s against the host clock: LSE −0.007 s, HSE/512 +0.007 s
+(both at the measurement noise floor), and **LSI +0.655 s, or +3.3%** -- the
+internal RC runs near 41.3 kHz against a nominal 40000 divisor. That is minutes
+a day. LSI is for elapsed time, not for a clock.
+
+---
+
+## The I2S divider cannot reach common sample rates
+
+**Symptom.** `begin(8000)` returns false. So does 16000, and 22050.
+
+**Cause.** The divider is `2*I2SDIV+ODD` with `I2SDIV` at most 255, so the
+largest division is 511 -- and it divides SYSCLK, which is 400 MHz. In 16-bit
+mode a frame is 32 bus clocks, so the slowest reachable rate is
+400e6/(32*511), about **24.5 kHz**. 32-bit mode halves that to about 12.2 kHz.
+
+The I2S clock source is selectable per peripheral (`RCC_I2S2CLKSource`) but the
+alternative is the PLL, which is faster still. There is nothing to switch to.
+
+44.1 and 48 kHz are comfortable, and 44.1 lands within 1564 ppm -- about three
+cents, against the twenty-one cents the SAI's 6-bit divider could manage.
+
+**Fix.** `minimumFrequency()` and `maximumFrequency()` report the range, and
+`begin()` returns false rather than clocking a rate nobody asked for.
+
+---
+
+## A throughput measurement that counts what was queued, not what was sent
+
+**Symptom.** An I2S transmit path measured at 46208 frames per second against a
+divider set to 44169 Hz -- 4.6% out, which looks like a clocking bug.
+
+**Cause.** The measurement counted frames **written into the ring buffer**. A
+run that starts with an empty ring absorbs one bufferful -- 2048 frames -- that
+never reached the wire. Over one second that is the entire discrepancy; over
+four it converged to 44672, and subtracting the queued frames gives 44160
+against the divider's 44169.
+
+**Not a hardware bug at all**, but worth writing down: any measurement of a
+buffered path has to subtract what is still in the buffer, and the error looks
+exactly like a rate error.
+
+---
+
+## mbedTLS 3.6 cannot be configured from nothing
+
+**Symptom.** A config file written from scratch fails `check_config.h` with a
+dozen "defined, but not all prerequisites" errors, none of which names a
+prerequisite.
+
+**Cause.** 3.6 routes hashes, ciphers and key types through PSA as well as the
+legacy switches, so a module can have prerequisites in two places at once.
+
+**Fix.** Start from upstream's own `mbedtls_config.h` and put every change in
+one block at the end. Editing a working config is tractable; building one is
+not. A version bump is then a fresh copy of upstream's file plus that block.
+
+Two other things that are not optional on bare metal: `MBEDTLS_PLATFORM_MS_TIME_ALT`,
+because `platform_util.c` has implementations for POSIX and Windows and
+`#error`s on anything else; and compiling the port layer from the build script
+rather than leaving it in `libraries/`, because a sketch includes
+`mbedtls/ssl.h`, which resolves to the submodule, so the dependency finder
+never sees a reason to build the port and the link fails on
+`mbedtls_aes_init`.
+
+---
+
+## A TLS client with an unset clock rejects every certificate
+
+**Symptom.** Every HTTPS connection fails verification with flag `0x200`. The
+CA is correct, the chain is correct, and the message is "the certificate
+validity starts in the future".
+
+**Cause.** The RTC counts from 2000-01-01 and, unless something has set it,
+from the moment power was applied. Every certificate ever issued therefore
+looks not yet valid.
+
+**Fix.** Not in the TLS code -- sync the clock first, which is why the RTC and
+SNTP are part of this core. But `EthernetClientSecure::verifyErrorString()`
+appends "the RTC has not been set" when the future-validity flag is set and the
+clock is unset, because the bare message sends people to look at their CA.
+`tests/hw/test_tls.py` asserts on that sentence.
