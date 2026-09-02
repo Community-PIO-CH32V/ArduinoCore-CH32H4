@@ -57,9 +57,15 @@ def test_regions_are_where_the_spec_says():
     assert 0x200C0000 <= s["_estack_v5f"] < 0x20100000
     assert 0x200C0000 <= s["_heap_dtcm_start"] < 0x20100000
     assert s["_heap_dtcm_end"] == 0x20100000
-    # The shared region starts after the 52 KB of reserved DMA buffers.
-    assert s["_heap_shared_start"] == 0x2010D000
+    # The shared region starts after the reserved DMA buffers -- 52 KB of
+    # them -- and then after the V3F's 1 KB trap vector table, which has to
+    # live in RAM because mtvec mode 3 holds absolute addresses. The heap
+    # starting one kilobyte too low would overlap that table, and the symptom
+    # would be the second core taking a stray trap once the heap grew far
+    # enough, which is a long way from the cause.
+    assert s["_heap_shared_start"] == 0x2010D400
     assert s["_heap_shared_end"] == 0x20180000
+    assert s["_heap_shared_start"] % 1024 == 0
 
 
 def test_heap_is_at_least_600k():
