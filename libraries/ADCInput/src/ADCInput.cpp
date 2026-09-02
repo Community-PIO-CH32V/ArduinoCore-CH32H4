@@ -64,10 +64,10 @@ bool ADCInput::setPins(pin_size_t p0, pin_size_t p1, pin_size_t p2,
         if (given[i] == 0xFF) {
             continue;
         }
-        if (given[i] >= PINS_COUNT) {
-            return false;
-        }
-        const uint8_t ch = g_pins[given[i]].adc_channel;
+        /* ch32h4_adc_channel() takes ATEMP and AVREF as well as real pins,
+         * so a scan can mix the internal channels with pins -- reading the
+         * die temperature alongside a signal needs no second ADC path. */
+        const uint8_t ch = ch32h4_adc_channel(given[i]);
         if (ch == 0xFF) {
             /* A pin with no ADC input. Refusing beats sampling a channel the
              * sketch did not name and reporting it as that pin's value. */
@@ -164,11 +164,14 @@ bool ADCInput::configureADC() {
     ch32h4_clock_enable(CH32_BUS_HB2, RCC_HB2Periph_ADC1);
     ch32h4_block_reset(CH32_BUS_HB2, RCC_HB2Periph_ADC1);
 
+    bool any_internal = false;
     for (uint8_t i = 0; i < _nchannels; i++) {
-        const ch32h4_pin_t *p = &g_pins[_pins[i]];
-        /* Analog mode: no AF mux, and the mode register's analog encoding
-         * disconnects the digital input buffer. */
-        ch32h4_pin_af(p->port, p->bit, CH32H4_AF_NONE, CH32H4_CFG_IN_ANALOG);
+        /* Analog mode, for the ones that have a pad. ATEMP and AVREF do not,
+         * and ch32h4_adc_prepare_pin() knows to leave them alone. */
+        ch32h4_adc_prepare_pin(_pins[i]);
+        if (ch32h4_adc_is_internal(_pins[i])) {
+            any_internal = true;
+        }
     }
 
     ADC_InitTypeDef a = {0};
@@ -188,9 +191,25 @@ bool ADCInput::configureADC() {
          * the sample window plus the 12.5-cycle conversion has to fit inside
          * one trigger period times the channel count. The slowest setting is
          * 239.5 cycles, which at a 12.5 MHz ADCCLK is 20 us a channel and
-         * would cap an eight-channel scan at about 6 kHz. */
-        ADC_RegularChannelConfig(ADC1, _channels[i], i + 1,
-                                 ADC_SampleTime_CyclesMode3);
+         * would cap an eight-channel scan at about 6 kHz.
+         *
+         * The internal channels are the exception. Both are driven through a
+         * high impedance and need the full window; with a short one they
+         * return whatever the sample-and-hold last held, which on a scan that
+         * mixes them with pins is the PREVIOUS channel's value -- a reading
+         * that looks plausible and tracks the wrong input. They get the
+         * slowest setting, and maximumFrequency() drops accordingly. */
+        const uint8_t sample_time = ch32h4_adc_is_internal(_pins[i])
+                                    ? ADC_SampleTime_CyclesMode7
+                                    : ADC_SampleTime_CyclesMode3;
+        ADC_RegularChannelConfig(ADC1, _channels[i], i + 1, sample_time);
+    }
+
+    /* The temperature sensor and the reference are switched off after a
+     * reset, and configureADC() resets the block -- so this has to come after
+     * it, every time, not once at first use. */
+    if (any_internal) {
+        ADC_TempSensorVrefintCmd(ENABLE);
     }
 
     ADC_DMACmd(ADC1, ENABLE);
@@ -265,6 +284,32 @@ extern "C" void DMA1_Channel7_IRQHandler(void) {
 
 /* ---- lifecycle ---------------------------------------------------------- */
 
+/* Microseconds one channel occupies: the sample window plus the fixed 12.5
+ * cycles of conversion, at the 12.5 MHz ADCCLK adc_init_once() sets up.
+ *
+ * The SDK names the sample times CyclesMode0..7 and nowhere says what they
+ * are, so the cycle counts come from the reference manual's SAMPTR table:
+ * mode 3 is 28.5 cycles and mode 7 is 239.5. At 12.5 MHz that is 3.28 us a
+ * pin against 20.16 us an internal channel. */
+static constexpr float ADCCLK_MHZ          = 12.5f;
+static constexpr float SAMPLE_CYCLES_PIN   = 28.5f;    /* CyclesMode3 */
+static constexpr float SAMPLE_CYCLES_INT   = 239.5f;   /* CyclesMode7 */
+static constexpr float CONVERSION_CYCLES   = 12.5f;
+
+uint32_t ADCInput::maximumFrequency() const {
+    if (_nchannels == 0) {
+        return 0;
+    }
+    float cycles = 0.0f;
+    for (uint8_t i = 0; i < _nchannels; i++) {
+        cycles += (ch32h4_adc_is_internal(_pins[i]) ? SAMPLE_CYCLES_INT
+                                                    : SAMPLE_CYCLES_PIN)
+                  + CONVERSION_CYCLES;
+    }
+    const float scan_us = cycles / ADCCLK_MHZ;
+    return (uint32_t)(1000000.0f / scan_us);
+}
+
 bool ADCInput::begin(long sampleRate) {
     return setFrequency((int)sampleRate) && begin();
 }
@@ -274,6 +319,14 @@ bool ADCInput::begin() {
         return true;
     }
     if (_nchannels == 0) {
+        return false;
+    }
+    /* Refuse a rate the channel list cannot convert in time. Triggering the
+     * ADC while it is still busy does not slow it down -- it drops the
+     * trigger, and one dropped scan puts every sample after it on the wrong
+     * channel for the rest of the capture. Failing here is the only place
+     * this is visible. */
+    if (_rate > maximumFrequency()) {
         return false;
     }
     if (!_ring && !setBuffer(DMA_HALF_SAMPLES * 4)) {
@@ -294,6 +347,9 @@ bool ADCInput::begin() {
     s_instance = this;
     configureDMA();
     _running = true;
+    /* Claim the ADC, so analogRead() refuses rather than starting a software
+     * conversion against the scan sequence this just set up. */
+    ch32h4_adc_claim();
 
     /* The timer starts last: everything downstream of it has to be ready
      * before the first trigger, or the first scan lands in a DMA that is not
@@ -306,6 +362,9 @@ void ADCInput::end() {
     if (!_running) {
         return;
     }
+    /* Released first: everything below leaves the ADC in a state analogRead()
+     * has to reconfigure anyway, and it reconfigures on every read. */
+    ch32h4_adc_release();
     TIM_Cmd(ch32h4_timer_dev(ADC_TIMER_ID), DISABLE);
     ADC_ExternalTrigConvCmd(ADC1, DISABLE);
     ADC_DMACmd(ADC1, DISABLE);

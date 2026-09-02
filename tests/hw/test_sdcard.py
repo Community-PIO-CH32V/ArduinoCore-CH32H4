@@ -10,6 +10,9 @@ Needs a card on the SDMMC default mapping: CK PC12, CMD PD2, D0 PC8.
 import pytest
 
 
+from conftest import Reply
+
+
 def _kv(out):
     d = {}
     for line in out.splitlines():
@@ -17,7 +20,7 @@ def _kv(out):
             if "=" in part:
                 k, _, v = part.partition("=")
                 d[k.strip()] = v.strip()
-    return d
+    return Reply(out, d)
 
 
 @pytest.fixture(scope="module")

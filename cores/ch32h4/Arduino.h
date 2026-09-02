@@ -89,7 +89,13 @@ extern "C" {
  * 1.20 V reference, which ch32h4_vdda_volts() reads. */
 void analogReference(uint8_t mode);
 
+/* The ADC is 12-bit. analogRead() defaults to Arduino's 10 and shifts, so
+ * analogReadResolution(12) is what a sketch calls to get the full range;
+ * above 12 the added low bits are zeros. Applies to analogRead() only --
+ * ADCInput always delivers raw 12-bit samples. */
 void analogReadResolution(int bits);
+int  analogReadResolutionBits(void);
+
 void analogWriteResolution(int bits);
 
 /* PWM frequency, in Hz. Applies to every timer analogWrite() subsequently
@@ -106,6 +112,36 @@ void analogWriteStop(pin_size_t pin);
 /* Measures VDDA against the internal reference on ADC1_IN17, nominally
  * 1.20 V. Returns volts, or 0.0f if the conversion failed. */
 float ch32h4_vdda_volts(void);
+
+/* Die temperature in degrees Celsius, from ADC1_IN16 and the factory
+ * calibration. Returns 0.0f if the conversion failed or the part has no
+ * calibration programmed.
+ *
+ * This is the DIE, several degrees above ambient on a part clocked at
+ * 400 MHz, and WCH specifies the sensor for measuring changes rather than
+ * absolute temperature. Treat a single reading as approximate. */
+float analogReadTemp(void);
+
+/* Which ADC channel a pin selects, or 0xFF for one with no ADC input. Accepts
+ * the internal pseudo-pins ATEMP and AVREF as well as real pins, and is the
+ * single place that mapping is decided -- analogRead() and ADCInput both go
+ * through it so they cannot disagree. */
+uint8_t ch32h4_adc_channel(pin_size_t pin);
+
+/* True for ATEMP and AVREF, which have no pad: nothing may index g_pins with
+ * them, and nothing may try to configure them as GPIO. */
+bool ch32h4_adc_is_internal(pin_size_t pin);
+
+/* Put a real pin into analog mode. Does nothing for the internal channels. */
+void ch32h4_adc_prepare_pin(pin_size_t pin);
+
+/* There is one ADC, and a timer-paced capture owns its regular sequence for
+ * as long as it runs. ADCInput claims it across begin()/end(); analogRead()
+ * returns 0 while it is claimed rather than starting a conversion that would
+ * both answer with the wrong channel and drop a scan from the capture. */
+void ch32h4_adc_claim(void);
+void ch32h4_adc_release(void);
+int  ch32h4_adc_is_capturing(void);
 
 /* Free heap across both regions -- DTCM first, then the shared half. */
 size_t ch32h4_heap_free(void);

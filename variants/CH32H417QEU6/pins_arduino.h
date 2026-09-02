@@ -134,8 +134,32 @@
 #define A8   PA2
 #define A9   PA3
 
-/* ADC1_IN17 is the internal reference, nominally 1.20 V. Reading it is the
-   check on the assumption that VDDA is 3.3 V -- see ch32h4_vdda_volts(). */
+/* The two internal ADC inputs, as pin numbers.
+ *
+ * They are not pins -- neither has a pad, a port or a bit, and neither can be
+ * configured, read digitally or given an interrupt. They are numbered above
+ * PINS_COUNT precisely so that any code treating them as real pins indexes
+ * past the end of g_pins and fails loudly rather than reading pin 0.
+ *
+ * Numbering them at all is what lets analogRead(ATEMP) and
+ * ADCInput(A0, ATEMP) work without a second API: everything that takes a pin
+ * goes through ch32h4_adc_channel(), which knows about these two and returns
+ * 0xFF for anything else with no ADC input.
+ *
+ *   ATEMP -- ADC1_IN16, the on-die temperature sensor. analogReadTemp()
+ *            converts it to degrees Celsius using the factory calibration.
+ *   AVREF -- ADC1_IN17, the internal reference, nominally 1.20 V. Reading it
+ *            is the check on the assumption that VDDA is 3.3 V; see
+ *            ch32h4_vdda_volts().
+ *
+ * Both need a long sample window -- they are driven through a high impedance,
+ * and a short one reads the sample-and-hold's previous contents instead. The
+ * core picks the slowest setting for them automatically.
+ */
+#define ATEMP  (PINS_COUNT + 0)
+#define AVREF  (PINS_COUNT + 1)
+
+#define ADC_INTERNAL_TEMP_CHANNEL  16
 #define ADC_INTERNAL_VREF_CHANNEL  17
 
 /* An interrupt "number" here is just the pin number. Note that EXTI lines are

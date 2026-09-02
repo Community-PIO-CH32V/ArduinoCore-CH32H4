@@ -6,10 +6,31 @@ static int s_adc_ready = 0;
 
 #define ADC_VREF_NOMINAL_MV  1200u  /* ADC1_IN17, the internal reference */
 
+/* The converter is 12-bit. analogRead() shifts to whatever width was asked
+ * for, so the Arduino default of 10 throws away two bits -- a sketch that
+ * wants the part's real resolution calls analogReadResolution(12) first.
+ *
+ * Above 12 the extra bits are zeros: the value is scaled, not interpolated,
+ * which is what Arduino and STM32duino both do. A rejected argument leaves the
+ * previous setting in place rather than clamping, so a sketch asking for
+ * something impossible reads at a width it chose earlier rather than at one
+ * this function picked for it.
+ *
+ * This affects analogRead() ONLY. ADCInput delivers what the DMA moved out of
+ * the data register, which is always 12-bit, because rescaling every sample of
+ * a 100 kHz capture to throw information away would be a strange default. */
 void analogReadResolution(int bits) {
     if (bits >= 1 && bits <= 16) {
         s_read_bits = (uint8_t)bits;
     }
+}
+
+/* What analogRead() is currently returning, in bits. Arduino has no such
+ * call; a library that wants to scale a reading otherwise has to be told the
+ * width out of band, and getting it wrong is a factor-of-four error that
+ * still looks like a plausible reading. */
+int analogReadResolutionBits(void) {
+    return (int)s_read_bits;
 }
 
 void analogWriteResolution(int bits) {
@@ -22,6 +43,13 @@ void analogWriteResolution(int bits) {
 void analogReference(uint8_t mode) {
     (void)mode;
 }
+
+/* Set while ADCInput owns ADC1 for a timer-paced capture. */
+static volatile int s_adc_capturing = 0;
+
+void ch32h4_adc_claim(void)   { s_adc_capturing = 1; }
+void ch32h4_adc_release(void) { s_adc_capturing = 0; }
+int  ch32h4_adc_is_capturing(void) { return s_adc_capturing; }
 
 static void adc_init_once(void) {
     if (s_adc_ready) {
@@ -47,6 +75,24 @@ static void adc_init_once(void) {
     cfgr |= (3u << 14);
     RCC->CFGR0 = cfgr;
 
+}
+
+/* Put ADC1 back into the single, software-triggered, one-channel mode that
+ * analogRead() needs -- on EVERY read, not once.
+ *
+ * ADCInput drives the same ADC and leaves it in scan mode, with an external
+ * trigger and DMA enabled and a whole channel list in the regular sequence.
+ * A software conversion started against that configuration converts the WHOLE
+ * sequence and signals EOC at the end of it, so analogRead() returns the last
+ * channel of somebody else's scan. It is a real reading of a real channel,
+ * just not the one that was asked for -- which is why it went unnoticed until
+ * a test read a known reference and got a plausible number back.
+ *
+ * The cost is a handful of register writes against a conversion that already
+ * takes about 20 us, and it makes analogRead() correct regardless of what ran
+ * before it.
+ */
+static void adc_single_shot_config(void) {
     ADC_InitTypeDef a = {0};
     a.ADC_Mode = ADC_Mode_Independent;
     a.ADC_ScanConvMode = DISABLE;
@@ -56,7 +102,11 @@ static void adc_init_once(void) {
     a.ADC_NbrOfChannel = 1;
     ADC_Init(ADC1, &a);
 
-    /* The internal reference channel has to be switched on explicitly. */
+    ADC_DMACmd(ADC1, DISABLE);
+    ADC_ExternalTrigConvCmd(ADC1, DISABLE);
+
+    /* The temperature sensor and the reference channel are off after a reset,
+     * and ADCInput resets the block. */
     ADC_TempSensorVrefintCmd(ENABLE);
 
     ADC_Cmd(ADC1, ENABLE);
@@ -64,6 +114,7 @@ static void adc_init_once(void) {
 
 static uint16_t adc_read_channel(uint8_t ch) {
     adc_init_once();
+    adc_single_shot_config();
     /* The longest sample time this part offers. The SDK names them
      * CyclesMode0..7 rather than by cycle count, so there is no way to read
      * the duration off the constant -- 7 is the slowest. It is deliberate: at
@@ -81,24 +132,107 @@ static uint16_t adc_read_channel(uint8_t ch) {
     return ADC_GetConversionValue(ADC1);
 }
 
-int analogRead(pin_size_t pin) {
+/* The one place that decides what an "analog pin" means.
+ *
+ * Both real pins and the two internal channels come through here, so
+ * analogRead(), ADCInput and anything else added later cannot disagree about
+ * which channel a pin selects -- a disagreement that would show up as a
+ * capture quietly reading the wrong input, which is close to undebuggable
+ * from the outside. Returns 0xFF for anything with no ADC input at all. */
+uint8_t ch32h4_adc_channel(pin_size_t pin) {
+    if (pin == ATEMP) {
+        return ADC_INTERNAL_TEMP_CHANNEL;
+    }
+    if (pin == AVREF) {
+        return ADC_INTERNAL_VREF_CHANNEL;
+    }
     if (pin >= PINS_COUNT) {
-        return 0;
+        return 0xFF;
+    }
+    return g_pins[pin].adc_channel;
+}
+
+bool ch32h4_adc_is_internal(pin_size_t pin) {
+    return pin == ATEMP || pin == AVREF;
+}
+
+/* Put a pin into analog mode, if it is a pin at all. The internal channels
+ * have no pad to configure, and indexing g_pins with their numbers would run
+ * off the end of the table. */
+void ch32h4_adc_prepare_pin(pin_size_t pin) {
+    if (ch32h4_adc_is_internal(pin) || pin >= PINS_COUNT) {
+        return;
     }
     const ch32h4_pin_t *p = &g_pins[pin];
-    if (p->adc_channel == 0xFF) {
-        return 0;
-    }
-
     /* Analog mode: no AF mux, and the mode register's analog encoding
      * disconnects the digital input buffer. */
     ch32h4_pin_af(p->port, p->bit, CH32H4_AF_NONE, CH32H4_CFG_IN_ANALOG);
+}
 
-    uint32_t raw = adc_read_channel(p->adc_channel);   /* 12-bit */
+int analogRead(pin_size_t pin) {
+    const uint8_t ch = ch32h4_adc_channel(pin);
+    if (ch == 0xFF) {
+        return 0;
+    }
+    /* There is one ADC. While ADCInput is running it owns the regular
+     * sequence, and a software conversion started underneath it would both
+     * return the wrong channel here and drop a scan there -- and a dropped
+     * scan puts every later sample of the capture on the wrong channel.
+     * Refusing is the only honest answer. */
+    if (s_adc_capturing) {
+        return 0;
+    }
+    ch32h4_adc_prepare_pin(pin);
+
+    uint32_t raw = adc_read_channel(ch);               /* 12-bit */
     if (s_read_bits >= 12) {
         return (int)(raw << (s_read_bits - 12));
     }
     return (int)(raw >> (12 - s_read_bits));
+}
+
+/* Degrees Celsius from the on-die sensor.
+ *
+ * The calibration is a factory pair stored at 0x1FFFF76C -- the sensor's
+ * output in millivolts, and the temperature it was measured at -- and the
+ * slope is a constant 4.3 mV per degree. The slope is NEGATIVE: the sensor's
+ * output falls as the die warms, which is why the difference is subtracted.
+ *
+ * The dummy read of main flash before touching the calibration word is
+ * WCH's own sequence (TempSensor_Volt_To_Temper does the same through
+ * FLASH_BOOT_GetMode), and without it the system area does not read back
+ * reliably. Copied deliberately rather than called, because the SDK's
+ * function takes millivolts and returns whole degrees, and rounding the
+ * measurement to an integer before the division throws away most of the
+ * resolution the sensor has.
+ *
+ * This measures the DIE, not the room. It sits several degrees above ambient
+ * on a part running at 400 MHz, and it is not a thermometer -- WCH specifies
+ * it for measuring CHANGES in temperature, and the absolute figure carries
+ * the error of both VDDA and the single-point calibration.
+ */
+float analogReadTemp(void) {
+    const float vdda = ch32h4_vdda_volts();
+    if (vdda <= 0.0f) {
+        return 0.0f;
+    }
+    const uint32_t raw = adc_read_channel(ADC_INTERNAL_TEMP_CHANNEL);
+    if (raw == 0) {
+        return 0.0f;
+    }
+    const float mv = (float)raw * vdda * 1000.0f / 4095.0f;
+
+    (void)FLASH_BOOT_GetMode();
+    const uint32_t cal = *(volatile uint32_t *)0x1FFFF76CU;
+    const float cal_mv = (float)(cal & 0xFFFFu);
+    const float cal_c = (float)((cal >> 16) & 0xFFFFu);
+    if (cal_mv == 0.0f || cal_mv == 65535.0f) {
+        /* An unprogrammed calibration word. Reporting a wildly wrong
+         * temperature would be worse than reporting none. */
+        return 0.0f;
+    }
+
+    return cal_c - (mv - cal_mv) / 4.3f;
 }
 
 float ch32h4_vdda_volts(void) {

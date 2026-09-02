@@ -237,7 +237,19 @@ class Board:
             if chunk:
                 out += chunk.decode(errors="replace")
                 if out.rstrip().endswith(">"):
-                    break
+                    return out
+
+        # No prompt inside the timeout, so the reply is truncated -- whatever
+        # the sketch was still printing is missing. Say so IN the returned
+        # text: a parser looking for one key then reports a missing key, and a
+        # missing key is indistinguishable from a driver that answered
+        # "failed". Marking it here is the difference between "the card
+        # disagreed with itself" and "the board did not finish answering",
+        # which are not the same bug and were confused once.
+        #
+        # Not raised, because test_fault's `crash` command is SUPPOSED to
+        # never return a prompt.
+        out += f"\n<<TRUNCATED: no prompt within {timeout:.1f}s>>\n"
         return out
 
 
@@ -282,7 +294,7 @@ def _sync(sketch: str) -> str:
 
 
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
-                  "tls_board", "dualcore_board")
+                  "tls_board", "dualcore_board", "adc_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -410,3 +422,33 @@ def dualcore_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("dualcore")
+
+
+@pytest.fixture(scope="session")
+def adc_board():
+    """The timer-paced ADC sketch.
+
+    Its own image because ADCInput claims TIM3 and DMA1 channel 7 for the
+    whole run, and coretest's PWM and tone tests contend for the same timers.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("adctest")
+
+
+class Reply(dict):
+    """A parsed key=value reply that explains itself when a key is missing.
+
+    The raw text is kept because the interesting case is a reply that was cut
+    short: a KeyError names the key that was wanted and says nothing about the
+    board having stopped mid-sentence, and the two look identical from the
+    traceback.
+    """
+
+    def __init__(self, raw, pairs):
+        super().__init__(pairs)
+        self.raw = raw
+
+    def __missing__(self, key):
+        raise AssertionError(
+            f"the board's reply has no {key!r}. Reply was:\n{self.raw}")

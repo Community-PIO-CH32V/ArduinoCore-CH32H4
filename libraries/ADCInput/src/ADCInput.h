@@ -51,6 +51,14 @@ public:
      * integers, so most rates are approximated. */
     uint32_t actualFrequency() const { return _actual_rate; }
 
+    /* The fastest scan rate this channel list can sustain, in scans per
+     * second. It depends on the list, not only its length: ATEMP and AVREF
+     * need the slowest sample window and cost about six times what a pin
+     * costs. begin() refuses anything above this rather than triggering the
+     * ADC again while it is still converting, which drops samples and shifts
+     * every channel after the drop onto the wrong pin. */
+    uint32_t maximumFrequency() const;
+
     /* Non-zero once a DMA half arrived with no room for it. Cleared by
      * reading. The whole half is dropped rather than part of it: a partial
      * scan puts every later sample on the wrong channel. */
