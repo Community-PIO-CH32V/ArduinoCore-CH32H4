@@ -57,7 +57,7 @@ amplifier and a WCH-Link attached.
 |---|---|---|
 | **M1** | Boot, clocks, single ELF, core Arduino API | verified |
 | **M2** | Adafruit TinyUSB, `Serial` as USB CDC | verified |
-| **M3** | Wire, SPI, EEPROM, Servo, Tone, I2S, ADCInput | verified — see the gaps below |
+| **M3** | Wire, SPI, EEPROM, Servo, Tone, I2S, ADCInput, DAC | verified — see the gaps below |
 | **M4** | `setup1()`/`loop1()` on the V3F, FIFO, HSEM mutexes | verified |
 | **M5** | SD block layer, FatFs R0.16, the FS/File API, the classic `SD` shim | verified |
 | **M6** | lwIP 2.2.1, on-chip Ethernet, TCP/UDP client and server, SNTP | verified |
@@ -81,9 +81,12 @@ Three things, all of them limited by the bench rather than by the code:
   DMA throughput and the underflow count, all of which are independent of the
   sample values — so the whole suite runs on silence. Judging the audio needs
   ears or a scope.
-* **The ADC's absolute accuracy.** Rate, throughput, channel ordering, the
-  internal reference and the die temperature are all checked; there is no
-  calibrated source on the bench to check gain and linearity against.
+* **The ADC's and DAC's absolute accuracy.** Rate, throughput, channel
+  ordering, the internal reference and the die temperature are all checked, and
+  the DAC is checked end to end by reading its own pad back through the ADC —
+  PA4 is ADC4 and PA5 is ADC5, so that needs nothing wired. But both converters
+  carry their own error, so this is not a linearity measurement, and there is
+  no calibrated source on the bench to make one against.
 
 Everything else that was once a gap is now covered by a test, including the
 negative cases that matter most — a TLS client that accepts a certificate from

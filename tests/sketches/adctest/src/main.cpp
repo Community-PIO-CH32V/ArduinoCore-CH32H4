@@ -189,6 +189,67 @@ static void handle(char *cmd) {
     Serial1.print("adc_res_bits="); Serial1.println(analogReadResolutionBits());
     Serial1.print("avref_at_res="); Serial1.println(analogRead(AVREF));
 
+  } else if (!strncmp(cmd, "dacwrite ", 9)) {
+    /* dacwrite <1|2> <value> [bits]
+       Writes through analogWrite(), which is the whole point -- the DAC has no
+       API of its own here -- then reads the same pad back with the ADC. The
+       two DAC pins are ADC4 and ADC5, so the converter can check the
+       converter with nothing wired to the board. */
+    int which = atoi(cmd + 9);
+    long value = 0;
+    int bits = 12;
+    char *sp = strchr(cmd + 9, ' ');
+    if (sp) {
+      value = atol(sp + 1);
+      char *sp2 = strchr(sp + 1, ' ');
+      if (sp2) bits = atoi(sp2 + 1);
+    }
+    const pin_size_t pin = (which == 2) ? DAC2 : DAC1;
+
+    analogWriteResolution(bits);
+    analogWrite(pin, (int)value);
+    /* The buffer needs a moment to settle before the ADC samples it. */
+    delayMicroseconds(200);
+
+    analogReadResolution(12);
+    Serial1.print("dac_pin="); Serial1.println(pin);
+    Serial1.print("dac_channel="); Serial1.println(ch32h4_dac_channel(pin));
+    Serial1.print("dac_started="); Serial1.println(ch32h4_dac_is_started(pin) ? 1 : 0);
+    Serial1.print("dac_code="); Serial1.println(ch32h4_dac_read(pin));
+    Serial1.print("dac_readback="); Serial1.println(analogRead(pin));
+    analogReadResolution(10);
+
+  } else if (!strncmp(cmd, "dacbuffer ", 10)) {
+    /* dacbuffer <1|2> <0|1> -- the output buffer cannot reach either rail, so
+       a full-range test has to turn it off. */
+    int which = atoi(cmd + 10);
+    int on = 0;
+    char *sp = strchr(cmd + 10, ' ');
+    if (sp) on = atoi(sp + 1);
+    const pin_size_t pin = (which == 2) ? DAC2 : DAC1;
+    Serial1.print("dac_buffer_set=");
+    Serial1.println(ch32h4_dac_output_buffer(pin, on != 0) ? 1 : 0);
+    Serial1.print("dac_buffer="); Serial1.println(on);
+
+  } else if (!strncmp(cmd, "dacstop ", 8)) {
+    const pin_size_t pin = (atoi(cmd + 8) == 2) ? DAC2 : DAC1;
+    analogWriteStop(pin);
+    Serial1.print("dac_started="); Serial1.println(ch32h4_dac_is_started(pin) ? 1 : 0);
+
+  } else if (!strcmp(cmd, "dacpins")) {
+    Serial1.print("pin_dac1="); Serial1.println(DAC1);
+    Serial1.print("pin_dac2="); Serial1.println(DAC2);
+    Serial1.print("dac1_has_dac="); Serial1.println(ch32h4_pin_has_dac(DAC1) ? 1 : 0);
+    Serial1.print("dac2_has_dac="); Serial1.println(ch32h4_pin_has_dac(DAC2) ? 1 : 0);
+    Serial1.print("a0_has_dac="); Serial1.println(ch32h4_pin_has_dac(A0) ? 1 : 0);
+    /* Both DAC pins are ADC inputs too -- that is what makes the readback
+       possible, and it was missing from the variant until the DAC went in. */
+    Serial1.print("dac1_adc_ch="); Serial1.println(ch32h4_adc_channel(DAC1));
+    Serial1.print("dac2_adc_ch="); Serial1.println(ch32h4_adc_channel(DAC2));
+    Serial1.print("num_analog="); Serial1.println(NUM_ANALOG_INPUTS);
+    Serial1.print("a10_ch="); Serial1.println(ch32h4_adc_channel(A10));
+    Serial1.print("a15_ch="); Serial1.println(ch32h4_adc_channel(A15));
+
   } else if (!strcmp(cmd, "adcvref")) {
     /* analogRead() refuses while a paced capture owns the ADC, and reports 0.
        Surfacing the flag keeps that distinguishable from a dead channel. */

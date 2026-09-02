@@ -303,3 +303,119 @@ def test_analog_read_refuses_while_a_capture_owns_the_adc(adc_board):
     # And it works again once the capture stops.
     adc_board.command("adcend")
     assert single(adc_board)["avref_raw"] > 300
+
+
+# ---- the DACs -------------------------------------------------------------
+#
+# Verified with nothing wired to the board, because both DAC pins are also ADC
+# inputs -- PA4 is ADC4 and PA5 is ADC5. Writing a code and reading the same
+# pad back is a real end-to-end check of the converter, the pin configuration
+# and the clock gate, and it is the reason the six missing analog channels had
+# to be added to the variant before any of this could be tested.
+
+def dacwrite(adc_board, which, value, bits=12):
+    adc_board.command("adcend")
+    return kv(adc_board.command("dacwrite %d %d %d" % (which, value, bits),
+                                timeout=5))
+
+
+def test_the_dac_pins_are_known(adc_board):
+    r = kv(adc_board.command("dacpins"))
+    assert r["pin_dac1"] == 4          # PA4
+    assert r["pin_dac2"] == 5          # PA5
+    assert r["dac1_has_dac"] == 1
+    assert r["dac2_has_dac"] == 1
+    assert r["a0_has_dac"] == 0, "a pin with no DAC was reported as having one"
+
+
+def test_the_dac_pins_are_also_adc_inputs(adc_board):
+    """PA4 is ADC4 and PA5 is ADC5. The variant said 0xFF for both -- and for
+    PA6, PA7, PB0 and PB1 -- so six of this package's sixteen analog inputs
+    were simply missing. Without them the DAC could not be checked at all."""
+    r = kv(adc_board.command("dacpins"))
+    assert r["dac1_adc_ch"] == 4
+    assert r["dac2_adc_ch"] == 5
+    assert r["num_analog"] == 16
+    assert r["a10_ch"] == 4            # A10 is PA4
+    assert r["a15_ch"] == 9            # A15 is PB1
+
+
+@pytest.mark.parametrize("which", [1, 2])
+@pytest.mark.parametrize("code", [0, 1024, 2048, 3072, 4095])
+def test_the_dac_output_matches_what_was_written(adc_board, which, code):
+    """Read back through the ADC on the same pad.
+
+    Both converters carry their own error, so this is not a linearity
+    measurement -- but a DAC that is not converting at all, or converting the
+    wrong channel, or stuck at a rail, fails it immediately."""
+    r = dacwrite(adc_board, which, code)
+    assert r["dac_started"] == 1
+    assert r["dac_code"] == code
+    assert abs(r["dac_readback"] - code) < 64,         "the pad does not read back what was written"
+
+
+def test_the_two_channels_are_independent(adc_board):
+    """DAC2 sharing DAC1's data register, or both writing channel 1, would pass
+    every single-channel test above."""
+    dacwrite(adc_board, 1, 500)
+    dacwrite(adc_board, 2, 3500)
+    # Re-reading channel 1 must still find its own value, not channel 2's.
+    r = dacwrite(adc_board, 1, 500)
+    assert abs(r["dac_readback"] - 500) < 64
+    r = dacwrite(adc_board, 2, 3500)
+    assert abs(r["dac_readback"] - 3500) < 64
+
+
+def test_analog_write_resolution_scales_the_dac(adc_board):
+    """analogWrite() is the DAC's API, so analogWriteResolution() has to apply
+    to it exactly as it applies to PWM. Full scale at 8 bits and full scale at
+    12 must land in the same place -- widening by multiply rather than shift,
+    or 255 at 8 bits would give 4080 and not 4095."""
+    top8 = dacwrite(adc_board, 1, 255, 8)
+    top12 = dacwrite(adc_board, 1, 4095, 12)
+    assert top8["dac_code"] == 4095, "full scale at 8 bits is not full scale"
+    assert abs(top8["dac_readback"] - top12["dac_readback"]) < 32
+
+    half8 = dacwrite(adc_board, 1, 128, 8)
+    assert abs(half8["dac_code"] - 2048) < 32
+
+
+def test_a_value_above_the_resolution_is_clamped(adc_board):
+    """Arduino's convention. Wrapping would put full scale next to zero."""
+    r = dacwrite(adc_board, 1, 9999, 8)
+    assert r["dac_code"] == 4095
+
+
+def test_the_output_buffer_costs_no_useful_range(adc_board):
+    """On classic STM32 the buffer cannot come within about 0.2 V of either
+    rail, so a buffered channel told to output zero sits near 250 counts. This
+    silicon does not do that, and the difference is worth pinning: a driver
+    written from STM32 habit would turn the buffer off by default for no
+    reason, and give up its drive strength to fix a problem it does not have.
+
+    This says nothing about drive strength -- the ADC input is a high-impedance
+    load, which is exactly what an unbuffered DAC copes with best."""
+    adc_board.command("dacbuffer 1 1")
+    buf_lo = dacwrite(adc_board, 1, 0)["dac_readback"]
+    buf_hi = dacwrite(adc_board, 1, 4095)["dac_readback"]
+
+    adc_board.command("dacbuffer 1 0")
+    raw_lo = dacwrite(adc_board, 1, 0)["dac_readback"]
+    raw_hi = dacwrite(adc_board, 1, 4095)["dac_readback"]
+
+    adc_board.command("dacbuffer 1 1")
+
+    assert buf_lo < 64, "the buffered output cannot reach the bottom rail"
+    assert buf_hi > 4000, "the buffered output cannot reach the top rail"
+    assert abs(buf_lo - raw_lo) < 64
+    assert abs(buf_hi - raw_hi) < 64
+
+
+def test_analog_write_stop_switches_the_dac_off(adc_board):
+    """analogWriteStop() releases a PWM pin's timer; on a DAC pin the matching
+    thing to undo is the DAC channel. Falling through to the timer path would
+    look for a timer this pin never claimed."""
+    assert dacwrite(adc_board, 1, 2048)["dac_started"] == 1
+    assert kv(adc_board.command("dacstop 1"))["dac_started"] == 0
+    # And it comes back on the next write.
+    assert dacwrite(adc_board, 1, 1000)["dac_started"] == 1

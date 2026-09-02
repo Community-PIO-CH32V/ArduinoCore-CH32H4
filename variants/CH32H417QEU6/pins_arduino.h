@@ -16,7 +16,7 @@
 
 #define PINS_COUNT           96
 #define NUM_DIGITAL_PINS     PINS_COUNT
-#define NUM_ANALOG_INPUTS    10
+#define NUM_ANALOG_INPUTS    16
 
 #define PA0   0
 #define PA1   1
@@ -133,6 +133,19 @@
 #define A7   PA1
 #define A8   PA2
 #define A9   PA3
+/* PA4-PA7 and PB0-PB1 are ADC channels 4-9. They are appended rather than
+   renumbered into place: A0..A9 are what existing sketches and tests already
+   name, and moving them to make the numbering tidy would silently change which
+   pad a sketch reads. Several carry a board function as well -- PA4 is DAC1,
+   PA5 is DAC2 and the SPI clock, PA6/PA7 are the SPI data pins and the
+   loopback jumper -- which is board wiring, not silicon, so the channels are
+   declared and the choice is left to the sketch. */
+#define A10  PA4
+#define A11  PA5
+#define A12  PA6
+#define A13  PA7
+#define A14  PB0
+#define A15  PB1
 
 /* The two internal ADC inputs, as pin numbers.
  *
@@ -211,7 +224,20 @@
 #define PIN_I2S_WS       PIN_I2S1_WS
 #define PIN_I2S_CK       PIN_I2S1_CK
 #define PIN_I2S_SD       PIN_I2S1_SD
-#define PIN_DAC_OUT      PA4
+/* The two 12-bit DACs. These pins are fixed -- there is no mux, and neither
+   channel can come out anywhere else.
+
+   Both are also ADC inputs (PA4 is ADC4, PA5 is ADC5), which is what makes the
+   DAC verifiable with nothing wired to the board: write a code, read the same
+   pad back with the ADC.
+
+   PA5 is the SPI1 clock as well. See the note on analogWrite() about what it
+   means for a pin to be DAC-capable. */
+#define PIN_DAC1         PA4
+#define PIN_DAC2         PA5
+#define DAC1             PIN_DAC1
+#define DAC2             PIN_DAC2
+#define PIN_DAC_OUT      PIN_DAC1   /* the older name for DAC1 */
 #define PIN_ONEWIRE      PB5    /* open-drain; needs a REAL external pull-up */
 #define PIN_SDMMC_CK     PC12
 #define PIN_SDMMC_CMD    PD2

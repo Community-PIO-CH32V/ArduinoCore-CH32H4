@@ -105,8 +105,53 @@ void analogWriteFrequency(uint32_t hz);
 
 /* Stop driving a PWM pin, and release its timer once no channels remain, so
  * Servo or tone() can claim it. Arduino has no such call, but anything sharing
- * these twelve timers needs one. */
+ * these twelve timers needs one. On a DAC pin it switches the DAC channel off
+ * instead, which is the matching thing to undo. */
 void analogWriteStop(pin_size_t pin);
+
+
+/* ---- the two 12-bit DACs, on PA4 (DAC1) and PA5 (DAC2) ------------------
+ *
+ * Written through analogWrite(), the way STM32duino and the SAMD core do it:
+ * a DAC-capable pin goes to the DAC and every other pin to a timer, so there
+ * is no dacWrite() to learn and a sketch from either of those cores works
+ * unchanged. analogWriteResolution() scales the argument.
+ *
+ *     analogWriteResolution(12);
+ *     analogWrite(DAC1, 2048);       // mid-rail
+ *
+ * The calls below are for what analogWrite() cannot express. */
+
+/* True for PA4 and PA5. These pins are fixed -- no mux reaches either DAC
+ * anywhere else -- and analogWrite() sends them to the DAC, so neither can
+ * produce PWM through analogWrite() even though both have timer channels. */
+bool ch32h4_pin_has_dac(pin_size_t pin);
+
+/* 1 or 2 for the DAC pins, 0 for anything else. */
+uint8_t ch32h4_dac_channel(pin_size_t pin);
+
+/* Raw 12-bit write, ignoring analogWriteResolution(). Returns false for a pin
+ * with no DAC. */
+bool ch32h4_dac_write(pin_size_t pin, uint16_t value12);
+
+/* The code currently held, or 0 if the channel was never started. */
+uint16_t ch32h4_dac_read(pin_size_t pin);
+
+bool ch32h4_dac_is_started(pin_size_t pin);
+void ch32h4_dac_stop(pin_size_t pin);
+
+/* The output buffer, on by default.
+ *
+ * Buffered, the DAC can drive a real load; unbuffered it is a high-impedance
+ * node that any load pulls off value.
+ *
+ * Unlike classic STM32, the buffer here costs no useful range -- measured
+ * against the ADC, a buffered channel reads 1 at code 0 and 4090 at code
+ * 4095, against 0 and 4089 unbuffered. This is for drive strength, not for
+ * range, and the default is right for almost everything.
+ *
+ * Takes effect on the next write. */
+bool ch32h4_dac_output_buffer(pin_size_t pin, bool enable);
 
 
 /* Measures VDDA against the internal reference on ADC1_IN17, nominally

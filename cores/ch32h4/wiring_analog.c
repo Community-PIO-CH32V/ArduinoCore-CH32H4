@@ -321,6 +321,39 @@ void analogWrite(pin_size_t pin, int value) {
         return;
     }
 
+    /* A DAC-capable pin goes to the DAC, not to a timer.
+     *
+     * This is what Arduino cores do -- STM32duino checks its DAC pin map
+     * first and the SAMD core does the same -- and it is why there is no
+     * dacWrite() here: a sketch written for either of those, or for an
+     * Arduino Zero, works unchanged.
+     *
+     * The cost is real and worth stating: PA4 and PA5 both have timer
+     * channels, and neither can produce PWM through analogWrite() any more.
+     * PA5 in particular is the SPI1 clock and one of only two pins on the
+     * 3.3 V rail with a timer. A sketch that genuinely wants PWM there can
+     * still have it through ch32h4_pwm_find() and the timer API; what it
+     * cannot have is analogWrite() guessing which one was meant.
+     *
+     * Scaling follows analogWriteResolution() exactly as the PWM path does,
+     * so analogWrite(DAC1, 255) at the default 8 bits is full scale and the
+     * same call after analogWriteResolution(12) is one sixteenth of it. */
+    if (ch32h4_pin_has_dac(pin)) {
+        const uint32_t dac_top = (1u << s_write_bits) - 1u;
+        if (value < 0) {
+            value = 0;
+        } else if ((uint32_t)value > dac_top) {
+            value = (int)dac_top;
+        }
+        /* Rescaled to the converter's 12 bits. Widening multiplies by
+         * 4095/top rather than shifting, so full scale at any resolution is
+         * full scale here and not 4080. */
+        const uint16_t code = (uint16_t)(((uint32_t)value * 4095u + dac_top / 2u)
+                                         / dac_top);
+        ch32h4_dac_write(pin, code);
+        return;
+    }
+
     ch32h4_pwm_af_t af;
     if (!ch32h4_pwm_find(pin, &af)) {
         /* Either the pin has no timer channel at all, or every timer it could
@@ -371,6 +404,12 @@ void analogWrite(pin_size_t pin, int value) {
  * library that shares these timers needs one. */
 void analogWriteStop(pin_size_t pin) {
     if (pin >= PINS_COUNT) {
+        return;
+    }
+    /* Symmetric with analogWrite(): a DAC pin never reached the timer path,
+     * so releasing a timer for it would be releasing one it never took. */
+    if (ch32h4_pin_has_dac(pin)) {
+        ch32h4_dac_stop(pin);
         return;
     }
     ch32h4_pwm_af_t af;

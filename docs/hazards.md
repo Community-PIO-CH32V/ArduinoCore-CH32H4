@@ -826,3 +826,81 @@ pad. Driving A0 to zero and requiring ATEMP to stay near its own value is what
 separates a correct capture from one reading the previous channel -- and
 driving the pair to opposite levels, both ways round, is what makes channel
 ORDER checkable at all.
+
+---
+
+## Six of this package's sixteen analog inputs were missing from the variant
+
+**Symptom.** `analogRead(PA4)` returned 0. So did PA5, PA6, PA7, PB0 and PB1.
+No error, because returning 0 for a pin with no ADC input is the documented
+behaviour -- the variant genuinely believed they had none.
+
+**Cause.** The pin table gave `adc_channel = 0xFF` for all six. The datasheet
+gives ADC1 channels 0-15 as PA0-PA7, PB0-PB1 and PC0-PC5, and the pin
+definition table's third column confirms every one of them is bonded out on
+the QEU6 package. `NUM_ANALOG_INPUTS` said 10 where the part has 16.
+
+**Fix.** The six channels added, and `A10`..`A15` **appended** rather than
+renumbered into place. Renumbering to put them in channel order would have
+been tidier and would have silently changed which pad every existing
+`A0`..`A9` sketch reads.
+
+Several of the new pins carry a board function too -- PA4 is DAC1, PA5 is DAC2
+and the SPI clock, PA6/PA7 are the SPI data pins and the loopback jumper. That
+is board wiring rather than silicon, so the channels are declared and the
+choice is left to the sketch, which is what the variant's own header comment
+says it does.
+
+**Worth noting** that this blocked something else: PA4 and PA5 being ADC
+inputs is exactly what makes the DAC testable with nothing wired to the board.
+
+---
+
+## analogWrite() on a DAC pin cannot produce PWM, and both DAC pins have timers
+
+**Not a bug -- a deliberate trade, recorded because it surprises people.**
+
+`analogWrite()` sends a DAC-capable pin to the DAC and every other pin to a
+timer. That is what STM32duino and the SAMD core do, and it is why there is no
+`dacWrite()` here: a sketch written for either of those works unchanged. Only
+ESP32 has a separate call.
+
+The cost on this part is that **PA4 and PA5 both have timer channels**, and
+neither can produce PWM through `analogWrite()` any more. PA5 matters most: it
+is the SPI1 clock and one of only two pins on the 3.3 V rail with a timer.
+
+A sketch that genuinely wants PWM there can still have it through
+`ch32h4_pwm_find()` and the timer API. What it cannot have is `analogWrite()`
+guessing which of the two was meant.
+
+**Scaling** follows `analogWriteResolution()` on both paths. The rescale to the
+converter's 12 bits multiplies rather than shifts, so full scale at 8 bits is
+4095 and not 4080.
+
+---
+
+## The DAC output buffer does not cost range on this silicon
+
+**Symptom.** None -- this is a hazard in the other direction: a driver written
+from STM32 habit disables the buffer by default, giving up its drive strength
+to avoid a limitation this part does not have.
+
+**Cause.** On classic STM32 the DAC's output buffer cannot come within about
+0.2 V of either rail, so a buffered channel told to output zero sits near 250
+counts of 4095. Everybody who has met an STM32 DAC knows this.
+
+**Measured here**, reading the DAC's own pad back through the ADC -- PA4 is
+ADC4, so this needs nothing wired to the board:
+
+| | code 0 | code 4095 |
+|---|---|---|
+| buffered | 1 | 4090 |
+| unbuffered | 0 | 4089 |
+
+About one count of difference at the bottom and none worth reporting at the
+top. The buffered output is effectively rail to rail.
+
+**So** the buffer stays on by default and `ch32h4_dac_output_buffer()` exists
+for drive strength rather than for range. Note what the measurement cannot
+say: the ADC input is a high-impedance load, which is precisely the load an
+unbuffered DAC copes with best, so nothing here compares drive strength.
