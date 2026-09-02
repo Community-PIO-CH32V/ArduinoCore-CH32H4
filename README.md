@@ -49,15 +49,45 @@ EXTI dispatch. See "Known gaps" for why that placement still matters.
 
 ## Status
 
+All seven milestones are implemented, and everything below marked *verified*
+has been exercised on a CH32H417QEU6 with the SD card, Ethernet, an I2S
+amplifier and a WCH-Link attached.
+
 | | Milestone | State |
 |---|---|---|
-| **M1** | Boot, clocks, single ELF, core Arduino API | **working**, 43 hardware tests |
-| M2 | Adafruit TinyUSB, `Serial` as USB CDC | **working** |
-| M3 | Wire, SPI, EEPROM, Servo | **building**; Tone, I2S, ADCInput, Ticker next |
-| M4 | `setup1()`/`loop1()` on the V3F, FIFO, HSEM mutexes | **building**, awaiting hardware |
-| M5 | SD, SDFS, FatFS | planned |
-| M6 | lwIP, on-chip Ethernet, the `lwip_*` library structure | planned |
-| M7 | mbedTLS with the ECDC AES and TRNG accelerators | planned |
+| **M1** | Boot, clocks, single ELF, core Arduino API | verified |
+| **M2** | Adafruit TinyUSB, `Serial` as USB CDC | verified |
+| **M3** | Wire, SPI, EEPROM, Servo, Tone, I2S, ADCInput | verified — see the gaps below |
+| **M4** | `setup1()`/`loop1()` on the V3F, FIFO, HSEM mutexes | verified |
+| **M5** | SD block layer, FatFs R0.16, the FS/File API, the classic `SD` shim | verified |
+| **M6** | lwIP 2.2.1, on-chip Ethernet, TCP/UDP client and server, SNTP | verified |
+| **M7** | mbedTLS 3.6.7, AES on the ECDC block, entropy from the TRNG | verified |
+| | RTC on LSI, LSE and HSE, wired into `gettimeofday()` | verified |
+
+`python -m pytest tests/hw` runs **152 hardware tests** against a connected
+board, and `python -m pytest tests/link` a 51-case matrix of build
+configurations. The suite reprograms the part eight times — once per sketch —
+and takes about three minutes.
+
+### What is not verified
+
+Three things, all of them limited by the bench rather than by the code:
+
+* **I2S receive** and **slave mode**. Receive needs a microphone and slave mode
+  needs an external clock, and neither is attached. The transmit path is
+  verified on both I2S blocks; the receive half-word ordering is carried from
+  the MicroPython driver's measurements rather than re-measured here.
+* **Whether the I2S output sounds right.** The tests confirm the divider, the
+  DMA throughput and the underflow count, all of which are independent of the
+  sample values — so the whole suite runs on silence. Judging the audio needs
+  ears or a scope.
+* **The ADC's absolute accuracy.** Rate, throughput, channel ordering, the
+  internal reference and the die temperature are all checked; there is no
+  calibrated source on the bench to check gain and linearity against.
+
+Everything else that was once a gap is now covered by a test, including the
+negative cases that matter most — a TLS client that accepts a certificate from
+the wrong CA passes every positive test there is.
 
 ## Building
 
