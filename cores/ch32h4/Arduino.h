@@ -93,6 +93,29 @@ void analogReference(uint8_t mode);
  * analogReadResolution(12) is what a sketch calls to get the full range;
  * above 12 the added low bits are zeros. Applies to analogRead() only --
  * ADCInput always delivers raw 12-bit samples. */
+/* Global interrupt enable/disable.
+ *
+ * The Arduino API does not declare these -- they are an AVR inheritance that
+ * every core provides anyway, and a great many libraries call them. On RISC-V
+ * the bit is MIE, mstatus[3].
+ *
+ * noInterrupts() does NOT nest. Two nested pairs leave interrupts on after the
+ * inner one, which is the same trap AVR's cli/sei has and the same one every
+ * other core reproduces; code that needs nesting must save mstatus itself. */
+static inline void interrupts(void) {
+    __asm volatile("csrsi mstatus, 8" ::: "memory");
+}
+
+static inline void noInterrupts(void) {
+    __asm volatile("csrci mstatus, 8" ::: "memory");
+}
+
+/* avr-libc's float formatter. Not in the Arduino API, but too widely used to
+ * leave out. Width is signed -- negative left-justifies -- and there is no
+ * length argument, so `sout` must be large enough for the width plus a
+ * terminator. */
+char *dtostrf(double val, signed char width, unsigned char prec, char *sout);
+
 void analogReadResolution(int bits);
 int  analogReadResolutionBits(void);
 

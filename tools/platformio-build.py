@@ -21,7 +21,8 @@ here when both prior ports to this silicon needed two.
 """
 
 import sys
-from os.path import isdir, join
+from os import makedirs
+from os.path import dirname, isdir, isfile, join
 
 from SCons.Script import DefaultEnvironment
 
@@ -115,6 +116,89 @@ if tls_enabled and not net_enabled:
     sys.stderr.write("Error: board_build.tls = mbedtls needs"
                      " board_build.network = ethernet\n")
     env.Exit(1)
+
+# The LittleFS partition, in the flash tail.
+#
+# The layout, from the bottom of the user area upward:
+#
+#     0x08000000  the V3F stub                32K
+#     0x08008000  the sketch                  912K - filesystem_size
+#                 LittleFS                    filesystem_size (may be 0)
+#     0x080EC000  EEPROM                      16K, always last
+#     0x080F0000  end of the 960K user area
+#
+# The EEPROM is pinned to the very end so that resizing the filesystem never
+# moves it, and a stored setting survives a rebuild. arduino-pico pins its
+# 4 KB EEPROM to the top for the same reason; this one is 16 KB because the
+# erase page here is 8 KB and it uses two of them alternately.
+#
+# Off by default. A filesystem nobody asked for is flash taken away from the
+# sketch, and LittleFS.begin() says plainly what to set when the region is
+# empty.
+#
+#     board_build.filesystem_size = 128k
+FS_ERASE_PAGE = 8 * 1024
+
+
+def _parse_size(text):
+    """Accept 128k, 1m, 0, or a plain byte count."""
+    t = str(text).strip().lower().replace(" ", "")
+    if not t:
+        return 0
+    mult = 1
+    if t.endswith("k"):
+        mult, t = 1024, t[:-1]
+    elif t.endswith("m"):
+        mult, t = 1024 * 1024, t[:-1]
+    elif t.endswith("b"):
+        t = t[:-1]
+    try:
+        return int(float(t) * mult)
+    except ValueError:
+        return None
+
+
+fs_size = _parse_size(board.get("build.filesystem_size", 0))
+if fs_size is None:
+    sys.stderr.write("Error: board_build.filesystem_size is not a size."
+                     " Use 0, 128k, or 1m.\n")
+    env.Exit(1)
+if fs_size < 0 or fs_size % FS_ERASE_PAGE:
+    sys.stderr.write(
+        "Error: board_build.filesystem_size must be a multiple of %d bytes,"
+        " the flash erase page on this part -- LittleFS cannot erase a"
+        " partial block. Got %d.\n" % (FS_ERASE_PAGE, fs_size))
+    env.Exit(1)
+
+# 912K is the whole sketch region. Leaving nothing for the sketch is refused
+# here rather than at the link, where it would be an out-of-range error against
+# a region the sketch never mentioned.
+FS_MAX = 912 * 1024 - FS_ERASE_PAGE
+if fs_size > FS_MAX:
+    sys.stderr.write(
+        "Error: board_build.filesystem_size of %d leaves no room for the"
+        " sketch. The maximum is %d.\n" % (fs_size, FS_MAX))
+    env.Exit(1)
+
+# Where the partition lands, mirroring the linker script exactly:
+#   the EEPROM occupies the last 16 KB of the 960 KB user area, and the
+#   filesystem sits immediately below it.
+#
+# Published on the environment so the platform's own builder can find it
+# without re-deriving the layout -- buildfs and uploadfs need the start address
+# and the size, and two places computing the same flash offset from different
+# constants is how an image gets written over a sketch.
+FLASH_PHYSICAL_BASE = 0x08000000
+USER_FLASH_BYTES = 960 * 1024
+EEPROM_BYTES = 16 * 1024
+
+fs_start = (FLASH_PHYSICAL_BASE + USER_FLASH_BYTES - EEPROM_BYTES - fs_size)
+env["CH32H4_FS_START"] = fs_start
+env["CH32H4_FS_SIZE"] = fs_size
+env["CH32H4_FS_BLOCK_SIZE"] = FS_ERASE_PAGE
+# LittleFS is configured with a 256-byte program page; mklittlefs must build
+# the image with the same geometry or the first mount fails.
+env["CH32H4_FS_PAGE_SIZE"] = 256
 
 # Which peripheral `Serial` refers to.
 #
@@ -242,8 +326,46 @@ env.Append(
     LIBSOURCE_DIRS=[join(FRAMEWORK_DIR, "libraries")],
 )
 
+# The linker script carries one assignment for the filesystem size, and the
+# build rewrites that single line into a copy in the build directory.
+#
+# Generated rather than passed with --defsym because the size is used in a
+# MEMORY region length, and whether a --defsym symbol is visible there depends
+# on the ld version. A generated file is also readable after the fact, which a
+# linker command line is not.
+def _generate_ldscript():
+    template = join(VARIANT_DIR, "ch32h417.ld")
+    with open(template) as fh:
+        text = fh.read()
+
+    marker = "__CH32H4_FS_SIZE__"
+    if marker not in text:
+        sys.stderr.write(
+            "Error: %s no longer contains the filesystem-size marker the build"
+            " rewrites. Someone edited the linker script; the build cannot set"
+            " the partition size.\n" % template)
+        env.Exit(1)
+
+    # Every occurrence, not the first: the same rule simplesub.py follows, so
+    # the two tools cannot disagree about which one counts. (Limiting it to
+    # one was a bug -- a mention of the token in a comment above the
+    # assignment consumed the substitution, and the link failed on an
+    # undefined symbol in the line that mattered.)
+    text = text.replace(marker, str(fs_size))
+
+    out = join(env.subst("$BUILD_DIR"), "ch32h417_generated.ld")
+    if not isdir(dirname(out)):
+        makedirs(dirname(out))
+    # Written only when it changes, so an unchanged size does not relink
+    # everything on every build.
+    if not isfile(out) or open(out).read() != text:
+        with open(out, "w") as fh:
+            fh.write(text)
+    return out
+
+
 env.Replace(
-    LDSCRIPT_PATH=join(VARIANT_DIR, "ch32h417.ld"),
+    LDSCRIPT_PATH=_generate_ldscript(),
     SIZEPROGREGEX=r"^(?:\.text|\.rodata|\.itcm_text|\.data)\s+([0-9]+).*",
     SIZEDATAREGEXP=r"^(?:\.data|\.bss)\s+(\d+).*",
 )

@@ -26,6 +26,46 @@
 
 using namespace arduino;
 
+#include <stdarg.h>
+
+/* See the declaration in Print.h for why this lives in the API copy. */
+int Print::printf(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    /* Enough for the overwhelming majority of format strings, and small enough
+     * to sit on a sketch's stack without thought. */
+    char stack_buf[128];
+    va_list probe;
+    va_copy(probe, args);
+    const int needed = vsnprintf(stack_buf, sizeof(stack_buf), format, probe);
+    va_end(probe);
+
+    if (needed < 0) {
+        va_end(args);
+        return 0;
+    }
+    if ((size_t)needed < sizeof(stack_buf)) {
+        va_end(args);
+        return (int)write((const uint8_t *)stack_buf, (size_t)needed);
+    }
+
+    /* Too long for the stack buffer: one allocation, sized exactly. */
+    char *heap_buf = (char *)malloc((size_t)needed + 1);
+    if (!heap_buf) {
+        va_end(args);
+        /* Write what did fit rather than nothing. A truncated log line beats a
+         * silent one, and the return value says it was short. */
+        return (int)write((const uint8_t *)stack_buf, sizeof(stack_buf) - 1);
+    }
+    vsnprintf(heap_buf, (size_t)needed + 1, format, args);
+    va_end(args);
+    const size_t written = write((const uint8_t *)heap_buf, (size_t)needed);
+    free(heap_buf);
+    return (int)written;
+}
+
+
 // Public Methods //////////////////////////////////////////////////////////////
 
 /* default implementation: may be overridden */

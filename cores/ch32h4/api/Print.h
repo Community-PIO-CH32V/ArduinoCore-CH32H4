@@ -44,6 +44,19 @@ class Print
   public:
     Print() : write_error(0) {}
 
+    /* printf(), which the Arduino API does not have.
+     *
+     * Added because arduino-pico, both ESP cores and Mbed's all provide it and
+     * a great deal of library code assumes it. Kept here, in this core's
+     * vendored copy of the API, rather than bolted on elsewhere: printf has to
+     * be a member to reach write(), and Print cannot be extended from outside.
+     *
+     * Output goes through a stack buffer first and falls back to the heap only
+     * when it does not fit, so the common case allocates nothing. Returns the
+     * number of characters WRITTEN, which after a truncated or failed
+     * allocation is less than printf would have returned. */
+    int printf(const char *format, ...) __attribute__((format(printf, 2, 3)));
+
     int getWriteError() { return write_error; }
     void clearWriteError() { setWriteError(0); }
 

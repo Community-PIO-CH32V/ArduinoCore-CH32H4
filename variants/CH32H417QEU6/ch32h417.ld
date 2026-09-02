@@ -27,18 +27,52 @@ __stack_size_v3f = 8192;
  * gives the V5F 32 KB with an 8 KB margin for exactly this reason. */
 __stack_size_v5f = 32768;
 
+/* Filesystem size, in bytes.
+ *
+ * THIS FILE IS A TEMPLATE. The filesystem-size token in the assignment below
+ * is substituted with a byte count before the link, and the script does not
+ * assemble until it has been:
+ *
+ *   PlatformIO      tools/platformio-build.py, from board_build.filesystem_size
+ *   Arduino IDE     tools/simplesub.py, from a prelink hook in platform.txt
+ *
+ * One token, one meaning, both builds -- which is the arrangement arduino-pico
+ * uses and the reason its memmap templates carry __FS_START__ and friends.
+ * Substituting nothing would leave a linker script that fails on an undefined
+ * symbol, which is a much better failure than one that silently links a
+ * filesystem of length zero over the top of the sketch.
+ *
+ * Must be a multiple of the 8 KB flash erase page. The build checks that; this
+ * file cannot, because ld has no way to report a good message from a MEMORY
+ * expression. */
+__fs_size = __CH32H4_FS_SIZE__;
+
 MEMORY
 {
     /* The V3F stub: vectors, clocks, VIO18, console, wake. It is small and does
        not grow, so 32 K is generous and keeps _v5f_entry on a round number. */
     FLASH_V3F (rx)  : ORIGIN = 0x00000000, LENGTH = 32K
 
-    /* The Arduino image. This region deliberately STOPS at the EEPROM base
+    /* The Arduino image. This region deliberately STOPS at the filesystem
        rather than running to the end of the 960 K user area, so an oversized
        image is a link error instead of a board that works until someone writes
        a setting. MicroPython lost 26 K of image into its filesystem for want
-       of exactly this, and boot-looped on the next reset. */
-    FLASH_V5F (rx)  : ORIGIN = 0x00008000, LENGTH = 912K
+       of exactly this, and boot-looped on the next reset.
+
+       __fs_size is substituted by the build for board_build.filesystem_size
+       and defaults to zero. The flash tail therefore looks like this, which is
+       the layout arduino-pico uses:
+
+           0x08008000  the sketch          912K - __fs_size
+                       LittleFS            __fs_size   (selectable, may be 0)
+           0x080EC000  EEPROM              16K         (always last)
+           0x080F0000  end of user flash
+
+       The EEPROM sits at the very end so that changing the filesystem size
+       never moves it -- a stored setting survives a rebuild that resizes the
+       filesystem, which is the whole reason arduino-pico pins its EEPROM to
+       the top too. */
+    FLASH_V5F (rx)  : ORIGIN = 0x00008000, LENGTH = 912K - __fs_size
 
     /* ITCM: zero-wait at the V5F core clock. NOT where code goes by default --
        only what has been measured as hot. */
@@ -416,6 +450,33 @@ SECTIONS
     _heap_shared_start = ORIGIN(SHARED);
     _heap_shared_end = ORIGIN(SHARED) + LENGTH(SHARED);
 
+    /* ---- The flash tail: filesystem, then EEPROM ------------------------ */
+
+    /* These are PHYSICAL addresses, 0x08000000-based. The FLASH_V3F/FLASH_V5F
+       regions above are the same memory seen through the alias at zero that
+       the part boots from; the flash controller's erase and program registers
+       take the 0x08... form, so anything self-programming wants these.
+       Confusing the two is a write to an address that is a valid mapping of
+       something else entirely.
+
+       Names follow arduino-pico, so its LittleFS and EEPROM code reads the
+       same here: _FS_start, _FS_end, _EEPROM_start. */
+    _flash_physical_base = 0x08000000;
+
+    /* Always the last 16 KB, whatever the filesystem size. Two 8 KB erase
+       pages, used alternately, because a 4 KB Arduino-style EEPROM cannot be
+       one page on this part and a single-page read-modify-write has a window
+       in which a power cut loses everything. */
+    _EEPROM_size  = 16K;
+    _EEPROM_start = _flash_physical_base + 960K - _EEPROM_size;
+    _EEPROM_end   = _EEPROM_start + _EEPROM_size;
+
+    /* Immediately below it, growing downward as it is made larger, so the
+       EEPROM never moves and a stored setting survives a rebuild that resizes
+       the filesystem. Empty by default: _FS_start == _FS_end. */
+    _FS_end   = _EEPROM_start;
+    _FS_start = _FS_end - __fs_size;
+
     /DISCARD/ : {
         *(.note.*)
         *(.comment)
@@ -428,3 +489,26 @@ ASSERT( _v5f_entry % 1024 == 0,
 
 ASSERT( _heap_dtcm_end > _heap_dtcm_start,
     "DTCM is full: .data, .bss and the two stacks leave no room for a heap." )
+
+/* The image, the filesystem and the EEPROM must exactly tile the flash tail.
+ *
+ * Until now the EEPROM's base was a constant in EEPROM.h and the image's end
+ * was a length here, and NOTHING checked the two against each other -- the
+ * header said so in as many words. Get them out of step and the filesystem
+ * either overlaps the sketch, which corrupts on the first write, or leaves a
+ * silent hole. Both are far easier to cause than to diagnose.
+ *
+ * This is the check. It costs nothing and it fails at link time. */
+ASSERT( _FS_start == _flash_physical_base + ORIGIN(FLASH_V5F) + LENGTH(FLASH_V5F),
+    "The filesystem does not start where the sketch region ends. __fs_size and the FLASH_V5F length have gone out of step." )
+
+ASSERT( _FS_end == _EEPROM_start,
+    "The filesystem must end exactly where the EEPROM begins." )
+
+ASSERT( _EEPROM_end == _flash_physical_base + 960K,
+    "The EEPROM must be the last thing in flash." )
+
+/* 8 KB is the erase page on the 960 KB part. A filesystem that is not a whole
+ * number of pages has a block LittleFS can write but cannot erase. */
+ASSERT( __fs_size % 8K == 0,
+    "board_build.filesystem_size must be a multiple of the 8 KB flash erase page." )
