@@ -294,7 +294,7 @@ def _sync(sketch: str) -> str:
 
 
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
-                  "tls_board", "dualcore_board", "adc_board")
+                  "tls_board", "dualcore_board", "adc_board", "i2s_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -452,3 +452,17 @@ class Reply(dict):
     def __missing__(self, key):
         raise AssertionError(
             f"the board's reply has no {key!r}. Reply was:\n{self.raw}")
+
+
+@pytest.fixture(scope="session")
+def i2s_board():
+    """The I2S sketch.
+
+    Everything it is asked to do here is silent. There is an amplifier and a
+    speaker on instance 0's pins, and none of what these tests measure depends
+    on the sample values -- the peripheral clocks zeros exactly as it clocks
+    music.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("i2stest")

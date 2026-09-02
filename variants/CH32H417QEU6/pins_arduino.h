@@ -175,9 +175,42 @@
 #define PIN_SPI_SCK      PA5    /* SPI1, AF5 */
 #define PIN_SPI_MISO     PA6    /* SPI1, AF5 */
 #define PIN_SPI_MOSI     PA7    /* SPI1, AF5 */
-#define PIN_I2S_WS       PB12   /* I2S2 (SPI2, on HB1), AF5 */
-#define PIN_I2S_CK       PB13
-#define PIN_I2S_SD       PB15
+/* I2S.
+ *
+ * WCH numbers these in a way that catches everyone once: there are TWO I2S
+ * blocks, and they are the audio halves of SPI2 and SPI3. The datasheet calls
+ * them I2S1 and I2S2 -- so I2S1 lives in the SPI2 registers and I2S2 lives in
+ * the SPI3 registers, and there is no I2S3 at all. Names here follow the
+ * datasheet; the code that drives them names the SPI block, which is what the
+ * register map, the RCC gate and the DMA request are all keyed on.
+ *
+ * The alternate function is per PIN, not per peripheral: I2S2's clock is AF6
+ * on PB3 while its data is AF7 on PB2. Configuring all three with one AF works
+ * for I2S1 by luck -- every one of its pins is AF5 -- and silently fails for
+ * I2S2.
+ *
+ * I2S1 is the one wired to the amplifier on this board. I2S2's pins are the
+ * free choice among those the mux offers: PA4 is the DAC output and PB5 is the
+ * OneWire pin, so WS goes to PA15 and data to PB2.
+ */
+#define PIN_I2S1_WS      PB12   /* I2S1 = SPI2, on HB1 */
+#define PIN_I2S1_CK      PB13
+#define PIN_I2S1_SD      PB15
+#define PIN_I2S1_AF_WS   5
+#define PIN_I2S1_AF_CK   5
+#define PIN_I2S1_AF_SD   5
+
+#define PIN_I2S2_WS      PA15   /* I2S2 = SPI3, on HB1 */
+#define PIN_I2S2_CK      PB3
+#define PIN_I2S2_SD      PB2
+#define PIN_I2S2_AF_WS   6
+#define PIN_I2S2_AF_CK   6
+#define PIN_I2S2_AF_SD   7
+
+/* The default instance, for sketches that never name one. */
+#define PIN_I2S_WS       PIN_I2S1_WS
+#define PIN_I2S_CK       PIN_I2S1_CK
+#define PIN_I2S_SD       PIN_I2S1_SD
 #define PIN_DAC_OUT      PA4
 #define PIN_ONEWIRE      PB5    /* open-drain; needs a REAL external pull-up */
 #define PIN_SDMMC_CK     PC12

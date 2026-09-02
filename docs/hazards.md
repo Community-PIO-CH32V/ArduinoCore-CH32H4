@@ -724,3 +724,105 @@ SNTP are part of this core. But `EthernetClientSecure::verifyErrorString()`
 appends "the RTC has not been set" when the future-validity flag is set and the
 clock is unset, because the bare message sends people to look at their CA.
 `tests/hw/test_tls.py` asserts on that sentence.
+
+---
+
+## There is no I2S3, and the second I2S drove the first one's pins
+
+**Symptom.** None. `I2S(OUTPUT, 1)` returned true, the peripheral ran, the DMA
+ran, the measured throughput was correct, and no call reported an error. Three
+pins toggled -- the wrong three.
+
+**Cause.** Two of them, and the first hides the second.
+
+WCH's numbering: there are **two** I2S blocks and they are the audio halves of
+SPI2 and SPI3. The datasheet calls them **I2S1 and I2S2**, so I2S1 lives in the
+SPI2 registers and I2S2 lives in the SPI3 registers. There is no I2S3 anywhere
+on the part. This driver had been written as I2S2/I2S3, which is off by one
+against the datasheet and exactly right against the register map -- so the
+peripheral selection, the RCC gate and the DMA request numbers were all
+correct, and only the names were wrong. That is the sort of error that survives
+review, because everything it touches works.
+
+What did not work was the pin setup: it hardcoded instance 0's three pins, on
+GPIOB, with one alternate function for all three. Instance 1 therefore clocked
+SPI3 while configuring SPI2's pads.
+
+The alternate function is per **pin**, not per peripheral. Instance 0 is AF5 on
+all three of its pins -- which is why a single constant worked and why nothing
+suggested it would not generalise. Instance 1 is AF6 on clock and word select
+but **AF7** on data.
+
+**Fix.** A pin-and-AF table per instance in the variant, named the way the
+datasheet names them, and `setBCLK()`/`setDATA()` checked against the
+instance's own pins rather than instance 0's. Instance 1 defaults to PA15,
+PB3 and PB2 -- what the mux offers once PA4 (the DAC output) and PB5 (OneWire)
+are excluded.
+
+**Worth noting** that an unwired instance is still measurable: the DMA feeds
+the peripheral and the peripheral clocks its pins whether or not anything is
+listening, so the divider and the throughput can be checked with no device
+attached.
+
+---
+
+## analogRead() shares one ADC with ADCInput, and lost
+
+**Symptom.** `analogRead()` returned a plausible, stable, wrong number --
+about 1504 where 1673 was expected. Only after a paced capture had run; on a
+freshly booted board it was correct.
+
+**Cause.** `analogRead()` configured the ADC once, behind a static flag, and
+never again. `ADCInput` reconfigures the same ADC for scan mode, with an
+external trigger and DMA and a whole channel list in the regular sequence, and
+leaves it that way. A software conversion started against that setup converts
+the **whole sequence** and signals EOC at the end of it, so `analogRead()`
+returned the last channel of somebody else's scan.
+
+The number was 1504 because the previous test had captured `[ATEMP, AVREF]`,
+and AVREF really does read 1504. A real conversion of a real channel, just not
+the one that was asked for -- which is why it went unnoticed until something
+read a channel whose value was known independently.
+
+**Fix.** Re-establish single-shot mode on every read rather than once, and
+refuse outright while a capture owns the sequencer. Refusing is the honest
+answer for the second case: converting underneath a running capture would both
+answer with the wrong channel here and drop a scan there, and a dropped scan
+puts every later sample of the capture on the wrong channel.
+
+**The general form** is worth keeping in mind: any two drivers sharing one
+peripheral need the second one's configuration to be re-established rather than
+assumed, and "initialise once" is the bug. The ADC, the timers and the DMA
+channels on this part are all shared this way.
+
+---
+
+## The internal ADC channels need the slow sample window, or they read the channel before them
+
+**Symptom.** A scan of `[A0, ATEMP]` reports a temperature channel that tracks
+A0. With A0 near zero it reads as an implausibly cold die; with A0 mid-scale it
+reads as a plausible warm one.
+
+**Cause.** Both internal channels -- the temperature sensor and the 1.20 V
+reference -- are driven through a high impedance and need a long sample window
+to charge the sample-and-hold. Sampled with the short window a pin uses, they
+return whatever the capacitor still held, which in a scan is the previous
+channel's value.
+
+**Fix.** The sample time is chosen per channel: the slowest setting for the
+internal ones, a short one for pins. That makes the achievable rate depend on
+the channel **list** rather than its length -- two internal channels cap a scan
+near 24.8 kHz where two pins reach 152 kHz -- so `maximumFrequency()` computes
+from the list, and `begin()` refuses a rate above it.
+
+Refusing matters: an over-triggered ADC does not slow down, it **drops the
+trigger**, and one dropped scan puts every later sample on the wrong channel
+for the rest of the capture.
+
+**Testing it** needs a known input on the channel before the internal one.
+There is no signal generator on this bench, but PC0 and PC1 go nowhere, and a
+pin can be driven from its own GPIO output driver while the ADC samples the
+pad. Driving A0 to zero and requiring ATEMP to stay near its own value is what
+separates a correct capture from one reading the previous channel -- and
+driving the pair to opposite levels, both ways round, is what makes channel
+ORDER checkable at all.

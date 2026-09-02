@@ -18,11 +18,36 @@ extern "C" {
 #define I2S_DMA_A_FLAGS 0x0000F000u   /* channel 4 nibble */
 #define I2S_DMA_B_FLAGS 0x000F0000u   /* channel 5 nibble */
 
-/* DMAMUX request numbers, reference manual table 10-2. */
-#define REQ_I2S2_TX 65
-#define REQ_I2S2_RX 66
-#define REQ_I2S3_TX 67
-#define REQ_I2S3_RX 68
+/* DMAMUX request numbers, reference manual table 10-2.
+ *
+ * Named for the SPI block, because that is what the table names and what the
+ * registers are. WCH's I2S1 is the audio half of SPI2 and I2S2 is the audio
+ * half of SPI3 -- there is no I2S3 -- so a macro called REQ_SPI3_TX holding
+ * 67 is right by accident and wrong by name, which is the sort of thing that
+ * survives review. */
+#define REQ_SPI2_TX 65   /* I2S1 */
+#define REQ_SPI2_RX 66
+#define REQ_SPI3_TX 67   /* I2S2 */
+#define REQ_SPI3_RX 68
+
+/* Pins and their alternate functions, per instance.
+ *
+ * The AF is per pin. I2S1 happens to be AF5 on all three, and configuring the
+ * set with one constant worked for exactly that reason; I2S2 is AF6 on clock
+ * and word select but AF7 on data, and the same code drove I2S1's pads while
+ * clocking SPI3. Nothing reported an error -- the peripheral ran, the DMA ran,
+ * and the wrong three pins toggled. */
+struct i2s_pins_t {
+    pin_size_t ws, ck, sd;
+    uint8_t af_ws, af_ck, af_sd;
+};
+
+static const i2s_pins_t s_pins[2] = {
+    { PIN_I2S1_WS, PIN_I2S1_CK, PIN_I2S1_SD,
+      PIN_I2S1_AF_WS, PIN_I2S1_AF_CK, PIN_I2S1_AF_SD },
+    { PIN_I2S2_WS, PIN_I2S2_CK, PIN_I2S2_SD,
+      PIN_I2S2_AF_WS, PIN_I2S2_AF_CK, PIN_I2S2_AF_SD },
+};
 
 /* I2SDIV is 8 bits and must be at least 2; ODD adds the half step, so the
  * effective divisor 2*I2SDIV+ODD runs from 4 to 511. */
@@ -43,9 +68,10 @@ static I2S *s_instances[2] = { nullptr, nullptr };
 
 I2S::I2S(PinMode direction, uint8_t id)
     : _id(id > 1 ? 0 : id), _rx(direction == INPUT) {
-    /* The variant's defaults, so a sketch that only calls begin() works. */
-    _pin_bclk = PIN_I2S_CK;
-    _pin_data = PIN_I2S_SD;
+    /* The variant's defaults FOR THIS INSTANCE, so a sketch that only calls
+     * begin() works on either. */
+    _pin_bclk = s_pins[_id].ck;
+    _pin_data = s_pins[_id].sd;
 }
 
 I2S::~I2S() {
@@ -59,7 +85,7 @@ bool I2S::setBCLK(pin_size_t pin) {
     /* The mux fixes these. Reporting false rather than reconfiguring is the
      * honest answer: a sketch asking for a pin the peripheral cannot drive
      * would otherwise get silence out of a pin it never named. */
-    if (pin != PIN_I2S_CK) {
+    if (pin != s_pins[_id].ck) {
         return false;
     }
     _pin_bclk = pin;
@@ -67,7 +93,7 @@ bool I2S::setBCLK(pin_size_t pin) {
 }
 
 bool I2S::setDATA(pin_size_t pin) {
-    if (_running || pin != PIN_I2S_SD) {
+    if (_running || pin != s_pins[_id].sd) {
         return false;
     }
     _pin_data = pin;
@@ -169,18 +195,21 @@ bool I2S::configureClock() {
 /* ---- pins --------------------------------------------------------------- */
 
 void I2S::configurePins() {
-    /* WS is the pin below BCLK on this mux, and the two are never separable.
-     * Naming it here rather than making it configurable keeps a sketch from
-     * asking for a combination the hardware does not have. */
-    const pin_size_t ws = PIN_I2S_WS;
+    const i2s_pins_t &pinout = s_pins[_id];
 
-    RCC_HB2PeriphClockCmd(RCC_HB2Periph_GPIOB | RCC_HB2Periph_AFIO, ENABLE);
+    /* Both instances' pins live on ports A and B, and gating a port that is
+     * already on costs nothing. Enabling only the ports actually used would
+     * mean deriving them from the pin table for no benefit. */
+    RCC_HB2PeriphClockCmd(RCC_HB2Periph_GPIOA | RCC_HB2Periph_GPIOB
+                          | RCC_HB2Periph_AFIO, ENABLE);
     (void)RCC->HB2PCENR;
 
-    struct { pin_size_t pin; bool input; } pins[] = {
-        { _pin_bclk, _slave },
-        { ws,        _slave },
-        { _pin_data, _rx },
+    /* WS follows the master/slave direction, not the data direction: a slave
+     * receives both clocks regardless of which way the samples go. */
+    struct { pin_size_t pin; uint8_t af; bool input; } pins[] = {
+        { _pin_bclk,  pinout.af_ck, _slave },
+        { pinout.ws,  pinout.af_ws, _slave },
+        { _pin_data,  pinout.af_sd, _rx    },
     };
 
     for (auto &p : pins) {
@@ -197,7 +226,7 @@ void I2S::configurePins() {
         init.GPIO_Mode = p.input ? GPIO_Mode_IN_FLOATING : GPIO_Mode_AF_PP;
         init.GPIO_Speed = GPIO_Speed_Very_High;
         GPIO_Init(port, &init);
-        GPIO_PinAFConfig(port, bit, GPIO_AF5);
+        GPIO_PinAFConfig(port, bit, p.af);
     }
 }
 
@@ -230,10 +259,10 @@ void I2S::configureDMA() {
 
     uint8_t req;
     if (_id == 0) {
-        req = _rx ? REQ_I2S2_RX : REQ_I2S2_TX;
+        req = _rx ? REQ_SPI2_RX : REQ_SPI2_TX;
         DMA_MuxChannelConfig(DMA_MuxChannel4, req);
     } else {
-        req = _rx ? REQ_I2S3_RX : REQ_I2S3_TX;
+        req = _rx ? REQ_SPI3_RX : REQ_SPI3_TX;
         DMA_MuxChannelConfig(DMA_MuxChannel5, req);
     }
 

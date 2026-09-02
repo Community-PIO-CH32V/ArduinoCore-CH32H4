@@ -1,4 +1,4 @@
-/* I2S on the I2S2/I2S3 peripherals, in the shape arduino-pico's I2S uses.
+/* I2S on this part's two I2S peripherals, in the shape arduino-pico's I2S uses.
  *
  *     I2S i2s(OUTPUT);
  *     i2s.setBCLK(PIN_I2S_CK);      // WS is BCLK+1 in hardware terms here
@@ -7,8 +7,21 @@
  *     i2s.begin(44100);
  *     i2s.write(sample_l);  i2s.write(sample_r);
  *
- * I2S(0) is I2S2 (on SPI2) and I2S(1) is I2S3 (on SPI3). They are independent:
+ * I2S(OUTPUT, 0) is I2S1 and I2S(OUTPUT, 1) is I2S2. They are independent:
  * neither is synchronous to the other and either can be used alone.
+ *
+ * ### The numbering, which catches everyone once
+ *
+ * There are TWO I2S blocks and they are the audio halves of SPI2 and SPI3.
+ * The datasheet calls them I2S1 and I2S2 -- so I2S1 is inside SPI2 and I2S2 is
+ * inside SPI3, and there is no I2S3 anywhere on the part. This file names the
+ * SPI block wherever a register, an RCC gate or a DMA request is involved,
+ * because that is what those are keyed on, and the datasheet name only where
+ * the peripheral is being named to a sketch.
+ *
+ * I2S1's pins are the ones wired to the amplifier on this board. Instance 1
+ * defaults to PA15/PB3/PB2, chosen from what the mux offers after PA4 (the DAC
+ * output) and PB5 (OneWire) are excluded.
  *
  * ### Why this and not the SAI
  *

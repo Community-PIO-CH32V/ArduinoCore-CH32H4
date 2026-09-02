@@ -9,10 +9,42 @@
 #include <Arduino.h>
 #include <I2S.h>
 
-static I2S i2s(OUTPUT);
+/* Heap-allocated, so the instance and the direction can both be changed at
+   run time -- there are two I2S blocks and only one of them is wired to the
+   amplifier, and a test that can only ever construct the wired one cannot say
+   anything about the other. */
+static I2S *i2sp = new I2S(OUTPUT, 0);
+static uint8_t inst = 0;
+static bool is_rx = false;
+
 static char line[96];
 static int len = 0;
 static bool started = false;
+
+#define i2s (*i2sp)
+
+static void doInstance(uint8_t id, bool rx) {
+  if (started) { i2s.end(); started = false; }
+  delete i2sp;
+  inst = id > 1 ? 0 : id;
+  is_rx = rx;
+  i2sp = new I2S(rx ? INPUT : OUTPUT, inst);
+  Serial1.print("i2s_instance="); Serial1.println(inst);
+  Serial1.print("i2s_rx="); Serial1.println(is_rx ? 1 : 0);
+  /* The pins the object actually adopted, not the ones the variant lists for
+     instance 0 -- which is exactly the bug this reports on. */
+  Serial1.print("i2s_pin_ck="); Serial1.println(inst ? PIN_I2S2_CK : PIN_I2S1_CK);
+  Serial1.print("i2s_pin_ws="); Serial1.println(inst ? PIN_I2S2_WS : PIN_I2S1_WS);
+  Serial1.print("i2s_pin_sd="); Serial1.println(inst ? PIN_I2S2_SD : PIN_I2S1_SD);
+  Serial1.print("i2s_af_ck="); Serial1.println(inst ? PIN_I2S2_AF_CK : PIN_I2S1_AF_CK);
+  Serial1.print("i2s_af_sd="); Serial1.println(inst ? PIN_I2S2_AF_SD : PIN_I2S1_AF_SD);
+  /* setBCLK is the observable check that the object took its OWN instance's
+     pins: it accepts that instance's clock pin and refuses the other's. */
+  Serial1.print("i2s_accepts_own_ck=");
+  Serial1.println(i2s.setBCLK(inst ? PIN_I2S2_CK : PIN_I2S1_CK) ? 1 : 0);
+  Serial1.print("i2s_accepts_other_ck=");
+  Serial1.println(i2s.setBCLK(inst ? PIN_I2S1_CK : PIN_I2S2_CK) ? 1 : 0);
+}
 
 static void doBegin(uint32_t rate, int bits) {
   if (started) {
@@ -118,9 +150,17 @@ static void doSilence(uint32_t ms) {
     yield();
   }
   const uint32_t elapsed = millis() - t0;
+  /* Subtract what is still in the ring, for the same reason doTone() does:
+     frames WRITTEN includes a whole bufferful the wire has never seen, and
+     over a short run that reads as a rate several percent high. Leaving it out
+     here made this command disagree with doTone() by 2.2% on the same
+     divider. */
+  const uint32_t queued = (uint32_t)((8192 - i2s.availableForWrite()) / 4);
+  const uint32_t sent = frames > queued ? frames - queued : 0;
   Serial1.print("i2s_frames="); Serial1.println(frames);
+  Serial1.print("i2s_queued="); Serial1.println(queued);
   Serial1.print("i2s_measured_rate=");
-  Serial1.println(elapsed ? (uint32_t)((uint64_t)frames * 1000 / elapsed) : 0);
+  Serial1.println(elapsed ? (uint64_t)sent * 1000 / elapsed : 0);
   Serial1.print("i2s_underflows="); Serial1.println(i2s.getUnderflows());
 }
 
@@ -168,10 +208,21 @@ static void handle(char *cmd) {
     Serial1.print("i2s_avail_write="); Serial1.println(i2s.availableForWrite());
     Serial1.print("i2s_underflows="); Serial1.println(i2s.getUnderflows());
 
+  } else if (!strncmp(cmd, "i2sinst ", 8)) {
+    /* i2sinst <0|1> [rx] */
+    uint8_t id = (uint8_t)atoi(cmd + 8);
+    char *sp = strchr(cmd + 8, ' ');
+    doInstance(id, sp && atoi(sp + 1));
+
   } else if (!strcmp(cmd, "i2spins")) {
     Serial1.print("pin_ck="); Serial1.println(PIN_I2S_CK);
     Serial1.print("pin_ws="); Serial1.println(PIN_I2S_WS);
     Serial1.print("pin_sd="); Serial1.println(PIN_I2S_SD);
+    Serial1.print("i2s1_ck="); Serial1.println(PIN_I2S1_CK);
+    Serial1.print("i2s2_ck="); Serial1.println(PIN_I2S2_CK);
+    Serial1.print("i2s2_sd="); Serial1.println(PIN_I2S2_SD);
+    Serial1.print("i2s2_ws="); Serial1.println(PIN_I2S2_WS);
+    Serial1.print("i2s_instance="); Serial1.println(inst);
     Serial1.print("vio18_sel="); Serial1.println((PWR->CTLR >> 10) & 0x7);
   }
   Serial1.print("> ");
