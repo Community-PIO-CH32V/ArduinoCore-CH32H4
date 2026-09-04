@@ -6,6 +6,7 @@
 # tools/platformio-build.py. The two are two statements of the same build, and
 # the flash layout in both comes from the same numbers.
 
+menu.usbstack=USB stack
 menu.serial=Serial port
 menu.exceptions=C++ Exceptions
 menu.fs=Filesystem size
@@ -28,22 +29,34 @@ ch32h417qeu6.upload.tool.default=wlink
 ch32h417qeu6.upload.protocol=wlink
 ch32h417qeu6.upload.maximum_data_size=917504
 
+# The USB device stack, independent of what `Serial` is.
+#
+# These were one menu until it became clear they are two questions. A sketch
+# can want TinyUSB for HID or MSC while keeping the console on the UART, and a
+# sketch that needs neither should not pay for a USB stack it never calls --
+# roughly 15 KB of flash and the RAM its buffers sit in.
+#
+# None also removes the reason a sketch must include Adafruit_TinyUSB.h: with
+# no stack there is nothing for the library-detection pass to find.
+ch32h417qeu6.menu.usbstack.tinyusb=Adafruit TinyUSB
+ch32h417qeu6.menu.usbstack.tinyusb.build.flags.usbstack=-DCH32H4_USB -DUSE_TINYUSB
+ch32h417qeu6.menu.usbstack.none=None
+ch32h417qeu6.menu.usbstack.none.build.flags.usbstack=
+
 # What `Serial` refers to. Serial1 is always USART1 on PA9/PA10, into the
 # WCH-Link's VCP, whichever is chosen here.
 #
 # USB CDC is the default, as in the PlatformIO build, because it is what
-# someone plugging the board into a PC expects to find. The sketch does not
-# have to include Adafruit_TinyUSB.h: the library is pulled in by Arduino.h's
-# own include of it, which fails during arduino-cli's library-detection pass
-# because platform.txt deliberately holds the TinyUSB headers back from that
-# pass -- see build.includes.detect there, which explains why an include path
-# that resolves too early is the thing that breaks this.
+# someone plugging the board into a PC expects to find. It needs the USB stack
+# menu set to Adafruit TinyUSB; choosing None with USB CDC is refused by
+# Arduino.h rather than silently giving you the UART, which is what it used to
+# do.
 #
-# The USART1 option is worth keeping: a fault during static initialisation
-# happens before USB has enumerated, so a board that only speaks CDC cannot
-# report one.
+# The USART1 option is worth keeping whatever the USB stack is: a fault during
+# static initialisation happens before USB has enumerated, so a board that only
+# speaks CDC cannot report one.
 ch32h417qeu6.menu.serial.usb=USB CDC
-ch32h417qeu6.menu.serial.usb.build.flags.serial=-DCH32H4_USB -DUSE_TINYUSB -DCH32H4_SERIAL_IS_USB
+ch32h417qeu6.menu.serial.usb.build.flags.serial=-DCH32H4_SERIAL_IS_USB
 ch32h417qeu6.menu.serial.uart=USART1
 ch32h417qeu6.menu.serial.uart.build.flags.serial=
 

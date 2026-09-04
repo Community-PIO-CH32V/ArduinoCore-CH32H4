@@ -48,14 +48,35 @@ using namespace arduino;
  * since a CDC-only board cannot report such a fault at all.
  *
  * `Serial1` is USART1 on PA9/PA10 either way. */
-#if defined(CH32H4_USB) && defined(CH32H4_SERIAL_IS_USB)
-#include "ch32h4_usb.h"
-#include "Adafruit_TinyUSB.h"
-#else
+/* Asking for a USB console without a USB stack used to fall through to the
+ * #else below and quietly hand back USART1 -- the board came up, printed
+ * nothing to the port the user was watching, and nothing said why. The two
+ * are separate menu entries now, which makes the combination easy to select
+ * by accident, so it is refused. */
+#if defined(CH32H4_SERIAL_IS_USB) && !defined(CH32H4_USB)
+#error "Serial is set to USB CDC but the USB stack is None. Pick a USB stack \
+(Tools > USB stack > Adafruit TinyUSB), or set Serial to USART1."
+#endif
+
+/* The stack first, unconditionally when it is compiled in, so that whatever
+ * Adafruit declares is parsed before `Serial` means anything here. */
 #ifdef CH32H4_USB
 #include "ch32h4_usb.h"
 #include "Adafruit_TinyUSB.h"
 #endif
+
+/* Then name `Serial`, and name it in exactly one place.
+ *
+ * Adafruit's header would alias its CDC object to `Serial` itself, which is
+ * right for a core where USB implies a USB console. Here they are separate
+ * menu entries, so the fork skips that alias for ARDUINO_ARCH_CH32H4 and the
+ * choice is made here instead. Doing it the other way round does not merely
+ * look untidy: Adafruit_TinyUSB.h includes this file, so with the alias live
+ * the macro below rewrites its own declaration into
+ * `Adafruit_USBD_CDC Serial1` and collides with the UART. */
+#ifdef CH32H4_SERIAL_IS_USB
+#define Serial SerialTinyUSB
+#else
 #define Serial Serial1
 #endif
 

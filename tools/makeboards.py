@@ -82,6 +82,7 @@ HEADER = """# Arduino IDE board definitions for the CH32H41x.
 # tools/platformio-build.py. The two are two statements of the same build, and
 # the flash layout in both comes from the same numbers.
 
+menu.usbstack=USB stack
 menu.serial=Serial port
 menu.exceptions=C++ Exceptions
 menu.fs=Filesystem size
@@ -104,23 +105,37 @@ EXCEPTIONS = """
 {id}.menu.exceptions.Enabled.build.flags.exceptions.define=-DCH32H4_EXCEPTIONS
 """
 
+USBSTACK = """
+# The USB device stack, independent of what `Serial` is.
+#
+# These were one menu until it became clear they are two questions. A sketch
+# can want TinyUSB for HID or MSC while keeping the console on the UART, and a
+# sketch that needs neither should not pay for a USB stack it never calls --
+# roughly 15 KB of flash and the RAM its buffers sit in.
+#
+# None also removes the reason a sketch must include Adafruit_TinyUSB.h: with
+# no stack there is nothing for the library-detection pass to find.
+{id}.menu.usbstack.tinyusb=Adafruit TinyUSB
+{id}.menu.usbstack.tinyusb.build.flags.usbstack=-DCH32H4_USB -DUSE_TINYUSB
+{id}.menu.usbstack.none=None
+{id}.menu.usbstack.none.build.flags.usbstack=
+"""
+
 SERIAL = """
 # What `Serial` refers to. Serial1 is always USART1 on PA9/PA10, into the
 # WCH-Link's VCP, whichever is chosen here.
 #
 # USB CDC is the default, as in the PlatformIO build, because it is what
-# someone plugging the board into a PC expects to find. The sketch does not
-# have to include Adafruit_TinyUSB.h: the library is pulled in by Arduino.h's
-# own include of it, which fails during arduino-cli's library-detection pass
-# because platform.txt deliberately holds the TinyUSB headers back from that
-# pass -- see build.includes.detect there, which explains why an include path
-# that resolves too early is the thing that breaks this.
+# someone plugging the board into a PC expects to find. It needs the USB stack
+# menu set to Adafruit TinyUSB; choosing None with USB CDC is refused by
+# Arduino.h rather than silently giving you the UART, which is what it used to
+# do.
 #
-# The USART1 option is worth keeping: a fault during static initialisation
-# happens before USB has enumerated, so a board that only speaks CDC cannot
-# report one.
+# The USART1 option is worth keeping whatever the USB stack is: a fault during
+# static initialisation happens before USB has enumerated, so a board that only
+# speaks CDC cannot report one.
 {id}.menu.serial.usb=USB CDC
-{id}.menu.serial.usb.build.flags.serial=-DCH32H4_USB -DUSE_TINYUSB -DCH32H4_SERIAL_IS_USB
+{id}.menu.serial.usb.build.flags.serial=-DCH32H4_SERIAL_IS_USB
 {id}.menu.serial.uart=USART1
 {id}.menu.serial.uart.build.flags.serial=
 """
@@ -172,6 +187,7 @@ def generate():
                 mabi=b["mabi"], clock=b["clock"], svd=b["svd"],
                 data=b["data_size"]))
 
+        out.append(USBSTACK.format(id=i))
         out.append(SERIAL.format(id=i))
         out.append(EXCEPTIONS.format(id=i))
         out.append(FS_INTRO.format(user=USER_FLASH, eeprom=EEPROM_SIZE))
