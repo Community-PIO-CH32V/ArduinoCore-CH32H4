@@ -156,3 +156,73 @@ def test_clock_macro_is_set_by_every_board():
         clock = boards.get("%s.build.flags.clock" % board, "")
         assert "SYSCLK_" in clock, (
             "%s does not set build.flags.clock" % board)
+
+
+# ---- the debug configuration ---------------------------------------------
+
+DEBUG_DIR = ROOT / "debug"
+PROGRAMMERS_TXT = ROOT / "programmers.txt"
+
+
+def test_programmers_reference_only_defined_properties():
+    """programmers.txt can override anything, including into nothing.
+
+    A typo in a property name here does not fail: the override simply lands on
+    a name nobody reads, the default in platform.txt stays in effect, and the
+    debugger attaches to the wrong core while appearing to honour the choice.
+    """
+    platform = read_properties(PLATFORM_TXT)
+    programmers = read_properties(PROGRAMMERS_TXT)
+
+    ids = sorted({k.split(".")[0] for k in programmers if k.endswith(".name")})
+    assert ids, "no programmers found"
+
+    for key in programmers:
+        prop = ".".join(key.split(".")[1:])
+        if prop in ("name",):
+            continue
+        # Every other property must be one platform.txt actually consumes.
+        assert prop in platform or prop.startswith("program.tool"), (
+            "%s sets %r, which nothing in platform.txt reads" % (key, prop))
+
+
+def test_each_programmer_names_a_debug_script_that_exists():
+    programmers = read_properties(PROGRAMMERS_TXT)
+    scripts = {k: v for k, v in programmers.items()
+               if k.endswith("debug.server.openocd.script")}
+    assert len(scripts) >= 2, "expected one debug script per core"
+    for key, value in scripts.items():
+        name = value.rsplit("/", 1)[-1]
+        assert (DEBUG_DIR / name).is_file(), (
+            "%s points at debug/%s, which does not exist" % (key, name))
+
+
+def test_the_openocd_configs_create_cpu0_before_cpu1():
+    """Creation order is what binds a hart to a target, and only that.
+
+    -coreid is accepted and ignored by this OpenOCD's wch_riscv driver:
+    swapping the two values changes nothing. The hart follows the order the
+    targets are created in, so cpu.0 must be created first -- it is the V3F.
+
+    Reorder them and the two cores swap underneath the port numbers. Nothing
+    reports it. The debugger attaches, halts, single-steps and shows source,
+    and the source is the other core's.
+    """
+    for cfg in sorted(DEBUG_DIR.glob("ch32h417-*.cfg")):
+        text = cfg.read_text(encoding="utf-8")
+        first = text.index("target create $_TARGETNAME.0")
+        second = text.index("target create $_TARGETNAME.1")
+        assert first < second, (
+            "%s creates cpu.1 before cpu.0, which swaps the cores" % cfg.name)
+
+
+@pytest.mark.parametrize("core,port0,port1", [
+    # cpu.0 is the V3F, cpu.1 the V5F. The file named for a core must put that
+    # core on 3333 -- the only port a debugger front end will connect to.
+    ("v3f", 3333, 3334),
+    ("v5f", 3334, 3333),
+])
+def test_the_named_core_answers_on_3333(core, port0, port1):
+    text = (DEBUG_DIR / ("ch32h417-%s.cfg" % core)).read_text(encoding="utf-8")
+    assert "$_TARGETNAME.0 configure -gdb-port %d" % port0 in text, text
+    assert "$_TARGETNAME.1 configure -gdb-port %d" % port1 in text, text

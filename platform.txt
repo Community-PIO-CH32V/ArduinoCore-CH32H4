@@ -68,7 +68,24 @@ compiler.machine.flags=-march={build.march} -mabi={build.mabi} -msmall-data-limi
 # exactly how a real warning gets missed.
 compiler.warning_flags=-Wall -Wextra -Wno-comment
 
-compiler.common.flags={compiler.machine.flags} -Os {compiler.warning_flags} -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common
+# Optimisation, and whether there is any debug information at all.
+#
+# arduino-cli picks between these two: normally .release, and .debug when the
+# build is asked to be debuggable (`arduino-cli compile --optimize-for-debug`,
+# or the IDE's "Optimize for Debugging"). Without the pair defined, every build
+# is -Os with no -g, and a debugger can set a breakpoint on a function and show
+# nothing else -- no source lines, no locals, no arguments. That is what this
+# core did until the debugger was first pointed at it.
+#
+# -Og rather than -O0: -O0 on this part produces an image that is very much
+# slower, and the timing-sensitive paths -- the flash page program, the I2S
+# DMA -- are worth keeping close to what ships. -g3 rather than -g so that
+# macros are visible, of which this core has a great many that matter.
+compiler.optimization_flags.release=-Os
+compiler.optimization_flags.debug=-Og -g3
+compiler.optimization_flags={compiler.optimization_flags.release}
+
+compiler.common.flags={compiler.machine.flags} {compiler.optimization_flags} {compiler.warning_flags} -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common
 
 compiler.c.flags={compiler.common.flags} -std=gnu17 -MMD -c
 compiler.cpp.flags={compiler.common.flags} -std=gnu++17 {build.flags.exceptions} -fno-threadsafe-statics -fno-rtti -fno-use-cxa-atexit -MMD -c
@@ -87,7 +104,7 @@ compiler.size.flags=-A
 # NOT -Wl,--no-relax-gp either: this is GNU ld 2.38, which does not have the
 # option, and passing it is a hard link error. If "relocation truncated to fit:
 # R_RISCV_GPREL_I" ever appears, the fix is -msmall-data-limit=0.
-compiler.c.elf.flags={compiler.machine.flags} -Os -nostartfiles -Wl,--gc-sections -Wl,--print-memory-usage --specs=nosys.specs
+compiler.c.elf.flags={compiler.machine.flags} {compiler.optimization_flags} -nostartfiles -Wl,--gc-sections -Wl,--print-memory-usage --specs=nosys.specs
 
 compiler.c.extra_flags=
 compiler.cpp.extra_flags=
@@ -246,3 +263,46 @@ tools.wlink.upload.pattern="{path}/{cmd}" flash "{build.path}/{build.project_nam
 tools.wlink.erase.params.verbose=-v
 tools.wlink.erase.params.quiet=-q
 tools.wlink.erase.pattern="{path}/{cmd}" erase
+
+# "Upload Using Programmer" -- the same flash, from either programmer entry.
+# There is one image and one core's worth of uploading to do; the two entries
+# in programmers.txt differ only in which core they debug.
+tools.wlink.program.params.verbose=-v
+tools.wlink.program.params.quiet=-q
+tools.wlink.program.pattern="{path}/{cmd}" flash "{build.path}/{build.project_name}.bin"
+
+# --------------------------------------------------------------------------
+# Debugging
+# --------------------------------------------------------------------------
+#
+# OpenOCD from WCH's fork -- upstream has no wlinke adapter driver and no
+# wch_riscv target -- driving the WCH-LinkE, with riscv-wch-elf-gdb from the
+# same toolchain that built the image.
+#
+# THE CORE IS CHOSEN BY THE PROGRAMMER, not by a board menu. Tools >
+# Programmer, or `arduino-cli debug -P wchlink_v3f`. A menu would have worked
+# too, but a menu entry is part of the FQBN and would rebuild the sketch on
+# every switch, for a choice that does not change a byte of the image.
+#
+# The default here is the V5F, because that is where setup() and loop() run.
+# debug/README.md has the rest, including why the two OpenOCD scripts must
+# differ in exactly one line.
+debug.executable={build.path}/{build.project_name}.elf
+debug.toolchain=gcc
+debug.toolchain.path={compiler.path}
+debug.toolchain.prefix={compiler.prefix}
+debug.server=openocd
+debug.server.openocd.path={runtime.tools.openocd-riscv-wch.path}/bin/openocd
+# GDB spawns the server itself, through CreateProcess, which does not append
+# .exe the way a shell would. Without this the debug session dies on
+# "CreateProcess: No such file or directory" naming a path that plainly exists.
+debug.server.openocd.path.windows={runtime.tools.openocd-riscv-wch.path}/bin/openocd.exe
+debug.server.openocd.scripts_dir={runtime.tools.openocd-riscv-wch.path}/bin/
+debug.server.openocd.script={runtime.platform.path}/debug/ch32h417-v5f.cfg
+
+# attach, NOT launch. The V5F is started by the V3F rather than by the reset
+# vector, so a front end that resets the part and expects to find the V5F
+# running finds it halted at nothing instead. Upload with the Upload button,
+# which uses wlink, and attach to the running image.
+debug.cortex-debug.custom.request=attach
+debug.cortex-debug.custom.objdumpPath={compiler.path}{compiler.objdump.cmd}

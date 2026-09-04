@@ -65,17 +65,19 @@ amplifier and a WCH-Link attached.
 | | RTC on LSI, LSE and HSE, wired into `gettimeofday()` | verified |
 | | LittleFS in the flash tail, and the EEPROM above it | verified |
 | | Arduino IDE / arduino-cli build | verified |
+| | Debugging both cores over OpenOCD and GDB | verified — see the gaps below |
 
-`python -m pytest tests` runs all **258**: **74 host-side** — the tree, the
-linker layout, the Arduino IDE build description and a matrix of build
-configurations — and **184 on hardware**, against a connected board. The
+`python -m pytest tests` runs all **263**: **79 host-side** — the tree, the
+linker layout, the Arduino IDE build description, the debug configuration and
+a matrix of build configurations — and **184 on hardware**, against a connected
+board. The
 hardware half is `tests/hw`; `--ignore=tests/hw` leaves the host-side half,
 which needs no board. The hardware suite reprograms the part nine times — once
 per sketch — and takes about three minutes.
 
 ### What is not verified
 
-Three things, all of them limited by the bench rather than by the code:
+Four things, three of them limited by the bench rather than by the code:
 
 * **I2S receive** and **slave mode**. Receive needs a microphone and slave mode
   needs an external clock, and neither is attached. The transmit path is
@@ -85,6 +87,12 @@ Three things, all of them limited by the bench rather than by the code:
   DMA throughput and the underflow count, all of which are independent of the
   sample values — so the whole suite runs on silence. Judging the audio needs
   ears or a scope.
+* **`arduino-cli debug` on Windows.** OpenOCD and GDB were verified on
+  hardware over TCP, on both cores, which is how the Arduino IDE drives them.
+  The `arduino-cli debug` subcommand starts the server through GDB as a pipe
+  instead, and this toolchain's GDB cannot spawn a pipe child on Windows at
+  all -- it fails identically on `cmd /c echo hi`, so there is nothing here to
+  fix. `debug/README.md` has the manual equivalent.
 * **The ADC's and DAC's absolute accuracy.** Rate, throughput, channel
   ordering, the internal reference and the die temperature are all checked, and
   the DAC is checked end to end by reading its own pad back through the ADC —
@@ -181,6 +189,43 @@ compiler.path=C:/Users/you/.platformio/packages/toolchain-riscv/bin/
 ```
 
 It is gitignored.
+
+### Debugging
+
+WCH's OpenOCD fork -- upstream has no `wlinke` adapter driver and no
+`wch_riscv` target -- and `riscv-wch-elf-gdb` from the toolchain that built the
+image. Both cores are debuggable, against the same ELF, which is what the
+single-image design buys.
+
+**Which core is chosen by the Programmer, not by a board menu.** Tools ▸
+Programmer, or `arduino-cli debug -P wchlink_v3f`:
+
+| Programmer | GDB port 3333 | port 3334 |
+|---|---|---|
+| `wchlink_v5f` (default) | V5F — `setup()`, `loop()`, the sketch | V3F |
+| `wchlink_v3f` | V3F — `setup1()`, `loop1()`, the boot stub | V5F |
+
+Port 3333 is the only port a debugger front end will connect to, so choosing a
+core means choosing an OpenOCD script; `debug/` holds one per core and
+`debug/README.md` explains why they must differ in exactly one line. A menu
+would have worked too, but a menu entry is part of the FQBN and would rebuild
+the sketch on every switch, for a choice that does not change a byte.
+
+The session attaches rather than launches: the V5F is started by the V3F, not
+by the reset vector, so a front end that resets the part and expects to find
+the V5F running finds it halted at nothing. Upload first, then attach.
+
+Build with **Optimize for Debugging** (`arduino-cli compile
+--optimize-for-debug`) to get `-Og -g3` instead of `-Os`. Without it there is
+no debug information at all: a breakpoint on a function still works, and
+nothing else does — no source lines, no locals, no arguments. With it, a
+breakpoint in `loop()` shows the sketch's own line, and stepping into
+`delay()` shows `ms=1000`.
+
+`arduino-cli debug` itself does not work on Windows, and the configuration is
+not the reason — the toolchain's GDB cannot spawn the pipe child that command
+requires, failing the same way on `cmd /c echo hi`. Start OpenOCD yourself and
+connect over TCP; `debug/README.md` has the four lines.
 
 ## Testing
 

@@ -1,0 +1,19 @@
+# The debug probe, once per core.
+#
+# Tools > Programmer in the IDE, or `arduino-cli debug -P <id>`. Both entries
+# drive the same WCH-LinkE over the same OpenOCD; they differ only in which
+# core answers on GDB port 3333, which is the only port a debugger front end
+# will connect to. debug/README.md says why that is the lever.
+#
+# Uploading works from either, and is identical for both -- there is one image
+# and one flash. Only debugging distinguishes them.
+
+wchlink_v5f.name=WCH-Link (debug the V5F, where the sketch runs)
+wchlink_v5f.program.tool=wlink
+wchlink_v5f.program.tool.default=wlink
+wchlink_v5f.debug.server.openocd.script={runtime.platform.path}/debug/ch32h417-v5f.cfg
+
+wchlink_v3f.name=WCH-Link (debug the V3F, setup1/loop1 and the boot stub)
+wchlink_v3f.program.tool=wlink
+wchlink_v3f.program.tool.default=wlink
+wchlink_v3f.debug.server.openocd.script={runtime.platform.path}/debug/ch32h417-v3f.cfg
