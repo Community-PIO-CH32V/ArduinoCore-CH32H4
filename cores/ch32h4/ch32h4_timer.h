@@ -34,6 +34,10 @@ enum {
     CH32H4_TIMER_I2S,
     CH32H4_TIMER_ADC,       /* timer-paced sampling */
     CH32H4_TIMER_USER,      /* a sketch or library taking one directly */
+    /* Appended, not inserted: these values are compared across separately
+     * compiled libraries, so renumbering the existing ones would make an
+     * old object file's "Servo" read as something else. */
+    CH32H4_TIMER_TICKER,    /* Ticker's 1 kHz tick */
 };
 
 #define CH32H4_TIMER_COUNT  12
@@ -71,6 +75,35 @@ void ch32h4_timer_clock_enable(uint8_t id);
  * SDK's TIM_DeInit() is exactly this reset pulse and nothing else, whatever
  * its name suggests. */
 void ch32h4_timer_reset(uint8_t id);
+
+/* The update interrupt, dispatched to whoever owns the timer.
+ *
+ * Every TIMx_IRQHandler lives in ch32h4_timer.c and does one thing: look up
+ * the handler registered for that timer and call it. It has to be that way --
+ * a vector has exactly one definition, so the first subsystem to write
+ * TIM4_IRQHandler makes the timer unusable to any other, and the second one
+ * to try does not fail at run time, it fails to LINK. That is how tone() and
+ * Ticker collided: both wanted the update event of a general-purpose timer.
+ *
+ * The handler runs in interrupt context with the pending bit already cleared.
+ * Registering does not enable anything; the caller still sets TIM_IT_Update
+ * and the NVIC, because only it knows when the timer is configured enough to
+ * start taking interrupts.
+ */
+typedef void (*ch32h4_timer_irq_t)(uint8_t id, void *ctx);
+
+/* Register for timer `id`. Replaces any previous registration, which is what
+ * a re-claim of the same timer by the same owner should do. */
+void ch32h4_timer_attach_irq(uint8_t id, ch32h4_timer_irq_t fn, void *ctx);
+
+/* Unregister and mask the update interrupt. Safe to call for a timer that was
+ * never attached. */
+void ch32h4_timer_detach_irq(uint8_t id);
+
+/* The NVIC line for a timer's update event, so a caller does not repeat the
+ * mapping. Returns a negative value for a timer whose update interrupt this
+ * core does not route. */
+int ch32h4_timer_irqn(uint8_t id);
 
 /* The clock feeding a timer's prescaler. Timers divide HCLK on this part;
  * SystemCoreClock is four times that on the V5F and is never the right

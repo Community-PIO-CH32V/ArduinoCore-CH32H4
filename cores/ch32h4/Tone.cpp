@@ -26,12 +26,14 @@ static struct {
     bool active;
 } s_tone = { (pin_size_t)-1, 0, 0, 0, false };
 
+static void tone_tick(uint8_t timer, void *ctx);
+
 static void tone_stop(void) {
     if (!s_tone.active) {
         return;
     }
     TIM_TypeDef *dev = ch32h4_timer_dev(s_tone.timer);
-    TIM_ITConfig(dev, TIM_IT_Update, DISABLE);
+    ch32h4_timer_detach_irq(s_tone.timer);
     TIM_Cmd(dev, DISABLE);
     ch32h4_timer_release(s_tone.timer, CH32H4_TIMER_TONE);
 
@@ -148,12 +150,17 @@ void tone(uint8_t pin, unsigned int frequency, unsigned long duration) {
         /* Count the tone out on the timer's own update event, so tone() with a
          * duration returns immediately. The update rate IS the tone frequency,
          * so the ISR counts periods rather than milliseconds. */
-        TIM_ITConfig(dev, TIM_IT_Update, ENABLE);
-        NVIC_EnableIRQ(timer == 2 ? TIM2_IRQn
-                     : timer == 3 ? TIM3_IRQn
-                     : timer == 4 ? TIM4_IRQn
-                     : timer == 5 ? TIM5_IRQn
-                                  : TIM2_IRQn);
+        const int irqn = ch32h4_timer_irqn(timer);
+        if (irqn >= 0) {
+            ch32h4_timer_attach_irq(timer, tone_tick, NULL);
+            TIM_ITConfig(dev, TIM_IT_Update, ENABLE);
+            NVIC_EnableIRQ((IRQn_Type)irqn);
+        }
+        /* A timer whose update interrupt this core does not route still plays
+         * the tone; only the automatic stop is lost, so the duration is
+         * ignored rather than the note. Previously this fell back to TIM2's
+         * vector, which meant one timer's interrupt counting another timer's
+         * periods. */
         /* Periods, not milliseconds. */
         s_tone.remaining_ms = (duration * frequency) / 1000u;
         if (s_tone.remaining_ms == 0) {
@@ -164,16 +171,13 @@ void tone(uint8_t pin, unsigned int frequency, unsigned long duration) {
     TIM_Cmd(dev, ENABLE);
 }
 
-/* The update handlers for the timers tone() can end up on. Each is weak in the
- * vector table, so defining them here overrides the spin-loop defaults. Only
- * the timer tone actually holds does anything. */
-static void tone_tick(uint8_t timer) {
-    TIM_TypeDef *dev = ch32h4_timer_dev(timer);
-    if (TIM_GetITStatus(dev, TIM_IT_Update) == RESET) {
-        return;
-    }
-    TIM_ClearITPendingBit(dev, TIM_IT_Update);
-
+/* Counted on the timer's own update event. The vector itself belongs to
+ * ch32h4_timer.c, which dispatches here -- see ch32h4_timer.h for why a
+ * subsystem cannot own a TIMx_IRQHandler of its own.
+ *
+ * The pending bit is already cleared by the dispatcher. */
+static void tone_tick(uint8_t timer, void *ctx) {
+    (void)ctx;
     if (!s_tone.active || s_tone.timer != timer || s_tone.remaining_ms == 0) {
         return;
     }
@@ -181,15 +185,3 @@ static void tone_tick(uint8_t timer) {
         tone_stop();
     }
 }
-
-void CH32H4_IRQ_HANDLER(TIM2_IRQHandler);
-void TIM2_IRQHandler(void) { tone_tick(2); }
-
-void CH32H4_IRQ_HANDLER(TIM3_IRQHandler);
-void TIM3_IRQHandler(void) { tone_tick(3); }
-
-void CH32H4_IRQ_HANDLER(TIM4_IRQHandler);
-void TIM4_IRQHandler(void) { tone_tick(4); }
-
-void CH32H4_IRQ_HANDLER(TIM5_IRQHandler);
-void TIM5_IRQHandler(void) { tone_tick(5); }
