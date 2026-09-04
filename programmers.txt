@@ -1,19 +1,36 @@
 # The debug probe, once per core.
 #
-# Tools > Programmer in the IDE, or `arduino-cli debug -P <id>`. Both entries
-# drive the same WCH-LinkE over the same OpenOCD; they differ only in which
-# core answers on GDB port 3333, which is the only port a debugger front end
-# will connect to. debug/README.md says why that is the lever.
+# Tools > Programmer in the IDE, or `arduino-cli debug -P <id>`. Both drive the
+# same WCH-LinkE through the same OpenOCD script; they differ only in
+# cortex-debug's targetProcessor, which decides which of the two GDB ports
+# OpenOCD opens the debugger connects to.
 #
-# Uploading works from either, and is identical for both -- there is one image
-# and one flash. Only debugging distinguishes them.
+# targetProcessor is an INDEX INTO THE ORDER THE TARGETS ARE CREATED IN, in
+# debug/ch32h417.cfg: 0 is the V3F, 1 is the V5F. Not a coreid, and not a port.
+#
+# Uploading is identical from either -- there is one image and one flash. Only
+# debugging distinguishes them.
 
 wchlink_v5f.name=WCH-Link (debug the V5F, where the sketch runs)
 wchlink_v5f.program.tool=wlink
 wchlink_v5f.program.tool.default=wlink
-wchlink_v5f.debug.server.openocd.script={runtime.platform.path}/debug/ch32h417-v5f.cfg
+wchlink_v5f.debug.cortex-debug.custom.targetProcessor=1
 
 wchlink_v3f.name=WCH-Link (debug the V3F, setup1/loop1 and the boot stub)
 wchlink_v3f.program.tool=wlink
 wchlink_v3f.program.tool.default=wlink
-wchlink_v3f.debug.server.openocd.script={runtime.platform.path}/debug/ch32h417-v3f.cfg
+# EMPTY, not 0, and that is not an oversight.
+#
+# arduino-cli emits these values as JSON strings, and cortex-debug picks the
+# port with
+#
+#     createPortName = (e, t="gdbPort") => t + (0 === e ? "" : e.toString())
+#
+# where the comparison is STRICT. The string "0" is not the number 0, so it
+# produces "gdbPort0" -- a key that does not exist in the port map, whose
+# entries are "gdbPort" and "gdbPort1" -- and GDB is told to connect to
+# localhost:undefined. An empty value is falsy, so cortex-debug's own
+# `targetProcessor || 0` turns it into the NUMBER 0, which is the one thing
+# that names the first port correctly. "1" needs no such care: it is not
+# compared against 0.
+wchlink_v3f.debug.cortex-debug.custom.targetProcessor=

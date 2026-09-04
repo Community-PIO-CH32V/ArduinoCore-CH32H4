@@ -67,7 +67,7 @@ amplifier and a WCH-Link attached.
 | | Arduino IDE / arduino-cli build | verified |
 | | Debugging both cores over OpenOCD and GDB | verified — see the gaps below |
 
-`python -m pytest tests` runs all **263**: **79 host-side** — the tree, the
+`python -m pytest tests` runs all **265**: **81 host-side** — the tree, the
 linker layout, the Arduino IDE build description, the debug configuration and
 a matrix of build configurations — and **184 on hardware**, against a connected
 board. The
@@ -90,9 +90,14 @@ Four things, three of them limited by the bench rather than by the code:
 * **`arduino-cli debug` on Windows.** OpenOCD and GDB were verified on
   hardware over TCP, on both cores, which is how the Arduino IDE drives them.
   The `arduino-cli debug` subcommand starts the server through GDB as a pipe
-  instead, and this toolchain's GDB cannot spawn a pipe child on Windows at
-  all -- it fails identically on `cmd /c echo hi`, so there is nothing here to
-  fix. `debug/README.md` has the manual equivalent.
+  instead, and that fails in the toolchain's GDB and then, with a GDB that can
+  spawn one, inside OpenOCD. Neither is this core's to fix; `debug/README.md`
+  has both diagnoses and the manual equivalent.
+* **The Arduino IDE's own debugger UI.** The mechanism it uses was read out of
+  the shipped `cortex-debug` bundle and reproduced exactly — two consecutive
+  ports, `-c "gdb_port N"`, GDB on the one for `targetProcessor` — and that
+  reproduction works on hardware for both cores. Clicking Debug in the IDE
+  itself has not been tried.
 * **The ADC's and DAC's absolute accuracy.** Rate, throughput, channel
   ordering, the internal reference and the die temperature are all checked, and
   the DAC is checked end to end by reading its own pad back through the ADC —
@@ -200,16 +205,20 @@ single-image design buys.
 **Which core is chosen by the Programmer, not by a board menu.** Tools ▸
 Programmer, or `arduino-cli debug -P wchlink_v3f`:
 
-| Programmer | GDB port 3333 | port 3334 |
-|---|---|---|
-| `wchlink_v5f` (default) | V5F — `setup()`, `loop()`, the sketch | V3F |
-| `wchlink_v3f` | V3F — `setup1()`, `loop1()`, the boot stub | V5F |
+| Programmer | core |
+|---|---|
+| `wchlink_v5f` (default) | V5F — `setup()`, `loop()`, the sketch |
+| `wchlink_v3f` | V3F — `setup1()`, `loop1()`, the boot stub |
 
-Port 3333 is the only port a debugger front end will connect to, so choosing a
-core means choosing an OpenOCD script; `debug/` holds one per core and
-`debug/README.md` explains why they must differ in exactly one line. A menu
-would have worked too, but a menu entry is part of the FQBN and would rebuild
-the sketch on every switch, for a choice that does not change a byte.
+One OpenOCD script brings up both cores; the programmer sets cortex-debug's
+`targetProcessor`, and the debugger connects to that core's port. A menu would
+have worked too, but a menu entry is part of the FQBN and would rebuild the
+sketch on every switch, for a choice that does not change a byte.
+
+`debug/README.md` is worth reading before changing anything there. Three
+things in that file look like the lever that selects a core and are not, and
+the port numbers are **not** 3333 — the IDE allocates a free pair somewhere in
+50000–52000, so pinning a port in the OpenOCD script breaks it.
 
 The session attaches rather than launches: the V5F is started by the V3F, not
 by the reset vector, so a front end that resets the part and expects to find
@@ -223,9 +232,12 @@ breakpoint in `loop()` shows the sketch's own line, and stepping into
 `delay()` shows `ms=1000`.
 
 `arduino-cli debug` itself does not work on Windows, and the configuration is
-not the reason — the toolchain's GDB cannot spawn the pipe child that command
-requires, failing the same way on `cmd /c echo hi`. Start OpenOCD yourself and
-connect over TCP; `debug/README.md` has the four lines.
+not the reason. It starts the server *through* GDB as a pipe, and that path is
+blocked at both ends: the toolchain's GDB cannot spawn a pipe child at all
+(it fails the same way on `cmd /c echo hi`), and a GDB that can — MounRiver's
+17.1 — only moves the failure into OpenOCD, which exits without a message. The
+same GDB drives this core over TCP perfectly. Start OpenOCD yourself and
+connect to it; `debug/README.md` has the four lines.
 
 ## Testing
 

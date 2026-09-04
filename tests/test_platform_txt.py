@@ -186,29 +186,45 @@ def test_programmers_reference_only_defined_properties():
             "%s sets %r, which nothing in platform.txt reads" % (key, prop))
 
 
-def test_each_programmer_names_a_debug_script_that_exists():
-    programmers = read_properties(PROGRAMMERS_TXT)
-    scripts = {k: v for k, v in programmers.items()
-               if k.endswith("debug.server.openocd.script")}
-    assert len(scripts) >= 2, "expected one debug script per core"
-    for key, value in scripts.items():
-        name = value.rsplit("/", 1)[-1]
-        assert (DEBUG_DIR / name).is_file(), (
-            "%s points at debug/%s, which does not exist" % (key, name))
+def test_the_debug_script_exists():
+    script = read_properties(PLATFORM_TXT)["debug.server.openocd.script"]
+    name = script.rsplit("/", 1)[-1]
+    assert (DEBUG_DIR / name).is_file(), (
+        "platform.txt points at debug/%s, which does not exist" % name)
 
 
-def test_the_openocd_configs_create_cpu0_before_cpu1():
+def test_the_openocd_config_sets_no_per_target_gdb_port():
+    """An explicit port here breaks the Arduino IDE, silently.
+
+    cortex-debug does not use 3333. It asks the OS for two consecutive free
+    ports in 50000-52000, hands the first to OpenOCD as -c "gdb_port N", and
+    connects GDB to the one for its targetProcessor. A target carrying an
+    explicit -gdb-port ignores that -c and keeps what the file said, so the
+    IDE connects to a port nothing is listening on.
+    """
+    for cfg in sorted(DEBUG_DIR.glob("*.cfg")):
+        text = cfg.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.strip().startswith("#"):
+                continue
+            assert "-gdb-port" not in line, (
+                "%s sets an explicit -gdb-port, which the IDE's own "
+                "gdb_port is then unable to override" % cfg.name)
+
+
+def test_the_openocd_config_creates_cpu0_before_cpu1():
     """Creation order is what binds a hart to a target, and only that.
 
     -coreid is accepted and ignored by this OpenOCD's wch_riscv driver:
-    swapping the two values changes nothing. The hart follows the order the
-    targets are created in, so cpu.0 must be created first -- it is the V3F.
+    swapping the values changes nothing, omitting them changes nothing. The
+    hart follows the order the targets are created in, so cpu.0 must come
+    first -- it is the V3F, and it is processor 0 for targetProcessor.
 
-    Reorder them and the two cores swap underneath the port numbers. Nothing
-    reports it. The debugger attaches, halts, single-steps and shows source,
-    and the source is the other core's.
+    Reorder them and the cores swap underneath. Nothing reports it: the
+    debugger attaches, halts, single-steps and shows source, and the source is
+    the other core's.
     """
-    for cfg in sorted(DEBUG_DIR.glob("ch32h417-*.cfg")):
+    for cfg in sorted(DEBUG_DIR.glob("*.cfg")):
         text = cfg.read_text(encoding="utf-8")
         first = text.index("target create $_TARGETNAME.0")
         second = text.index("target create $_TARGETNAME.1")
@@ -216,13 +232,41 @@ def test_the_openocd_configs_create_cpu0_before_cpu1():
             "%s creates cpu.1 before cpu.0, which swaps the cores" % cfg.name)
 
 
-@pytest.mark.parametrize("core,port0,port1", [
-    # cpu.0 is the V3F, cpu.1 the V5F. The file named for a core must put that
-    # core on 3333 -- the only port a debugger front end will connect to.
-    ("v3f", 3333, 3334),
-    ("v5f", 3334, 3333),
-])
-def test_the_named_core_answers_on_3333(core, port0, port1):
-    text = (DEBUG_DIR / ("ch32h417-%s.cfg" % core)).read_text(encoding="utf-8")
-    assert "$_TARGETNAME.0 configure -gdb-port %d" % port0 in text, text
-    assert "$_TARGETNAME.1 configure -gdb-port %d" % port1 in text, text
+def test_processor_zero_is_never_the_string_zero():
+    """cortex-debug compares targetProcessor against 0 with ===.
+
+        createPortName = (e, t="gdbPort") => t + (0 === e ? "" : e.toString())
+
+    arduino-cli emits these values as JSON strings, so "0" is not 0: it names
+    "gdbPort0", a key the port map does not have, and GDB is handed
+    localhost:undefined. An empty value is falsy and cortex-debug's own
+    `targetProcessor || 0` turns it into the number 0, which works. "1" is
+    never compared against 0 and is safe as a string.
+    """
+    key = "debug.cortex-debug.custom.targetProcessor"
+    for path in (PLATFORM_TXT, PROGRAMMERS_TXT):
+        for k, v in read_properties(path).items():
+            if k.endswith(key):
+                assert v.strip() != "0", (
+                    "%s sets %s to the string \"0\"; leave it empty instead"
+                    % (path.name, k))
+
+
+def test_both_cores_are_reachable_by_programmer():
+    """One programmer per core, and the two must not select the same one."""
+    programmers = read_properties(PROGRAMMERS_TXT)
+    key = "debug.cortex-debug.custom.targetProcessor"
+    chosen = {k.split(".")[0]: v.strip()
+              for k, v in programmers.items() if k.endswith(key)}
+    assert len(chosen) == 2, chosen
+    assert len(set(chosen.values())) == 2, (
+        "both programmers select the same processor: %r" % chosen)
+    assert "1" in chosen.values(), "no programmer selects the V5F"
+    assert "" in chosen.values(), "no programmer selects the V3F"
+
+
+def test_the_platform_declares_two_processors():
+    platform = read_properties(PLATFORM_TXT)
+    assert platform.get("debug.cortex-debug.custom.numberOfProcessors") == "2", (
+        "without numberOfProcessors=2 cortex-debug allocates one port and "
+        "targetProcessor is clamped to 0, so the V5F becomes unreachable")

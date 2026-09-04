@@ -284,9 +284,7 @@ tools.wlink.program.pattern="{path}/{cmd}" flash "{build.path}/{build.project_na
 # too, but a menu entry is part of the FQBN and would rebuild the sketch on
 # every switch, for a choice that does not change a byte of the image.
 #
-# The default here is the V5F, because that is where setup() and loop() run.
-# debug/README.md has the rest, including why the two OpenOCD scripts must
-# differ in exactly one line.
+# debug/README.md has the rest, including what does and does not bind a core.
 debug.executable={build.path}/{build.project_name}.elf
 debug.toolchain=gcc
 debug.toolchain.path={compiler.path}
@@ -298,7 +296,7 @@ debug.server.openocd.path={runtime.tools.openocd-riscv-wch.path}/bin/openocd
 # "CreateProcess: No such file or directory" naming a path that plainly exists.
 debug.server.openocd.path.windows={runtime.tools.openocd-riscv-wch.path}/bin/openocd.exe
 debug.server.openocd.scripts_dir={runtime.tools.openocd-riscv-wch.path}/bin/
-debug.server.openocd.script={runtime.platform.path}/debug/ch32h417-v5f.cfg
+debug.server.openocd.script={runtime.platform.path}/debug/ch32h417.cfg
 
 # attach, NOT launch. The V5F is started by the V3F rather than by the reset
 # vector, so a front end that resets the part and expects to find the V5F
@@ -306,3 +304,22 @@ debug.server.openocd.script={runtime.platform.path}/debug/ch32h417-v5f.cfg
 # which uses wlink, and attach to the running image.
 debug.cortex-debug.custom.request=attach
 debug.cortex-debug.custom.objdumpPath={compiler.path}{compiler.objdump.cmd}
+
+# Both cores, and which one to attach to.
+#
+# This is cortex-debug's multi-core support and it is the ONLY thing that
+# selects a core. It asks the OS for numberOfProcessors consecutive free ports
+# -- somewhere in 50000-52000, never 3333 -- gives the first to OpenOCD as
+# -c "gdb_port N", and connects GDB to the port for targetProcessor. OpenOCD
+# hands N to its first target and N+1 to its second, so targetProcessor is an
+# index into the order debug/ch32h417.cfg creates them: 0 is the V3F, 1 the
+# V5F.
+#
+# Which is also why that file must not carry per-target -gdb-port lines: a
+# target with an explicit port ignores the -c, keeps 3333, and the IDE
+# connects to a port nothing is listening on.
+#
+# The default is the V5F, because that is where setup() and loop() run.
+# programmers.txt overrides targetProcessor for the V3F.
+debug.cortex-debug.custom.numberOfProcessors=2
+debug.cortex-debug.custom.targetProcessor=1
