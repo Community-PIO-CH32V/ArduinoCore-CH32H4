@@ -77,16 +77,49 @@ not suit this core:
   example puts a second core's image. This core's V5F image starts at
   `0x00008000`, and there is one flash, not two.
 
+## The order, which the IDE will not do for you
+
+    Sketch > Optimize for Debugging      (once; it stays on)
+    Upload                               (every time the sketch changes)
+    Debug
+
+**Optimize for Debugging is not a preference.** It is the difference between
+having debug information and having none. The default build is `-Os` with no
+`-g` at all, so the ELF carries a symbol table and nothing else, and a
+debugger shows exactly what that allows:
+
+    delay@0x0000cdda
+
+a name, with no file, no line and no way to step. Measured on 1.0.1: the
+default build has ZERO DWARF attributes, the debug build has 18541.
+
+That covers the SDK too, which is compiled into libch32h4sdk.a with the same
+flags. With the option on, `RCC_GetClocksFreq` resolves to line 530 of
+`ch32h417_rcc.c` and stepping into vendor code works like anything else -- so
+if SDK functions will not step, the archive is not the reason, the missing
+`-g` is.
+
+**Upload before Debug, every time.** The IDE's Debug button neither builds nor
+uploads; that is the IDE, not something a platform can change. Attach to a
+stale image and the addresses come from one binary while the source comes from
+another, which reads as a broken debugger rather than a forgotten upload.
+Toggling Optimize for Debugging changes the binary, so it needs an upload too.
+
 ## Attaching, not launching
 
-The launch configuration is `attach`. The V5F is started by the V3F, not by
-the reset vector, so a debugger that resets the part and expects to find the
-V5F running finds it halted at nothing. Upload first — with the normal Upload
-button, which uses wlink — then attach.
+The session attaches, and `launch` would not work here for two separate
+reasons.
 
-Build with **Optimize for Debugging** (`arduino-cli compile
---optimize-for-debug`). Without it the build is `-Os` with no `-g` at all: a
-breakpoint on a function works and nothing else does.
+The V5F is started by the V3F, not by the reset vector. A `launch` resets the
+part and expects to halt at an entry point; here that halts a core which has
+not been woken, so the debugger would be attached to something that never
+runs.
+
+And GDB's `load` needs a flash bank on the target it is talking to.
+`ch32h417.cfg` declares one bank, on `cpu.0`, while a V5F session is connected
+to `cpu.1` -- so even setting the reset problem aside, loading from inside the
+debugger would fail. Uploading with wlink and attaching avoids both.
+
 
 ## `arduino-cli debug` does not work on Windows
 

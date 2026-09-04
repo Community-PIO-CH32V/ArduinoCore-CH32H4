@@ -246,6 +246,11 @@ The session attaches rather than launches: the V5F is started by the V3F, not
 by the reset vector, so a front end that resets the part and expects to find
 the V5F running finds it halted at nothing. Upload first, then attach.
 
+The order is **Optimize for Debugging → Upload → Debug**, and the IDE will not
+do the middle step for you: its Debug button neither builds nor uploads, and
+attaching to a stale image gives source that does not match the addresses on
+the board. Re-upload after toggling the option, which changes the binary.
+
 Build with **Optimize for Debugging** (`arduino-cli compile
 --optimize-for-debug`) to get `-Og -g3` instead of `-Os`. Without it there is
 no debug information at all: a breakpoint on a function still works, and
