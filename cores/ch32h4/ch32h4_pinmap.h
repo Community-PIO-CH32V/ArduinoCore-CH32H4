@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include "api/Common.h"
+#include "ch32h417.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,6 +90,40 @@ extern const size_t g_spi_mosi_map_len;
 bool ch32h4_spi_sck_af(uint8_t id, pin_size_t pin, uint8_t *af);
 bool ch32h4_spi_miso_af(uint8_t id, pin_size_t pin, uint8_t *af);
 bool ch32h4_spi_mosi_af(uint8_t id, pin_size_t pin, uint8_t *af);
+
+/* ---- USART --------------------------------------------------------------
+ *
+ * Same shape as the SPI maps, and the same warning applies twice over: a wrong
+ * AF number gives a USART that initialises, reports TXE and TC set, holds the
+ * right divisor in BRR -- and puts nothing on the wire.
+ *
+ * USART1 is on HB2; USART2 through USART8 are on HB1. That is the opposite
+ * split from SPI, where only SPI1 is on HB2, and matching neither is what
+ * ch32h4_uart_clock_enable() is for.
+ */
+extern const ch32h4_periph_pin_t g_uart_tx_map[];
+extern const size_t g_uart_tx_map_len;
+extern const ch32h4_periph_pin_t g_uart_rx_map[];
+extern const size_t g_uart_rx_map_len;
+
+/* The alternate function for `pin` on USART `id` (1-8), or false if that pin
+ * cannot carry that signal for that peripheral. */
+bool ch32h4_uart_tx_af(uint8_t id, pin_size_t pin, uint8_t *af);
+bool ch32h4_uart_rx_af(uint8_t id, pin_size_t pin, uint8_t *af);
+
+/* Enable a USART's clock on the correct bus. */
+void ch32h4_uart_clock_enable(uint8_t id);
+
+/* Reset a USART's block, on the correct bus. Configuration survives a warm
+ * reset and a re-flash, so a port that is not reset inherits the previous
+ * run's baud rate and mode. */
+void ch32h4_uart_reset(uint8_t id);
+
+/* The peripheral for a USART id, or NULL. */
+USART_TypeDef *ch32h4_uart_dev(uint8_t id);
+
+/* The NVIC line for a USART id, or a negative value if there is none. */
+int ch32h4_uart_irqn(uint8_t id);
 
 /* Which SPI peripheral this trio of pins can all serve, or 0. */
 uint8_t ch32h4_spi_find(pin_size_t sck, pin_size_t miso, pin_size_t mosi);

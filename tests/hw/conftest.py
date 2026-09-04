@@ -295,7 +295,7 @@ def _sync(sketch: str) -> str:
 
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "dualcore_board", "adc_board", "i2s_board",
-                  "lfs_board")
+                  "lfs_board", "uart_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -423,6 +423,21 @@ def dualcore_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("dualcore")
+
+
+@pytest.fixture(scope="session")
+def uart_board():
+    """The extra-USART sketch.
+
+    Its own image because it reconfigures USART2 repeatedly -- baud, parity,
+    stop bits -- and coretest holds assumptions about the pins it uses.
+
+    Needs PA2 jumpered to PA3. The tests skip without it rather than failing:
+    a missing wire is a missing precondition.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("uarttest")
 
 
 @pytest.fixture(scope="session")

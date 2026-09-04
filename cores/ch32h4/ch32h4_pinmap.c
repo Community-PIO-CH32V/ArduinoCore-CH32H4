@@ -1,6 +1,7 @@
 #include "Arduino.h"
 #include "ch32h4_pinmap.h"
 #include "ch32h4_timer.h"
+#include "ch32h4_clock.h"
 
 bool ch32h4_pin_has_pwm(pin_size_t pin) {
     for (size_t i = 0; i < g_pwm_af_map_len; i++) {
@@ -138,4 +139,73 @@ uint8_t ch32h4_i2c_find(pin_size_t scl, pin_size_t sda, uint8_t *af) {
         }
     }
     return 0;
+}
+
+/* ---- USART --------------------------------------------------------------- */
+
+static bool periph_af(const ch32h4_periph_pin_t *map, size_t len,
+                      uint8_t id, pin_size_t pin, uint8_t *af) {
+    for (size_t i = 0; i < len; i++) {
+        if (map[i].id == id && map[i].pin == (uint8_t)pin) {
+            if (af) {
+                *af = map[i].af;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ch32h4_uart_tx_af(uint8_t id, pin_size_t pin, uint8_t *af) {
+    return periph_af(g_uart_tx_map, g_uart_tx_map_len, id, pin, af);
+}
+
+bool ch32h4_uart_rx_af(uint8_t id, pin_size_t pin, uint8_t *af) {
+    return periph_af(g_uart_rx_map, g_uart_rx_map_len, id, pin, af);
+}
+
+/* USART1 alone is on HB2. Enabling any of the others there gives a peripheral
+ * whose registers read back as zeroes, with no error anywhere -- the same trap
+ * the timer and SPI helpers exist to close. */
+typedef struct {
+    USART_TypeDef *dev;
+    ch32_bus_t     bus;
+    uint32_t       mask;
+    int            irqn;
+} uart_hw_t;
+
+static const uart_hw_t s_uart[9] = {
+    { NULL,   CH32_BUS_HB1, 0,                      -1            },
+    { USART1, CH32_BUS_HB2, RCC_HB2Periph_USART1,   USART1_IRQn   },
+    { USART2, CH32_BUS_HB1, RCC_HB1Periph_USART2,   USART2_IRQn   },
+    { USART3, CH32_BUS_HB1, RCC_HB1Periph_USART3,   USART3_IRQn   },
+    { USART4, CH32_BUS_HB1, RCC_HB1Periph_USART4,   USART4_IRQn   },
+    { USART5, CH32_BUS_HB1, RCC_HB1Periph_USART5,   USART5_IRQn   },
+    { USART6, CH32_BUS_HB1, RCC_HB1Periph_USART6,   USART6_IRQn   },
+    { USART7, CH32_BUS_HB1, RCC_HB1Periph_USART7,   USART7_IRQn   },
+    { USART8, CH32_BUS_HB1, RCC_HB1Periph_USART8,   USART8_IRQn   },
+};
+
+static bool uart_valid(uint8_t id) {
+    return id >= 1 && id <= 8;
+}
+
+USART_TypeDef *ch32h4_uart_dev(uint8_t id) {
+    return uart_valid(id) ? s_uart[id].dev : NULL;
+}
+
+int ch32h4_uart_irqn(uint8_t id) {
+    return uart_valid(id) ? s_uart[id].irqn : -1;
+}
+
+void ch32h4_uart_clock_enable(uint8_t id) {
+    if (uart_valid(id)) {
+        ch32h4_clock_enable(s_uart[id].bus, s_uart[id].mask);
+    }
+}
+
+void ch32h4_uart_reset(uint8_t id) {
+    if (uart_valid(id)) {
+        ch32h4_block_reset(s_uart[id].bus, s_uart[id].mask);
+    }
 }

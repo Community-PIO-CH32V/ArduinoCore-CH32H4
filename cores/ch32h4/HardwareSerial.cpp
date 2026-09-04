@@ -2,20 +2,55 @@
 #include "ch32h4_fault.h"
 #include "ch32h4_irq.h"
 
-void CH32H4Serial::begin(unsigned long baud, uint16_t config) {
-    /* The early console owns this same peripheral until now, and the reset
-     * below would cut off whatever byte is still in its shift register. */
-    ch32h4_console_flush();
+bool CH32H4Serial::setTX(pin_size_t pin) {
+    if (_running || !ch32h4_uart_tx_af(_id, pin, nullptr)) {
+        return false;
+    }
+    _tx = pin;
+    return true;
+}
 
-    ch32h4_clock_enable(CH32_BUS_HB2, RCC_HB2Periph_USART1);
-    ch32h4_block_reset(CH32_BUS_HB2, RCC_HB2Periph_USART1);
+bool CH32H4Serial::setRX(pin_size_t pin) {
+    if (_running || !ch32h4_uart_rx_af(_id, pin, nullptr)) {
+        return false;
+    }
+    _rx_pin = pin;
+    return true;
+}
+
+void CH32H4Serial::begin(unsigned long baud, uint16_t config) {
+    uint8_t tx_af = 0, rx_af = 0;
+    if (!ch32h4_uart_tx_af(_id, _tx, &tx_af) ||
+        !ch32h4_uart_rx_af(_id, _rx_pin, &rx_af)) {
+        /* The pin cannot carry this signal for this peripheral. Starting
+         * anyway would give a port whose flags all read correctly and whose
+         * output never leaves the die. */
+        return;
+    }
+
+    _usart = ch32h4_uart_dev(_id);
+    if (_usart == nullptr) {
+        return;
+    }
+
+    /* The early console owns USART1 until now, and the reset below would cut
+     * off whatever byte is still in its shift register. No other port is
+     * shared with it. */
+    if (_id == 1) {
+        ch32h4_console_flush();
+    }
+
+    ch32h4_uart_clock_enable(_id);
+    ch32h4_uart_reset(_id);
 
     /* TX push-pull, RX also on the alternate function -- NOT a floating
      * input. The mux owns the pad's output enable, so a floating input leaves
      * the peripheral disconnected while every status flag still reads
      * correctly. */
-    ch32h4_pin_af(GPIOA, 9,  GPIO_AF7, CH32H4_CFG_AF_PP_50);
-    ch32h4_pin_af(GPIOA, 10, GPIO_AF7, CH32H4_CFG_AF_PP_50);
+    ch32h4_pin_af(g_pins[_tx].port, g_pins[_tx].bit, tx_af,
+                  CH32H4_CFG_AF_PP_50);
+    ch32h4_pin_af(g_pins[_rx_pin].port, g_pins[_rx_pin].bit, rx_af,
+                  CH32H4_CFG_AF_PP_50);
 
     USART_InitTypeDef u = {};
     /* USART_Init divides HCLK via RCC_GetClocksFreq, which is correct as
@@ -37,7 +72,10 @@ void CH32H4Serial::begin(unsigned long baud, uint16_t config) {
 
     USART_Init(_usart, &u);
     USART_ITConfig(_usart, USART_IT_RXNE, ENABLE);
-    NVIC_EnableIRQ(USART1_IRQn);
+    const int irqn = ch32h4_uart_irqn(_id);
+    if (irqn >= 0) {
+        NVIC_EnableIRQ((IRQn_Type)irqn);
+    }
     USART_Cmd(_usart, ENABLE);
 
     _head = _tail = 0;
@@ -58,11 +96,19 @@ size_t CH32H4Serial::write(uint8_t c) {
     /* The same semaphore ch32h4_console_puts() takes. Two drivers share this
      * peripheral and two cores share both drivers, and nothing in the USART
      * serialises them -- see the comment on CH32H4_HSEM_CONSOLE. */
-    ch32h4_console_lock();
+    /* Only USART1 is shared with the boot console and the other core; the
+     * rest belong to this sketch alone and paying for a hardware semaphore on
+     * every byte would be a cost with nothing on the other side of it. */
+    const bool shared = (_id == 1);
+    if (shared) {
+        ch32h4_console_lock();
+    }
     while (USART_GetFlagStatus(_usart, USART_FLAG_TXE) == RESET) {
     }
     USART_SendData(_usart, c);
-    ch32h4_console_unlock();
+    if (shared) {
+        ch32h4_console_unlock();
+    }
     return 1;
 }
 
@@ -72,11 +118,16 @@ size_t CH32H4Serial::write(const uint8_t *buf, size_t n) {
     }
     /* Taken once for the whole buffer. The lock is recursive per core, so the
      * per-byte write() below nests without a second take. */
-    ch32h4_console_lock();
+    const bool shared = (_id == 1);
+    if (shared) {
+        ch32h4_console_lock();
+    }
     for (size_t i = 0; i < n; i++) {
         write(buf[i]);
     }
-    ch32h4_console_unlock();
+    if (shared) {
+        ch32h4_console_unlock();
+    }
     return n;
 }
 
@@ -121,14 +172,4 @@ void CH32H4Serial::_isr() {
     if (USART_GetFlagStatus(_usart, USART_FLAG_ORE) != RESET) {
         (void)USART_ReceiveData(_usart);
     }
-}
-
-CH32H4Serial Serial1(USART1);
-
-/* The attribute belongs on the declaration -- see ch32h4_irq.h. */
-extern "C" void CH32H4_IRQ_HANDLER(USART1_IRQHandler);
-extern "C" void USART1_IRQHandler(void) {
-    ch32h4_irq_enter(&ch32h4_irq_usart1_count);
-    Serial1._isr();
-    ch32h4_irq_exit();
 }

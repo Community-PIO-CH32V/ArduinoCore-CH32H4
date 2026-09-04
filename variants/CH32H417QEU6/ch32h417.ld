@@ -16,6 +16,80 @@
  */
 ENTRY( _start_v3f )
 
+/* Force the V5F's startup into the link.
+ *
+ * ENTRY() above references _start_v3f, which is what drags startup_v3f.o out
+ * of the core archive. NOTHING references the V5F's equivalent: the V3F wakes
+ * that core by writing an ADDRESS -- CH32_V5F_START_ADDR -- not by calling a
+ * symbol. So without this the archive member is never extracted, and the image
+ * links cleanly with no V5F reset handler and no V5F vector table. The board
+ * flashes, the V3F boots, prints its banner, wakes a core that has no entry
+ * point, and stops. Nothing in the build says a word.
+ *
+ * This used to be hidden by -Wl,--whole-archive around the core, which pulled
+ * in every member whether referenced or not. That had to go so that unused
+ * HardwareSerial ports are not linked, and EXTERN is the narrow version of it:
+ * name what genuinely has no caller, rather than keeping everything because
+ * two files do.
+ *
+ * KEEP() in the section list below is NOT a substitute. It stops --gc-sections
+ * discarding a section that was linked; it cannot pull in an object the linker
+ * never had a reason to read. */
+EXTERN( _start_v5f )
+EXTERN( _vector_base_v5f )
+
+/* And the heap.
+ *
+ * cores/ch32h4/ch32h4_sbrk.c replaces newlib's _sbrk with one that hands out
+ * DTCM first and then the shared SRAM -- two disjoint regions, which is the
+ * only way to use both on this part. Nothing in the core CALLS _sbrk though;
+ * malloc does, and malloc arrives from libc after the core archive has already
+ * been scanned. Without this the linker resolves _sbrk from --specs=nosys
+ * instead, and that stub wants a symbol `end` this layout does not define:
+ *
+ *     (.text._sbrk+0x10): undefined reference to `end'
+ *
+ * Naming it here makes _sbrk undefined from the start, so the core's own
+ * definition is the one that satisfies malloc. Note the failure was loud;
+ * the version where nosys DOES link and malloc quietly gets a heap of
+ * whatever follows the image would not have been. */
+EXTERN( _sbrk )
+
+/* And __gnu_cxx::__verbose_terminate_handler, for the same reason and with a
+ * more expensive symptom.
+ *
+ * cores/ch32h4/ch32h4_eh.cpp replaces libstdc++'s default handler, whose only
+ * job is to print the type name of an escaping exception -- and which drags in
+ * vterminate.o and the C++ name demangler, 43 KB of .text nothing else calls.
+ * Nothing in the core references the replacement: libstdc++ finds it by name
+ * or falls back to its own.
+ *
+ * With --whole-archive gone, "falls back to its own" is what happened, and the
+ * image grew 36 KB with no error and no warning. Naming the mangled symbol
+ * here is what keeps the override in the link. */
+EXTERN( _ZN9__gnu_cxx27__verbose_terminate_handlerEv )
+
+/* And the C++ runtime hooks, which fail in the worst way this part offers.
+ *
+ * cores/ch32h4/ch32h4_cxx.cpp supplies __cxa_atexit, atexit,
+ * __cxa_pure_virtual, __cxa_deleted_virtual and __dso_handle. Under
+ * -nostartfiles nothing else does, and nothing in the core CALLS them -- the
+ * compiler emits the references, from any sketch with a function-local static
+ * or a virtual destructor.
+ *
+ * Unresolved, those references become calls to ADDRESS 0. Address 0 on this
+ * part is _start_v3f, so the call does not fault: the core quietly re-runs the
+ * other core's startup, and the board lockup-resets several times a second
+ * while printing a clean boot banner each time. `static String line;` in a
+ * loop() is enough to trigger it.
+ *
+ * tests/test_link_matrix.py::test_nothing_calls_address_zero exists for this
+ * and is what caught it when --whole-archive was removed. */
+EXTERN( __cxa_atexit )
+EXTERN( __cxa_pure_virtual )
+EXTERN( __cxa_deleted_virtual )
+EXTERN( __dso_handle )
+
 /* 8 KB, not the 2 KB this was while the V3F only ever ran the boot stub.
  * setup1()/loop1() are ordinary user code and can call anything -- printf
  * alone can want a kilobyte. DTCM has room: the heap gives up 6 KB out of

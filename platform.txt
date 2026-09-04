@@ -251,10 +251,19 @@ recipe.S.o.pattern="{compiler.path}{compiler.S.cmd}" {compiler.S.flags} {compile
 
 recipe.ar.pattern="{compiler.path}{compiler.ar.cmd}" {compiler.ar.flags} {compiler.ar.extra_flags} "{archive_file_path}" "{object_file}"
 
-# --whole-archive around the core archive: the variant's pin table must win
-# over the core's weak defaults, and a plain archive member is only pulled in
-# if something already references it.
-recipe.c.combine.pattern="{compiler.path}{compiler.c.elf.cmd}" {compiler.c.elf.flags} {compiler.c.elf.extra_flags} "-T{build.path}/ch32h417.ld" "-Wl,-Map,{build.path}/{build.project_name}.map" -o "{build.path}/{build.project_name}.elf" "-L{build.path}" -Wl,--start-group {object_files} -Wl,--whole-archive "{archive_file_path}" -Wl,--no-whole-archive "{build.path}/libch32h4sdk.a" -lm -lstdc++ -lc -Wl,--end-group
+# NO --whole-archive around the core archive.
+#
+# It used to be there, on the reasoning that the variant's tables and the
+# vector tables must not be dropped. The tables are fine without it -- the core
+# references g_pins and g_pwm_af_map, so those members are pulled in normally
+# -- and the one thing that genuinely has no caller, the V5F's startup, is
+# named by EXTERN() in the linker script instead.
+#
+# It has to go, because with it every member of core.a is linked whether or not
+# anything uses it. That is what makes an unused HardwareSerial port cost
+# flash, a receive buffer in RAM and a static constructor: Serial4 would be
+# built into every sketch that never mentions it.
+recipe.c.combine.pattern="{compiler.path}{compiler.c.elf.cmd}" {compiler.c.elf.flags} {compiler.c.elf.extra_flags} "-T{build.path}/ch32h417.ld" "-Wl,-Map,{build.path}/{build.project_name}.map" -o "{build.path}/{build.project_name}.elf" "-L{build.path}" -Wl,--start-group {object_files} "{archive_file_path}" "{build.path}/libch32h4sdk.a" -lm -lstdc++ -lc -Wl,--end-group
 
 recipe.objcopy.bin.pattern="{compiler.path}{compiler.elf2hex.cmd}" {compiler.elf2hex.flags} {compiler.elf2hex.extra_flags} "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.bin"
 

@@ -526,11 +526,21 @@ libs.append(env.BuildLibrary(
     join("$BUILD_DIR", "FrameworkArduino"),
     CORE_DIR))
 
-# The reset vectors, both vector tables and the interrupt handlers are reached
-# only from hardware, never from a call, so --gc-sections and the archiver
-# would both drop them.
-env.Prepend(_LIBFLAGS="-Wl,--whole-archive ")
-env.Append(_LIBFLAGS=" -Wl,--no-whole-archive -lc")
+# NO --whole-archive.
+#
+# It was here so that the vector tables and the V5F's reset handler survived,
+# both of which are reached only from hardware and referenced by nothing. The
+# narrow version of that lives in the linker script now -- EXTERN() naming the
+# four symbols that genuinely have no caller -- and the broad version had to go
+# for the same reason it went from platform.txt: with it, every member of the
+# core archive is linked whether or not a sketch uses it, so an unused
+# HardwareSerial port costs flash, a receive buffer and a static constructor.
+#
+# It was also costing something already. Without whole-archive, ch32h4_eh.o
+# stops being linked by accident and starts being linked because the linker
+# script names its terminate handler -- and the same sketch came out 1.1 KB
+# smaller.
+env.Append(_LIBFLAGS=" -lc")
 
 env.Append(LIBS=libs)
 

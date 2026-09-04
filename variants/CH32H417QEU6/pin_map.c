@@ -246,3 +246,105 @@ const ch32h4_i2c_pin_t g_i2c_map[] = {
     { 4, PF12, PF13, 2 },
 };
 const size_t g_i2c_map_len = sizeof(g_i2c_map) / sizeof(g_i2c_map[0]);
+
+/* Which pins can carry USART TX, and with which alternate
+ * function. Same provenance as the timer table above: the
+ * MicroPython port for this silicon generated it from the
+ * datasheet's per-pin function lists.
+ *
+ * A WRONG AF NUMBER FAILS SILENTLY. The USART runs, STATR shows TXE
+ * and TC set, BRR holds the right divisor, and nothing reaches the
+ * wire -- which is why this is a table and not eight #defines
+ * somebody typed.
+ *
+ * This part multiplexes like an STM32F4 rather than remapping like a
+ * CH32V307, so moving a USART to other pins means choosing another
+ * row here, not flipping a remap bit. */
+const ch32h4_periph_pin_t g_uart_tx_map[] = {
+    /* USART1 */
+    { 1, PA9  ,  7 },
+    { 1, PB6  ,  7 },
+    { 1, PB14 ,  4 },
+    { 1, PD13 , 14 },
+    /* USART2 */
+    { 2, PA2  ,  7 },
+    { 2, PD5  ,  7 },
+    /* USART3 */
+    { 3, PA13 ,  4 },
+    { 3, PB10 ,  7 },
+    { 3, PC10 ,  7 },
+    { 3, PE14 ,  7 },
+    /* USART4 */
+    { 4, PC6  ,  7 },
+    { 4, PF4  ,  7 },
+    /* USART5 */
+    { 5, PE0  ,  4 },
+    { 5, PE3  , 11 },
+    /* USART6 */
+    { 6, PA0  ,  8 },
+    { 6, PA12 ,  6 },
+    { 6, PB9  ,  8 },
+    { 6, PC10 ,  8 },
+    { 6, PD1  ,  8 },
+    /* USART7 */
+    { 7, PB6  , 14 },
+    { 7, PB13 , 14 },
+    { 7, PC12 ,  8 },
+    /* USART8 */
+    { 8, PA15 , 11 },
+    { 8, PB4  , 11 },
+    { 8, PE8  ,  7 },
+    { 8, PF7  ,  7 },
+};
+const size_t g_uart_tx_map_len = sizeof(g_uart_tx_map) / sizeof(g_uart_tx_map[0]);
+
+/* Which pins can carry USART RX, and with which alternate
+ * function. Same provenance as the timer table above: the
+ * MicroPython port for this silicon generated it from the
+ * datasheet's per-pin function lists.
+ *
+ * A WRONG AF NUMBER FAILS SILENTLY. The USART runs, STATR shows TXE
+ * and TC set, BRR holds the right divisor, and nothing reaches the
+ * wire -- which is why this is a table and not eight #defines
+ * somebody typed.
+ *
+ * This part multiplexes like an STM32F4 rather than remapping like a
+ * CH32V307, so moving a USART to other pins means choosing another
+ * row here, not flipping a remap bit. */
+const ch32h4_periph_pin_t g_uart_rx_map[] = {
+    /* USART1 */
+    { 1, PA10 ,  7 },
+    { 1, PB7  ,  7 },
+    { 1, PB15 ,  4 },
+    { 1, PD12 , 14 },
+    /* USART2 */
+    { 2, PA3  ,  7 },
+    { 2, PD6  ,  7 },
+    /* USART3 */
+    { 3, PA14 ,  4 },
+    { 3, PB11 ,  7 },
+    { 3, PC11 ,  7 },
+    { 3, PD9  ,  7 },
+    /* USART4 */
+    { 4, PC7  ,  7 },
+    { 4, PF3  ,  7 },
+    /* USART5 */
+    { 5, PE2  ,  4 },
+    { 5, PF5  ,  4 },
+    /* USART6 */
+    { 6, PA1  ,  8 },
+    { 6, PA11 ,  6 },
+    { 6, PB8  ,  8 },
+    { 6, PC11 ,  8 },
+    { 6, PD0  ,  8 },
+    /* USART7 */
+    { 7, PB5  , 14 },
+    { 7, PB12 , 14 },
+    { 7, PD2  ,  8 },
+    /* USART8 */
+    { 8, PA8  , 11 },
+    { 8, PB3  , 11 },
+    { 8, PE7  ,  7 },
+    { 8, PF6  ,  7 },
+};
+const size_t g_uart_rx_map_len = sizeof(g_uart_rx_map) / sizeof(g_uart_rx_map[0]);
