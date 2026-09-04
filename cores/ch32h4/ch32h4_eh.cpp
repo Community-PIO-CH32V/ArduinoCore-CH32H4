@@ -1,13 +1,24 @@
 /* Exception support.
  *
- * Only compiled into anything when the build asks for exceptions. One
- * libstdc++.a serves both settings -- unlike arduino-pico, which ships a
+ * One libstdc++.a serves both settings -- unlike arduino-pico, which ships a
  * second prebuilt library -- because -fno-exceptions only changes codegen for
  * our own sources.
+ *
+ * The file is in two halves, and which half is conditional matters. Frame
+ * registration is only needed when something can throw, so it is behind
+ * CH32H4_EXCEPTIONS. The terminate handler is NOT: std::terminate is reachable
+ * with -fno-exceptions too -- a pure virtual call, a failed operator new, a
+ * failed static-init guard -- so leaving it out means the default handler, and
+ * the 43 KB name demangler behind it, is linked into a build that cannot throw
+ * at all.
+ *
+ * That is not hypothetical. It is what this core shipped: the whole file was
+ * behind CH32H4_EXCEPTIONS, so the exceptions-OFF build -- the default, chosen
+ * to save space -- came out 35 KB LARGER than the exceptions-on one.
  */
-#ifdef CH32H4_EXCEPTIONS
-
 #include "ch32h4_console.h"
+
+#ifdef CH32H4_EXCEPTIONS
 
 extern "C" {
 
@@ -36,16 +47,25 @@ static void ch32h4_register_eh_frame(void) {
 
 }  /* extern "C" */
 
-/* libstdc++'s documented customisation point. Defining it ourselves stops the
- * linker pulling in vterminate.o, and with it the C++ name demangler -- 43 KB
- * of .text reachable from nowhere else. */
+#endif /* CH32H4_EXCEPTIONS */
+
+/* libstdc++'s documented customisation point, defined UNCONDITIONALLY.
+ *
+ * Defining it ourselves stops the linker pulling in vterminate.o, and with it
+ * the C++ name demangler -- 43 KB of .text whose only caller is the default
+ * handler's attempt to print the type name of the exception that got away.
+ * Nothing else reaches it, and a board with no debugger attached cannot do
+ * anything with the name anyway.
+ *
+ * The message no longer names exceptions: in a -fno-exceptions build, arriving
+ * here means a pure virtual call, a failed allocation or a recursive static
+ * initialisation rather than a throw.
+ */
 namespace __gnu_cxx {
 void __verbose_terminate_handler() {
-    ch32h4_console_puts("\nterminate called: an exception escaped\n");
+    ch32h4_console_puts("\nterminate called\n");
     ch32h4_console_flush();
     for (;;) {
     }
 }
 }  // namespace __gnu_cxx
-
-#endif /* CH32H4_EXCEPTIONS */
