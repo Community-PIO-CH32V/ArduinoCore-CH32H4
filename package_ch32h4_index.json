@@ -12,15 +12,15 @@
         {
           "name": "CH32H41x Boards",
           "architecture": "ch32h4",
-          "version": "1.0.0",
+          "version": "1.0.1",
           "category": "Contributed",
           "help": {
             "online": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/issues"
           },
-          "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/ch32h4-1.0.0.zip",
-          "archiveFileName": "ch32h4-1.0.0.zip",
-          "checksum": "SHA-256:44fdd1816cf4ba64bf08456bc540bce773a983ecad75f85f69f5b17785269f18",
-          "size": "11483566",
+          "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.1/ch32h4-1.0.1.zip",
+          "archiveFileName": "ch32h4-1.0.1.zip",
+          "checksum": "SHA-256:1d48307358ba7d77a95d46e6b74175d42b2b2b6fb5f86e13b67f775be098f585",
+          "size": "11483818",
           "boards": [
             {
               "name": "CH32H417QEU6-R0-1v1"
@@ -180,35 +180,35 @@
           "systems": [
             {
               "host": "x86_64-mingw32",
-              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-embed-amd64-rooted.zip",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.1/python3-3.11.9-embed-amd64-rooted.zip",
               "archiveFileName": "python3-3.11.9-embed-amd64-rooted.zip",
               "checksum": "SHA-256:2a1076dd3fb63158267c0f86a0e5218c6920ac16fa8701ddaf494bd7375e2fa6",
               "size": "11250043"
             },
             {
               "host": "i686-mingw32",
-              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-embed-amd64-rooted.zip",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.1/python3-3.11.9-embed-amd64-rooted.zip",
               "archiveFileName": "python3-3.11.9-embed-amd64-rooted.zip",
               "checksum": "SHA-256:2a1076dd3fb63158267c0f86a0e5218c6920ac16fa8701ddaf494bd7375e2fa6",
               "size": "11250043"
             },
             {
               "host": "x86_64-pc-linux-gnu",
-              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-via-env.tar.gz",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.1/python3-3.11.9-via-env.tar.gz",
               "archiveFileName": "python3-3.11.9-via-env.tar.gz",
               "checksum": "SHA-256:c596fca6d0c9ecb604498ee6f38454b808d3a46d0255fc9ff703fe64660b9d87",
               "size": "1063"
             },
             {
               "host": "x86_64-apple-darwin",
-              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-via-env.tar.gz",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.1/python3-3.11.9-via-env.tar.gz",
               "archiveFileName": "python3-3.11.9-via-env.tar.gz",
               "checksum": "SHA-256:c596fca6d0c9ecb604498ee6f38454b808d3a46d0255fc9ff703fe64660b9d87",
               "size": "1063"
             },
             {
               "host": "arm64-apple-darwin",
-              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-via-env.tar.gz",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.1/python3-3.11.9-via-env.tar.gz",
               "archiveFileName": "python3-3.11.9-via-env.tar.gz",
               "checksum": "SHA-256:c596fca6d0c9ecb604498ee6f38454b808d3a46d0255fc9ff703fe64660b9d87",
               "size": "1063"
