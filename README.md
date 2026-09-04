@@ -67,10 +67,10 @@ amplifier and a WCH-Link attached.
 | | Arduino IDE / arduino-cli build | verified |
 | | Debugging both cores over OpenOCD and GDB | verified — see the gaps below |
 
-`python -m pytest tests` runs all **265**: **81 host-side** — the tree, the
-linker layout, the Arduino IDE build description, the debug configuration and
-a matrix of build configurations — and **184 on hardware**, against a connected
-board. The
+`python -m pytest tests` runs all **272**: **88 host-side** — the tree, the
+linker layout, the Arduino IDE build description, the debug configuration, the
+Boards Manager index and a matrix of build configurations — and **184 on
+hardware**, against a connected board. The
 hardware half is `tests/hw`; `--ignore=tests/hw` leaves the host-side half,
 which needs no board. The hardware suite reprograms the part nine times — once
 per sketch — and takes about three minutes.
