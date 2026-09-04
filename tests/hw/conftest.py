@@ -109,17 +109,39 @@ def flash(sketch: str):
     # Erase first, with the same tool. An OpenOCD erase clears only the first
     # 448 KB, so anything a previous wlink write left past that survives and
     # the board boot-loops. Do not mix the two tools.
-    for args in (["erase"], ["flash", "--address", "0x08000000", str(binary)]):
-        r = subprocess.run([str(exe)] + args, capture_output=True, text=True)
-        out = r.stdout + r.stderr
-        # A 0x55 protocol error invalidates the operation before it, and wlink
-        # still prints "Flash done". Both conditions must be checked.
-        if "0x55" in out:
-            tool_failure("wlink protocol error 0x55 -- the operation before it "
-                         "never happened. Unplug the probe physically and "
-                         "power-cycle the board.\n" + out[-2000:])
-        if args[0] == "flash" and "Flash done" not in out:
-            tool_failure("wlink did not report success:\n" + out[-2000:])
+    # Retried as a PAIR, because 0x55 means the operation before it never
+    # happened -- so repeating it is correct rather than hopeful.
+    #
+    # It is reproducible and not a sick probe: erasing while the core spins in
+    # a loop that never yields leaves the next flash failing this way, about
+    # half the time, and never when the board is already erased. Every sketch
+    # here yields now, which removes the cause; this removes the consequence
+    # for anything that slips through, and for a sketch that has genuinely
+    # hung -- which is exactly when reprogramming matters most.
+    failed = None
+    for attempt in range(3):
+        failed = None
+        for args in (["erase"],
+                     ["flash", "--address", "0x08000000", str(binary)]):
+            r = subprocess.run([str(exe)] + args, capture_output=True, text=True)
+            out = r.stdout + r.stderr
+            # wlink still prints "Flash done" after a 0x55, so both conditions
+            # have to be checked.
+            if "0x55" in out:
+                failed = ("wlink protocol error 0x55 -- the operation before "
+                          "it never happened.\n" + out[-2000:])
+                break
+            if args[0] == "flash" and "Flash done" not in out:
+                failed = "wlink did not report success:\n" + out[-2000:]
+                break
+        if failed is None:
+            break
+        time.sleep(0.5)
+
+    if failed is not None:
+        tool_failure("three attempts to program the board all failed. Unplug "
+                     "the probe physically and power-cycle the board.\n"
+                     + failed)
 
 
 _ser = None
@@ -295,7 +317,7 @@ def _sync(sketch: str) -> str:
 
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "dualcore_board", "adc_board", "i2s_board",
-                  "lfs_board", "uart_board")
+                  "lfs_board", "uart_board", "spi_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -423,6 +445,19 @@ def dualcore_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("dualcore")
+
+
+@pytest.fixture(scope="session")
+def spi_board():
+    """The SPI sketch, including the DMA block path.
+
+    Needs the board's PA6-PA7 jumper -- MISO tied to MOSI -- for anything that
+    checks a round trip. Those tests skip without it; the ones that only ask
+    which peripheral the pins resolve to do not need it.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("spitest")
 
 
 @pytest.fixture(scope="session")

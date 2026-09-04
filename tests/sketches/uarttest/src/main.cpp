@@ -86,4 +86,13 @@ void loop() {
       line[len++] = c;
     }
   }
+  /* Every other sketch here yields, so this one does too -- USB and the
+     lwIP timers are driven from yield(), and a sketch that never calls it
+     starves them.
+
+     It is NOT a fix for the wlink 0x55 seen when switching sketches. That was
+     the first theory and it is wrong: the sequence still fails about half the
+     time with this yield in place, and halting both cores first does not help
+     either. See the retry in tests/hw/conftest.py for what does. */
+  yield();
 }

@@ -200,11 +200,200 @@ uint16_t SPIClassCH32H4::transfer16(uint16_t data) {
     return (uint16_t)((hi << 8) | lo);
 }
 
-void SPIClassCH32H4::transfer(void *buf, size_t count) {
-    uint8_t *p = (uint8_t *)buf;
-    for (size_t i = 0; i < count; i++) {
-        p[i] = transfer(p[i]);
+/* ---- block transfers ----------------------------------------------------
+ *
+ * The byte-at-a-time loop is far slower than the bus. Measured on this part at
+ * 400 MHz, 4096 bytes in place:
+ *
+ *     1 MHz clock     607 kbit/s    60% of the bus
+ *     8 MHz clock    1700 kbit/s    21%
+ *    24 MHz clock    2269 kbit/s     9%
+ *
+ * It plateaus near 2.3 Mbit/s because every byte costs two polled waits, so
+ * raising the clock past about 3 MHz buys nothing: the wire idles nine tenths
+ * of the time and only the length of the idle changes.
+ *
+ * DMA moves the block with the CPU out of the way, so the rate is the bus
+ * rate. This follows the MicroPython port's driver for the same silicon
+ * closely, because several of its details are not things a reading of the
+ * reference manual would suggest and all of them cost a byte or a hang:
+ *
+ *   - Arm the RECEIVE channel before the transmit one. WCH's own example does
+ *     the opposite, and at these clocks the first byte can complete before the
+ *     receiver is listening.
+ *   - Receive outranks transmit in DMA priority. A byte collected late is
+ *     lost; a byte loaded late only leaves SCK idle for a moment.
+ *   - Drain a stale RXNE before arming, or the first "received" byte is one
+ *     left over from the previous transfer.
+ *   - Time out on LACK OF PROGRESS in CNTR, not on a fixed spin. A wrong
+ *     DMAMUX request number gives a channel nothing ever triggers, and a fixed
+ *     bound either fires early on a long slow transfer or hangs for a
+ *     visible age on a short one.
+ *
+ * Channels 2 (RX) and 3 (TX): I2S owns 4 and 5, ADCInput owns 7.
+ */
+
+/* Reference manual table 10-2, as used by the MicroPython port's SPI driver:
+ * SPI1 is 63/64 and each further bus is two higher -- which is what makes the
+ * 65/66 the I2S code already uses for SPI2 come out right. */
+#define SPI_DMA_TX_REQ(id)  (61 + 2 * (id))
+#define SPI_DMA_RX_REQ(id)  (62 + 2 * (id))
+
+#define SPI_DMA_RX_CH       DMA1_Channel2
+#define SPI_DMA_TX_CH       DMA1_Channel3
+#define SPI_DMA_RX_MUX      DMA_MuxChannel2
+#define SPI_DMA_TX_MUX      DMA_MuxChannel3
+/* Channel 2 occupies bits 4-7 of INTFR, channel 3 bits 8-11. */
+#define SPI_DMA_RX_FLAGS    0x000000F0u
+#define SPI_DMA_TX_FLAGS    0x00000F00u
+
+/* CNTR is 16 bits, so a longer block is split rather than truncated. */
+#define SPI_DMA_MAX         65535u
+
+/* Microseconds without CNTR moving before a transfer is called dead. */
+#define SPI_DMA_STALL_US    100000u
+
+/* Clocked out when the caller only wants to receive, and written to when it
+ * only wants to send. One byte either way, with the increment disabled. */
+static uint8_t s_dma_idle = 0xFF;
+
+static inline void spi_drain(SPI_TypeDef *dev) {
+    if (dev->STATR & SPI_STATR_RXNE) {
+        (void)dev->DATAR;
     }
+    (void)dev->STATR;
+}
+
+void SPIClassCH32H4::transferPolled(const uint8_t *tx, uint8_t *rx,
+                                    size_t count) {
+    SPI_TypeDef *dev = spi_regs(_id);
+    for (size_t i = 0; i < count; i++) {
+        while (SPI_I2S_GetFlagStatus(dev, SPI_I2S_FLAG_TXE) == RESET) {
+        }
+        SPI_I2S_SendData(dev, tx ? tx[i] : 0xFF);
+        while (SPI_I2S_GetFlagStatus(dev, SPI_I2S_FLAG_RXNE) == RESET) {
+        }
+        const uint8_t got = (uint8_t)SPI_I2S_ReceiveData(dev);
+        if (rx) {
+            rx[i] = got;
+        }
+    }
+}
+
+/* Watch one channel's CNTR to zero. False if it stops making progress, which
+ * is what a mis-routed request line looks like from here. */
+static bool dma_wait(DMA_Channel_TypeDef *ch) {
+    uint32_t left = ch->CNTR;
+    uint32_t deadline = micros() + SPI_DMA_STALL_US;
+    while (ch->CNTR != 0) {
+        const uint32_t now = ch->CNTR;
+        if (now != left) {
+            left = now;
+            deadline = micros() + SPI_DMA_STALL_US;
+        } else if ((int32_t)(micros() - deadline) > 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SPIClassCH32H4::transferDMA(const uint8_t *tx, uint8_t *rx, size_t count) {
+    SPI_TypeDef *dev = spi_regs(_id);
+    bool ok = true;
+
+    RCC_HBPeriphClockCmd(RCC_HBPeriph_DMA1, ENABLE);
+    DMA_MuxChannelConfig(SPI_DMA_TX_MUX, SPI_DMA_TX_REQ(_id));
+    DMA_MuxChannelConfig(SPI_DMA_RX_MUX, SPI_DMA_RX_REQ(_id));
+
+    while (count != 0 && ok) {
+        const uint16_t chunk =
+            (uint16_t)(count > SPI_DMA_MAX ? SPI_DMA_MAX : count);
+
+        DMA_Cmd(SPI_DMA_TX_CH, DISABLE);
+        DMA_Cmd(SPI_DMA_RX_CH, DISABLE);
+        DMA1->INTFCR = SPI_DMA_TX_FLAGS | SPI_DMA_RX_FLAGS;
+
+        DMA_InitTypeDef d = {0};
+        d.DMA_PeripheralBaseAddr = (uint32_t)&dev->DATAR;
+        d.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+        d.DMA_BufferSize = chunk;
+
+        if (rx) {
+            d.DMA_DIR = DMA_DIR_PeripheralSRC;
+            d.DMA_Memory0BaseAddr = (uint32_t)rx;
+            d.DMA_MemoryInc = DMA_MemoryInc_Enable;
+            d.DMA_Priority = DMA_Priority_VeryHigh;
+            DMA_Init(SPI_DMA_RX_CH, &d);
+        }
+
+        /* In place is safe without a copy: a byte must reach DATAR before it
+         * can be shifted out, and the byte it exchanges only lands two byte
+         * times later, so the transmit side stays ahead of the receive side
+         * overwriting it. */
+        d.DMA_DIR = DMA_DIR_PeripheralDST;
+        d.DMA_Memory0BaseAddr = tx ? (uint32_t)tx : (uint32_t)&s_dma_idle;
+        d.DMA_MemoryInc = tx ? DMA_MemoryInc_Enable : DMA_MemoryInc_Disable;
+        d.DMA_Priority = DMA_Priority_High;
+        DMA_Init(SPI_DMA_TX_CH, &d);
+
+        spi_drain(dev);
+
+        DMA_Channel_TypeDef *watch = SPI_DMA_TX_CH;
+        if (rx) {
+            DMA_Cmd(SPI_DMA_RX_CH, ENABLE);
+            SPI_I2S_DMACmd(dev, SPI_I2S_DMAReq_Rx, ENABLE);
+            watch = SPI_DMA_RX_CH;
+        }
+        SPI_I2S_DMACmd(dev, SPI_I2S_DMAReq_Tx, ENABLE);
+        DMA_Cmd(SPI_DMA_TX_CH, ENABLE);
+
+        ok = dma_wait(watch);
+
+        /* Transmit complete means the last byte reached the shift register,
+         * not the wire. Wait for the bus to go idle before dropping the
+         * request lines, or a send-only transfer returns with a byte still
+         * going out and the next endTransaction() raises CS under it. */
+        if (ok && !rx) {
+            uint32_t guard = 100000u;
+            while ((dev->STATR & SPI_STATR_BSY) && guard) {
+                guard--;
+            }
+        }
+
+        SPI_I2S_DMACmd(dev, SPI_I2S_DMAReq_Tx, DISABLE);
+        SPI_I2S_DMACmd(dev, SPI_I2S_DMAReq_Rx, DISABLE);
+        DMA_Cmd(SPI_DMA_TX_CH, DISABLE);
+        DMA_Cmd(SPI_DMA_RX_CH, DISABLE);
+        DMA1->INTFCR = SPI_DMA_TX_FLAGS | SPI_DMA_RX_FLAGS;
+
+        count -= chunk;
+        if (tx) {
+            tx += chunk;
+        }
+        if (rx) {
+            rx += chunk;
+        }
+    }
+    return ok;
+}
+
+void SPIClassCH32H4::transfer(const void *tx, void *rx, size_t count) {
+    if (!_running || count == 0) {
+        return;
+    }
+    const uint8_t *t = (const uint8_t *)tx;
+    uint8_t *r = (uint8_t *)rx;
+
+    if (count >= DMA_THRESHOLD && transferDMA(t, r, count)) {
+        return;
+    }
+    /* Short, or the DMA stalled. Falling back keeps the transfer correct on a
+     * board where something else has taken the channels. */
+    transferPolled(t, r, count);
+}
+
+void SPIClassCH32H4::transfer(void *buf, size_t count) {
+    transfer(buf, buf, count);
 }
 
 /* Arduino's interrupt-masking helpers. This core does not disable interrupts

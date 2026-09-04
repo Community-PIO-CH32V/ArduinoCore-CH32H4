@@ -41,6 +41,17 @@ public:
     uint16_t transfer16(uint16_t data) override;
     void transfer(void *buf, size_t count) override;
 
+    /* Separate buffers, which a DMA transfer can do without the caller
+     * copying first. `rx` may be null to send without keeping what comes
+     * back. */
+    void transfer(const void *tx, void *rx, size_t count);
+
+    /* Block transfers above this many bytes go through DMA; shorter ones stay
+     * on the polled path, where setting up two channels costs more than it
+     * saves. Exposed so a test can prove both paths rather than whichever the
+     * threshold happens to select. */
+    static const size_t DMA_THRESHOLD = 32;
+
     void beginTransaction(arduino::SPISettings settings) override;
     void endTransaction() override;
 
@@ -61,6 +72,10 @@ public:
 
 private:
     void applySettings(const arduino::SPISettings &settings);
+
+    /* Either buffer may be null: null tx sends 0xFF, null rx discards. */
+    void transferPolled(const uint8_t *tx, uint8_t *rx, size_t count);
+    bool transferDMA(const uint8_t *tx, uint8_t *rx, size_t count);
 
     pin_size_t _sck, _miso, _mosi;
     uint8_t _id = 0;
