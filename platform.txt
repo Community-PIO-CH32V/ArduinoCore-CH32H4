@@ -19,11 +19,12 @@
 #
 # Two hooks need it: the SDK archive and the linker-script substitution.
 #
-# On Windows it comes from the package, so a Boards Manager install needs
-# nothing preinstalled -- python.org's embeddable build, declared as a tool in
-# package_ch32h4_index.json. On Linux and macOS it is python3 from PATH, which
-# is what arduino-pico does as well: its Unix "pqt-python3" is a 292-byte
-# tarball holding a shim that execs the system python3.
+# It comes from the package, so a Boards Manager install needs nothing
+# preinstalled: python.org's embeddable build on Windows, and on Linux and
+# macOS a shim that execs the system python3 -- which is what arduino-pico
+# ships as its Unix pqt-python3, and which is not optional. arduino-cli
+# resolves every toolsDependency or none, so a python3 tool declared for
+# Windows alone would make this platform fail to install everywhere else.
 #
 # Still a property, so platform.local.txt can point it somewhere else in a
 # checkout that has no installed tool.
@@ -44,7 +45,12 @@ version=1.0.0
 compiler.path={runtime.tools.riscv-wch-elf-gcc.path}/bin/
 compiler.prefix=riscv-wch-elf-
 
-ch32h4.python=python3
+# Both come from the package. On Windows that is a real embeddable
+# interpreter; elsewhere it is a shim that execs the system python3, which
+# exists because arduino-cli resolves every toolsDependency or none -- a tool
+# with no entry for the running host makes the platform fail to install there,
+# rather than merely lacking that tool.
+ch32h4.python={runtime.tools.python3.path}/python3
 # The embeddable distribution unpacks flat and its interpreter is python.exe,
 # not python3.exe -- there is no python3.exe in it to point at.
 ch32h4.python.windows={runtime.tools.python3.path}/python.exe

@@ -19,8 +19,8 @@
           },
           "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/ch32h4-1.0.0.zip",
           "archiveFileName": "ch32h4-1.0.0.zip",
-          "checksum": "SHA-256:d44ab39f7d744e44e4fc0ea856254d36efbf21a38963b6b184f6a67ce5993337",
-          "size": "11362060",
+          "checksum": "SHA-256:cdda6dbc441c0fc42a453594299f6a241a203ea52b0bdd3b2f606b32ba56bd97",
+          "size": "11363779",
           "boards": [
             {
               "name": "CH32H417QEU6-R0-1v1"
@@ -68,6 +68,27 @@
               "archiveFileName": "riscv-wch-elf-gcc-12.2.0-d2836398.zip",
               "checksum": "SHA-256:3139969210f87d52f7e0347b0d784aeab7798db2c58f76845bcfebdc46d39d02",
               "size": "304845934"
+            },
+            {
+              "host": "x86_64-pc-linux-gnu",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/toolchain-riscv-linux/zip/fde267fb356efc11dee4c48ea58a1fd6dc787603",
+              "archiveFileName": "riscv-wch-elf-gcc-12.2.0-fde267fb.zip",
+              "checksum": "SHA-256:b7483c4d62e277313a8e6c6bcee5fc5c469008922385a70304cdb2c7a59e53d4",
+              "size": "632377453"
+            },
+            {
+              "host": "x86_64-apple-darwin",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/toolchain-riscv-mac/zip/e6360e0f77854a50a653a38ddbde4af413b06453",
+              "archiveFileName": "riscv-wch-elf-gcc-12.2.0-e6360e0f.zip",
+              "checksum": "SHA-256:0310ee2ebfa9d675f2066ce4bec62f0279d973127622f573d5aac41dce82c4dd",
+              "size": "326675992"
+            },
+            {
+              "host": "arm64-apple-darwin",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/toolchain-riscv-mac/zip/e6360e0f77854a50a653a38ddbde4af413b06453",
+              "archiveFileName": "riscv-wch-elf-gcc-12.2.0-e6360e0f.zip",
+              "checksum": "SHA-256:0310ee2ebfa9d675f2066ce4bec62f0279d973127622f573d5aac41dce82c4dd",
+              "size": "326675992"
             }
           ]
         },
@@ -118,31 +139,38 @@
           "systems": [
             {
               "host": "x86_64-mingw32",
-              "url": "https://github.com/ch32-rs/wlink/releases/download/v0.1.2/wlink-v0.1.2-win-x64.zip",
-              "archiveFileName": "wlink-v0.1.2-win-x64.zip",
-              "checksum": "SHA-256:59b3989137a9d22c9c1e8c04fd9371af3f54fa43b4cb63c59d6fb4286a34c78a",
-              "size": "592257"
+              "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-win-x64.zip",
+              "archiveFileName": "wlink-v0.1.2-ch32h4.1-win-x64.zip",
+              "checksum": "SHA-256:cab9bb6baab1a131904dde3a641586647c5b78bfa4c671348bfb62ed4a87436c",
+              "size": "588127"
             },
             {
               "host": "i686-mingw32",
-              "url": "https://github.com/ch32-rs/wlink/releases/download/v0.1.2/wlink-v0.1.2-win-x64.zip",
-              "archiveFileName": "wlink-v0.1.2-win-x64.zip",
-              "checksum": "SHA-256:59b3989137a9d22c9c1e8c04fd9371af3f54fa43b4cb63c59d6fb4286a34c78a",
-              "size": "592257"
+              "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-win-x86.zip",
+              "archiveFileName": "wlink-v0.1.2-ch32h4.1-win-x86.zip",
+              "checksum": "SHA-256:20a8bf46203207ce066031ed0aa57bbf3f4a7af7ffe1d092ce5242b31b38f78b",
+              "size": "553211"
             },
             {
               "host": "x86_64-pc-linux-gnu",
-              "url": "https://github.com/ch32-rs/wlink/releases/download/v0.1.2/wlink-v0.1.2-linux-x64.tar.gz",
-              "archiveFileName": "wlink-v0.1.2-linux-x64.tar.gz",
-              "checksum": "SHA-256:f8f1fba2436694116fe2cf16b1572e92d116c4acd921bf12fbc0ca5bf63824bf",
-              "size": "843618"
+              "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-linux-x64.tar.gz",
+              "archiveFileName": "wlink-v0.1.2-ch32h4.1-linux-x64.tar.gz",
+              "checksum": "SHA-256:930cc542b1613666821194366bef3f1b5d630b998c089d32ebc00062465473db",
+              "size": "821112"
             },
             {
               "host": "arm64-apple-darwin",
-              "url": "https://github.com/ch32-rs/wlink/releases/download/v0.1.2/wlink-v0.1.2-macos-arm64.tar.gz",
-              "archiveFileName": "wlink-v0.1.2-macos-arm64.tar.gz",
-              "checksum": "SHA-256:49164d236346e4c294935412a072040eac8faaeb5f097952846807f7dc0fbf8c",
-              "size": "763735"
+              "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-macos-arm64.tar.gz",
+              "archiveFileName": "wlink-v0.1.2-ch32h4.1-macos-arm64.tar.gz",
+              "checksum": "SHA-256:a1be0c0552ddefb112fa753b1a044c053fc3d3ee43d17337c915f2e1624f5642",
+              "size": "741347"
+            },
+            {
+              "host": "x86_64-apple-darwin",
+              "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-macos-x64.tar.gz",
+              "archiveFileName": "wlink-v0.1.2-ch32h4.1-macos-x64.tar.gz",
+              "checksum": "SHA-256:ab7c130dac20f8b4d70fe2cb960aed34d7e9ea9385ff95b3f9dac12eb4f24ac4",
+              "size": "762125"
             }
           ]
         },
@@ -163,6 +191,27 @@
               "archiveFileName": "python3-3.11.9-embed-amd64-rooted.zip",
               "checksum": "SHA-256:2a1076dd3fb63158267c0f86a0e5218c6920ac16fa8701ddaf494bd7375e2fa6",
               "size": "11250043"
+            },
+            {
+              "host": "x86_64-pc-linux-gnu",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-via-env.tar.gz",
+              "archiveFileName": "python3-3.11.9-via-env.tar.gz",
+              "checksum": "SHA-256:07a8e0590ee807fcf3aa91e5f895ac6d664a458e354bef07409e3bc34d972a9c",
+              "size": "709"
+            },
+            {
+              "host": "x86_64-apple-darwin",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-via-env.tar.gz",
+              "archiveFileName": "python3-3.11.9-via-env.tar.gz",
+              "checksum": "SHA-256:07a8e0590ee807fcf3aa91e5f895ac6d664a458e354bef07409e3bc34d972a9c",
+              "size": "709"
+            },
+            {
+              "host": "arm64-apple-darwin",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-via-env.tar.gz",
+              "archiveFileName": "python3-3.11.9-via-env.tar.gz",
+              "checksum": "SHA-256:07a8e0590ee807fcf3aa91e5f895ac6d664a458e354bef07409e3bc34d972a9c",
+              "size": "709"
             }
           ]
         }

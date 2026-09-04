@@ -22,15 +22,18 @@ WHERE THE ARCHIVES COME FROM. Nothing here is repackaged or re-hosted except
 the platform itself, because everything else already exists as a stable public
 archive:
 
-  riscv-wch-elf-gcc   a codeload zip of the toolchain git repo, pinned to a
-                      commit. WCH's own Arduino index does exactly this for
-                      its riscv-none-embed-gcc and openocd, so the pattern is
-                      the one this ecosystem already relies on.
+  riscv-wch-elf-gcc   codeload zips of three toolchain git repos, one per
+                      OS, each pinned to a commit. WCH's own Arduino index
+                      does exactly this for its riscv-none-embed-gcc and
+                      openocd, so the pattern is the one this ecosystem
+                      already relies on.
   openocd-riscv-wch   PlatformIO's registry, which publishes a size and a
                       sha256 per host through its API -- no download needed to
                       write the index, and four hosts instead of one.
-  wlink               GitHub release assets, which are immutable once
-                      published.
+  wlink               release assets from our fork, built by its CI. Every
+                      host from one build, including the Intel macOS one
+                      upstream dropped when GitHub retired its last Intel
+                      runner.
   python3             python.org's Windows embeddable distribution, from the
                       permanent /ftp/python/ path. WINDOWS ONLY, deliberately:
                       see the note on that entry.
@@ -47,6 +50,7 @@ import json
 import os
 import sys
 import urllib.request
+import tarfile
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -95,34 +99,34 @@ TOOLS = [
     {
         "name": "riscv-wch-elf-gcc",
         "version": "12.2.0",
-        # A git repository holding the built toolchain, archived by GitHub.
-        # The zip unpacks to a single directory, which arduino-cli strips, so
-        # {runtime.tools.*.path}/bin is where the compiler lands -- the repo
-        # has bin/, lib/, include/ at its root.
+        # Three repositories, one per OS, each a git repo holding the built
+        # toolchain and each archived by GitHub. The zip has a single root
+        # directory, which arduino-cli strips, so {runtime.tools.*.path}/bin is
+        # where the compiler lands -- every one of them has bin/, lib/ and
+        # riscv-wch-elf/ at its root.
         #
-        # PINNED TO A COMMIT ON THE gcc12 BRANCH, and NOT to the repository's
-        # 12.2.0 tag, which is a different toolchain: the tag carries
-        # riscv-none-elf- binaries and the default branch riscv-none-embed-,
-        # while this core needs riscv-wch-elf-. The prefixes are the whole
-        # difference -- an upstream RISC-V GCC has no xw extension, so it
-        # cannot assemble -march=rv32imafc_zba_zbb_zbc_zbs_xw at all, and the
-        # build fails on the first instruction rather than on a missing file.
-        # A branch name would archive whatever the branch points at today; a
+        # PINNED TO COMMITS ON THE gcc12 BRANCH, and NOT to any repository's
+        # 12.2.0 tag, which is a different toolchain: the Windows repo's tag
+        # carries riscv-none-elf- binaries and its default branch
+        # riscv-none-embed-, while this core needs riscv-wch-elf-. That is not
+        # a cosmetic difference -- an upstream RISC-V GCC has no xw extension
+        # and cannot assemble -march=rv32imafc_zba_zbb_zbc_zbs_xw at all, so
+        # the build would fail on the first instruction rather than on a
+        # missing file. A branch name archives whatever it points at today; a
         # commit cannot move.
         #
-        # WINDOWS ONLY, and that is the repository's name and content, not a
-        # choice made here: there is no equivalent Linux or macOS build of the
-        # riscv-wch-elf toolchain published anywhere this could point at. The
-        # -march this core needs (rv32imafc_zba_zbb_zbc_zbs_xw, with WCH's xw
-        # extension) is not in an upstream RISC-V GCC, so a generic
-        # riscv-none-elf toolchain cannot stand in.
+        # The host lists are the ones each repo's own package.json declares,
+        # not a guess: the macOS build says it serves darwin_x86_64 AND
+        # darwin_arm64, so one archive covers both Macs.
         "sources": [
-            {"hosts": WIN,
-             "url": "https://codeload.github.com/Community-PIO-CH32V/"
-                    "toolchain-riscv-windows/zip/"
-                    "d2836398c87fdc9832fd04026588c26da199b902",
-             "archive": "riscv-wch-elf-gcc-12.2.0-d2836398.zip"},
+            {"hosts": WIN, "repo": "toolchain-riscv-windows",
+             "sha": "d2836398c87fdc9832fd04026588c26da199b902"},
+            {"hosts": LINUX, "repo": "toolchain-riscv-linux",
+             "sha": "fde267fb356efc11dee4c48ea58a1fd6dc787603"},
+            {"hosts": MAC_X86 + MAC_ARM, "repo": "toolchain-riscv-mac",
+             "sha": "e6360e0f77854a50a653a38ddbde4af413b06453"},
         ],
+        "codeload": "Community-PIO-CH32V/%s",
     },
     {
         "name": "openocd-riscv-wch",
@@ -155,19 +159,27 @@ TOOLS = [
     {
         "name": "wlink",
         "version": "0.1.2",
-        # 0.1.2 exactly. 0.1.1 reports "Probe is not attached to an MCU" on
-        # this part, which is a version problem wearing the costume of a
-        # wiring problem, and the hardware test suite refuses to run on it.
+        # From OUR FORK's release, not ch32-rs/wlink's, and every host from the
+        # same build.
+        #
+        # 0.1.2 is required: 0.1.1 reports "Probe is not attached to an MCU" on
+        # this part, which is a version problem wearing the costume of a wiring
+        # problem, and the hardware suite refuses to run on it. But upstream's
+        # 0.1.2 has no Intel macOS asset -- c4f15b7 dropped the target when
+        # GitHub retired the macos-13 runner -- and 0.1.1, which does have one,
+        # is the broken version.
+        #
+        # That gap is not "Intel Macs lack an uploader". arduino-cli resolves
+        # every toolsDependency or none, so declaring the compiler and OpenOCD
+        # for that host while wlink is missing makes the whole platform fail to
+        # install there. The fork restores the target by cross-compiling on the
+        # Apple Silicon runner, which needs no retired hardware.
         "sources": [
-            {"hosts": WIN,
-             "url": "https://github.com/ch32-rs/wlink/releases/download/"
-                    "v0.1.2/wlink-v0.1.2-win-x64.zip"},
-            {"hosts": LINUX,
-             "url": "https://github.com/ch32-rs/wlink/releases/download/"
-                    "v0.1.2/wlink-v0.1.2-linux-x64.tar.gz"},
-            {"hosts": MAC_ARM,
-             "url": "https://github.com/ch32-rs/wlink/releases/download/"
-                    "v0.1.2/wlink-v0.1.2-macos-arm64.tar.gz"},
+            {"hosts": ["x86_64-mingw32"], "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-win-x64.zip"},
+            {"hosts": ["i686-mingw32"], "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-win-x86.zip"},
+            {"hosts": LINUX, "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-linux-x64.tar.gz"},
+            {"hosts": MAC_ARM, "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-macos-arm64.tar.gz"},
+            {"hosts": MAC_X86, "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-macos-x64.tar.gz"},
         ],
     },
     {
@@ -183,11 +195,17 @@ TOOLS = [
         # library in python311.zip. The hooks use argparse, hashlib,
         # subprocess and concurrent.futures and nothing else.
         #
-        # Linux and macOS get no entry and platform.txt falls back to python3
-        # on PATH. That is not a gap: it is what arduino-pico does too, whose
-        # Unix "pqt-python3" is a 292-byte tarball containing a shim that execs
-        # the system python3. Shipping the same shim would add a file to
-        # maintain and change nothing.
+        # Linux and macOS get a SHIM rather than an interpreter -- a tiny
+        # tarball holding a python3 script that execs the system one. That is
+        # what arduino-pico ships as its Unix pqt-python3, and it took a
+        # per-host audit of this index to see why it is not merely tidiness:
+        #
+        # arduino-cli resolves EVERY toolsDependency or none. A tool declared
+        # with no entry for the running host does not degrade to "unavailable
+        # there" -- it makes `core install` fail on that host outright. Leaving
+        # python3 as Windows-only would have made this package uninstallable on
+        # Linux and macOS, for the sake of an interpreter those hosts already
+        # have.
         #
         # REPACKED, not linked. python.org's embeddable zip has no top-level
         # directory -- python.exe and the .pyds sit at its root -- and
@@ -202,6 +220,11 @@ TOOLS = [
             "out": "python3-3.11.9-embed-amd64-rooted.zip",
             "root": "python3-3.11.9",
             "hosts": WIN,
+        },
+        "shim": {
+            "out": "python3-3.11.9-via-env.tar.gz",
+            "root": "python3-3.11.9",
+            "hosts": LINUX + MAC_X86 + MAC_ARM,
         },
     },
 ]
@@ -324,28 +347,84 @@ def repack(url, out, root):
     return dst
 
 
+SHIM = """#!/bin/sh
+# Hand off to the system python3.
+#
+# This exists so that the python3 tool has an entry for this host. arduino-cli
+# resolves every toolsDependency or none, so a tool missing the running host
+# does not lose a feature -- it makes the whole platform fail to install.
+# Windows genuinely needs an interpreter shipped; Linux and macOS have one, and
+# this is the smallest honest way to say so. arduino-pico ships the same thing.
+#
+# Searched on PATH rather than hardcoded: python3 is /usr/bin on some systems,
+# /usr/local/bin or a Homebrew prefix on others. The guard skips this script
+# itself, in case the tool directory is somehow on PATH ahead of the real one.
+self=$0
+for dir in $(printf %s "$PATH" | tr ':' ' '); do
+    for name in python3 python; do
+        cand="$dir/$name"
+        [ -x "$cand" ] || continue
+        [ "$cand" = "$self" ] && continue
+        exec "$cand" "$@"
+    done
+done
+echo "python3 not found on PATH; the CH32H41x core needs one to build" >&2
+exit 127
+"""
+
+
+def build_shim(out, root):
+    """A tar.gz holding one executable python3 script.
+
+    Built here rather than committed so that the file the index hashes and the
+    file the release carries cannot drift apart.
+    """
+    path = os.path.join(CACHE, out)
+    if not os.path.isfile(path):
+        os.makedirs(CACHE, exist_ok=True)
+        sys.stderr.write("building %s\n" % out)
+        data = SHIM.encode("utf-8")
+        info = tarfile.TarInfo(root + "/python3")
+        info.size = len(data)
+        info.mode = 0o755
+        info.mtime = 0
+        with tarfile.open(path, "w:gz") as tf:
+            tf.addfile(info, io.BytesIO(data))
+    return path
+
+
 def build_tools():
     tools = []
     for spec in TOOLS:
         if "pio" in spec:
             systems = pio_systems(*spec["pio"])
         elif "repack" in spec:
-            r = spec["repack"]
-            path = repack(r["url"], r["out"], r["root"])
-            size, digest, name = hash_file(path)
-            systems = [{
-                "host": host,
-                "url": RELEASE_ASSET % name,
-                "archiveFileName": name,
-                "checksum": "SHA-256:" + digest,
-                "size": str(size),
-            } for host in r["hosts"]]
-            PUBLISH.append(path)
+            systems = []
+            for kind, build in (("repack", None), ("shim", None)):
+                if kind not in spec:
+                    continue
+                r = spec[kind]
+                if kind == "repack":
+                    path = repack(r["url"], r["out"], r["root"])
+                else:
+                    path = build_shim(r["out"], r["root"])
+                size, digest, name = hash_file(path)
+                systems += [{
+                    "host": host,
+                    "url": RELEASE_ASSET % name,
+                    "archiveFileName": name,
+                    "checksum": "SHA-256:" + digest,
+                    "size": str(size),
+                } for host in r["hosts"]]
+                PUBLISH.append(path)
         elif "codeload" in spec:
             systems = []
             for src in spec["sources"]:
+                repo = spec["codeload"]
+                if "%s" in repo:
+                    repo = repo % src["repo"]
                 url = ("https://codeload.github.com/%s/zip/%s"
-                       % (spec["codeload"], src["sha"]))
+                       % (repo, src["sha"]))
                 name = "%s-%s-%s.zip" % (spec["name"], spec["version"],
                                          src["sha"][:8])
                 size, digest, _ = fetch(url, name)
