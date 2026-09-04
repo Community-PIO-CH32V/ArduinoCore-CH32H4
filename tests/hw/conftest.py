@@ -317,7 +317,8 @@ def _sync(sketch: str) -> str:
 
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "dualcore_board", "adc_board", "i2s_board",
-                  "lfs_board", "uart_board", "spi_board")
+                  "lfs_board", "uart_board", "spi_board",
+                  "wire_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -445,6 +446,19 @@ def dualcore_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("dualcore")
+
+
+@pytest.fixture(scope="session")
+def wire_board():
+    """The I2C sketch.
+
+    Needs a device on the bus; the board carries an SSD1306 at 0x3C. Tests that
+    talk to it skip when nothing answers, so an unpopulated bench reports a
+    missing precondition rather than a broken driver.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("wiretest")
 
 
 @pytest.fixture(scope="session")
