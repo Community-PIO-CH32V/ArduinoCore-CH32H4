@@ -19,8 +19,8 @@
           },
           "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/ch32h4-1.0.0.zip",
           "archiveFileName": "ch32h4-1.0.0.zip",
-          "checksum": "SHA-256:cdda6dbc441c0fc42a453594299f6a241a203ea52b0bdd3b2f606b32ba56bd97",
-          "size": "11363779",
+          "checksum": "SHA-256:91f92f77912a27d5c57f2159435de31dfeb34d07ada0c5cb39add55c952ae4f7",
+          "size": "11364100",
           "boards": [
             {
               "name": "CH32H417QEU6-R0-1v1"
@@ -196,22 +196,22 @@
               "host": "x86_64-pc-linux-gnu",
               "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-via-env.tar.gz",
               "archiveFileName": "python3-3.11.9-via-env.tar.gz",
-              "checksum": "SHA-256:07a8e0590ee807fcf3aa91e5f895ac6d664a458e354bef07409e3bc34d972a9c",
-              "size": "709"
+              "checksum": "SHA-256:c596fca6d0c9ecb604498ee6f38454b808d3a46d0255fc9ff703fe64660b9d87",
+              "size": "1063"
             },
             {
               "host": "x86_64-apple-darwin",
               "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-via-env.tar.gz",
               "archiveFileName": "python3-3.11.9-via-env.tar.gz",
-              "checksum": "SHA-256:07a8e0590ee807fcf3aa91e5f895ac6d664a458e354bef07409e3bc34d972a9c",
-              "size": "709"
+              "checksum": "SHA-256:c596fca6d0c9ecb604498ee6f38454b808d3a46d0255fc9ff703fe64660b9d87",
+              "size": "1063"
             },
             {
               "host": "arm64-apple-darwin",
               "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-via-env.tar.gz",
               "archiveFileName": "python3-3.11.9-via-env.tar.gz",
-              "checksum": "SHA-256:07a8e0590ee807fcf3aa91e5f895ac6d664a458e354bef07409e3bc34d972a9c",
-              "size": "709"
+              "checksum": "SHA-256:c596fca6d0c9ecb604498ee6f38454b808d3a46d0255fc9ff703fe64660b9d87",
+              "size": "1063"
             }
           ]
         }

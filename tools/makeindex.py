@@ -356,19 +356,42 @@ SHIM = """#!/bin/sh
 # Windows genuinely needs an interpreter shipped; Linux and macOS have one, and
 # this is the smallest honest way to say so. arduino-pico ships the same thing.
 #
-# Searched on PATH rather than hardcoded: python3 is /usr/bin on some systems,
-# /usr/local/bin or a Homebrew prefix on others. The guard skips this script
-# itself, in case the tool directory is somehow on PATH ahead of the real one.
+# Searched on PATH rather than hardcoded, because python3 is in /usr/bin on
+# some systems and a Homebrew or /usr/local prefix on others.
+#
+# The search splits PATH with IFS rather than with `tr`, for two reasons that
+# only showed up when this was actually run. It called an external binary --
+# so a caller with a reduced PATH got "tr: command not found" before the real
+# diagnostic -- and the unquoted expansion it needed re-split each entry on
+# whitespace, which silently skips any PATH directory whose name contains a
+# space. IFS=: splits on the one character that separates entries and on
+# nothing else.
 self=$0
-for dir in $(printf %s "$PATH" | tr ':' ' '); do
+found=
+saved_IFS=$IFS
+IFS=:
+for dir in $PATH; do
+    [ -n "$dir" ] || continue
     for name in python3 python; do
         cand="$dir/$name"
         [ -x "$cand" ] || continue
+        # Skip this script, in case the tool directory is on PATH ahead of the
+        # real interpreter; execing ourselves would loop until the process
+        # limit rather than fail.
         [ "$cand" = "$self" ] && continue
-        exec "$cand" "$@"
+        found=$cand
+        break
     done
+    [ -n "$found" ] && break
 done
-echo "python3 not found on PATH; the CH32H41x core needs one to build" >&2
+IFS=$saved_IFS
+
+if [ -n "$found" ]; then
+    exec "$found" "$@"
+fi
+
+echo "python3 not found on PATH; the CH32H41x Arduino core needs one to" >&2
+echo "run its two prebuild hooks. Install python3 and try again." >&2
 exit 127
 """
 
