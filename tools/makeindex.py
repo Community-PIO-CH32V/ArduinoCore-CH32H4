@@ -62,7 +62,19 @@ MAINTAINER = "Community-PIO-CH32V"
 WEBSITE = "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4"
 EMAIL = "maxi.gerhardt@googlemail.com"
 
-PLATFORM_VERSION = "1.0.0"
+# BUMP THIS FOR EVERY CHANGE TO THE PLATFORM. Do not replace the assets of a
+# release that already exists.
+#
+# Re-uploading over a published version opens a window in which the index and
+# the archive disagree, because raw.githubusercontent.com serves a cached index
+# for minutes after a push while the release asset changes at once. A client
+# that reads the old index and downloads the new archive refuses it -- rightly:
+#
+#   Archive hash differs from hash in index
+#
+# which looks like a corrupt download and is not. A new version has no such
+# window: nothing points at it until the index does.
+PLATFORM_VERSION = "1.0.1"
 # Assets that have to exist on the release this index points at. repack()
 # fills it in; main() prints it, because an index naming a file nobody uploaded
 # is an index that fails at install time on somebody else's machine.
