@@ -126,14 +126,35 @@ def test_windows_gets_a_python_because_it_cannot_be_assumed(package):
         "which is the whole thing this index removes")
 
 
-def test_the_platform_version_matches_the_generator(package):
-    text = MAKEINDEX.read_text(encoding="utf-8")
-    m = re.search(r'^PLATFORM_VERSION = "([^"]+)"', text, re.M)
-    assert m, "makeindex.py has no PLATFORM_VERSION"
+def test_the_platform_version_matches_package_json(package):
+    """One artifact, one version number.
+
+    package.json is what PlatformIO installs and this index is what Boards
+    Manager installs, and they described the same core with different numbers
+    for several releases before anyone noticed -- package.json sat at 0.1.0
+    while the index reached 1.0.1. Both now come from package.json, so this
+    asks whether the index was regenerated after the version moved.
+    """
+    declared = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     versions = {p["version"] for p in package["platforms"]}
-    assert m.group(1) in versions, (
-        "makeindex.py builds %s but the index has %s -- regenerate it"
-        % (m.group(1), sorted(versions)))
+    assert declared["version"] in versions, (
+        "package.json says %s but the index has %s -- regenerate it with "
+        "tools/makeindex.py" % (declared["version"], sorted(versions)))
+
+
+def test_the_archive_the_index_names_is_the_one_for_this_version(package):
+    """The filename, the URL and the version have to agree.
+
+    They are three separate strings in the generated index, and a release
+    that gets two of them right is a download that 404s or, worse, one that
+    fetches the PREVIOUS version's archive and installs it under the new
+    version's name.
+    """
+    for plat in package["platforms"]:
+        expected = "ch32h4-%s.zip" % plat["version"]
+        assert plat["archiveFileName"] == expected, plat["archiveFileName"]
+        assert plat["url"].endswith("/%s/%s" % (plat["version"], expected)), (
+            plat["url"])
 
 
 def test_the_board_list_matches_boards_txt(package):

@@ -30,6 +30,7 @@ what arduino-cli strips when it installs a platform.
 """
 import argparse
 import io
+import json
 import os
 import re
 import subprocess
@@ -40,13 +41,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def platform_version():
-    """The version the index declares, so the two cannot disagree."""
-    path = os.path.join(ROOT, "tools", "makeindex.py")
+    """The one version number, from package.json.
+
+    Read from the same place makeindex.py reads it, rather than scraped out
+    of makeindex.py's source -- which is what this used to do, and which
+    broke silently the moment that constant stopped being a literal.
+    """
+    path = os.path.join(ROOT, "package.json")
     with io.open(path, encoding="utf-8") as fh:
-        m = re.search(r'^PLATFORM_VERSION = "([^"]+)"', fh.read(), re.M)
-    if not m:
-        raise SystemExit("makearchive: no PLATFORM_VERSION in makeindex.py")
-    return m.group(1)
+        version = json.load(fh).get("version")
+    if not version:
+        raise SystemExit("makearchive: no version in package.json")
+    return version
 
 
 def submodule_paths():
