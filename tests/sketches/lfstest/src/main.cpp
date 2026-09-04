@@ -141,6 +141,23 @@ static void doEepromGuard(uint32_t rounds) {
   Serial1.println(LittleFS.exists("/fill0.bin") ? 1 : 0);
 }
 
+/* Read the EEPROM without writing it first.
+ *
+ * doEepromGuard() writes the pattern and then checks it, which proves the
+ * mirror round-trips and nothing else -- run it twice and it passes even if
+ * commit() never reaches the flash. This reads what a PREVIOUS run committed,
+ * so it is the only check here that a reset cannot survive by accident. */
+static void doEepromCheck() {
+  EEPROM.begin(256);
+  bool intact = true;
+  for (int i = 0; i < 32; i++) {
+    if (EEPROM.read(i) != (uint8_t)(0xA5 ^ i)) { intact = false; break; }
+  }
+  Serial1.print("eeprom_active_page="); Serial1.println(EEPROM.activePage());
+  EEPROM.end();
+  Serial1.print("eeprom_persisted="); Serial1.println(intact ? 1 : 0);
+}
+
 static void doWipe() {
   Serial1.print("fs_format="); Serial1.println(LittleFS.format() ? 1 : 0);
   Serial1.print("fs_remount="); Serial1.println(LittleFS.begin() ? 1 : 0);
@@ -216,6 +233,9 @@ static void handle(char *cmd) {
 
   } else if (!strncmp(cmd, "fseeprom ", 9)) {
     doEepromGuard((uint32_t)atol(cmd + 9));
+
+  } else if (!strcmp(cmd, "fseepromcheck")) {
+    doEepromCheck();
 
   } else if (!strcmp(cmd, "fsformat")) {
     doWipe();

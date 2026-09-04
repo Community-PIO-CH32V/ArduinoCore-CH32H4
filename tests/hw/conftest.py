@@ -294,7 +294,8 @@ def _sync(sketch: str) -> str:
 
 
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
-                  "tls_board", "dualcore_board", "adc_board", "i2s_board")
+                  "tls_board", "dualcore_board", "adc_board", "i2s_board",
+                  "lfs_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -422,6 +423,22 @@ def dualcore_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("dualcore")
+
+
+@pytest.fixture(scope="session")
+def lfs_board():
+    """LittleFS in the internal flash, and the EEPROM above it.
+
+    Its own image, and it has to be. Every other sketch here reaches the flash
+    only to run from it; this one erases and programs the tail while executing
+    out of the same array, which is the thing that goes wrong. It is also the
+    only sketch that can see the filesystem and the EEPROM at once, which is
+    what the coexistence tests need -- the two share an 8 KB erase page
+    boundary and an off-by-one page in either direction destroys the other.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("lfstest")
 
 
 @pytest.fixture(scope="session")
