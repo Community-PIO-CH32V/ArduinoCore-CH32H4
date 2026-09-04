@@ -106,14 +106,22 @@ def test_every_reference_resolves():
 
 
 def test_boards_txt_matches_its_generator():
-    committed = BOARDS_TXT.read_bytes()
+    # Line endings are NOT part of the comparison. makeboards.py writes LF, and
+    # git on Windows checks the file out as CRLF under core.autocrlf -- so a
+    # byte-exact test passes on the machine that generated the file and fails
+    # on every fresh clone, which is the worst possible place to find out.
+    original = BOARDS_TXT.read_bytes()
+    committed = original.replace(b"\r\n", b"\n")
+
     proc = subprocess.run(
         [sys.executable, str(ROOT / "tools" / "makeboards.py")],
         capture_output=True)
     assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
-    regenerated = BOARDS_TXT.read_bytes()
-    if regenerated != committed:
-        BOARDS_TXT.write_bytes(committed)   # leave the tree as it was found
+    regenerated = BOARDS_TXT.read_bytes().replace(b"\r\n", b"\n")
+
+    # Leave the tree exactly as it was found, line endings included.
+    BOARDS_TXT.write_bytes(original)
+
     assert regenerated == committed, (
         "boards.txt does not match tools/makeboards.py. It is generated and"
         " committed, so an edit here survives until the next run of the"
