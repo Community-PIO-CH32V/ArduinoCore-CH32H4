@@ -74,7 +74,16 @@ EMAIL = "maxi.gerhardt@googlemail.com"
 #
 # which looks like a corrupt download and is not. A new version has no such
 # window: nothing points at it until the index does.
-PLATFORM_VERSION = "1.0.1"
+# Read from package.json rather than written here, because there are two
+# manifests for one artifact -- package.json is what PlatformIO installs and
+# this index is what Boards Manager installs -- and they were already a
+# release apart before anyone noticed. One number, one place to change it.
+def _platform_version():
+    with open(os.path.join(ROOT, "package.json")) as fh:
+        return json.load(fh)["version"]
+
+
+PLATFORM_VERSION = _platform_version()
 # Assets that have to exist on the release this index points at. repack()
 # fills it in; main() prints it, because an index naming a file nobody uploaded
 # is an index that fails at install time on somebody else's machine.

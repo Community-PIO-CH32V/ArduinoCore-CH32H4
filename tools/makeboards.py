@@ -41,6 +41,13 @@ BOARDS = [
         "id": "ch32h417qeu6",
         "name": "CH32H417QEU6-R0-1v1",
         "variant": "CH32H417QEU6",
+        # The package base the variant builds on. Boards sharing a package
+        # share its pin tables, its alternate-function maps and its memory
+        # layout. Only the linker script has to be named here: everything
+        # else the package supplies is reached by an #include from the
+        # variant directory, which both build systems follow on their own,
+        # and a linker script is the one input that is not a C include.
+        "package": "CH32H417xx_QEU6",
         "mcu": "ch32h417qeu6",
         "f_cpu": "400000000L",
         "board": "CH32H417QEU6",
@@ -171,6 +178,7 @@ def generate():
             "{id}.name={name}\n"
             "{id}.build.core=ch32h4\n"
             "{id}.build.variant={variant}\n"
+            "{id}.build.package={package}\n"
             "{id}.build.mcu={mcu}\n"
             "{id}.build.f_cpu={f_cpu}\n"
             "{id}.build.board={board}\n"
@@ -182,7 +190,8 @@ def generate():
             "{id}.upload.tool.default=wlink\n"
             "{id}.upload.protocol=wlink\n"
             "{id}.upload.maximum_data_size={data}\n".format(
-                id=i, name=b["name"], variant=b["variant"], mcu=b["mcu"],
+                id=i, name=b["name"], variant=b["variant"],
+                package=b["package"], mcu=b["mcu"],
                 f_cpu=b["f_cpu"], board=b["board"], march=b["march"],
                 mabi=b["mabi"], clock=b["clock"], svd=b["svd"],
                 data=b["data_size"]))

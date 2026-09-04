@@ -222,7 +222,14 @@ compiler.cpreprocessor.flags={build.defines} {build.includes} {build.extra_inclu
 # 1. The linker script. One token, substituted from the Filesystem menu.
 #    tools/simplesub.py refuses to write a file in which the token was not
 #    found, so a renamed placeholder fails here rather than in the linker.
-recipe.hooks.prebuild.1.pattern="{ch32h4.python}" "{runtime.platform.path}/tools/simplesub.py" --input "{build.variant.path}/ch32h417.ld" --out "{build.path}/ch32h417.ld" --sub __CH32H4_FS_SIZE__ {build.fs_size}
+#
+#    Taken from the PACKAGE directory, not the variant. The memory layout
+#    belongs to the chip, so every board on a given package shares one
+#    copy rather than each carrying 600 lines of it. build.package is the
+#    only thing a board has to name to get it: the rest of what the
+#    package supplies is reached by an #include from the variant, which
+#    the compiler follows without help.
+recipe.hooks.prebuild.1.pattern="{ch32h4.python}" "{runtime.platform.path}/tools/simplesub.py" --input "{runtime.platform.path}/variants/{build.package}/ch32h417.ld" --out "{build.path}/ch32h417.ld" --sub __CH32H4_FS_SIZE__ {build.fs_size}
 
 # 2. The vendor SDK, compiled into an archive. Incremental: the script skips a
 #    source whose object is newer, so only the first build pays for it.

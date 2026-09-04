@@ -1,0 +1,7 @@
+# The package base this variant builds on, as a directory name under
+# variants/. Read by tools/platformio-build.py when the board definition
+# does not set build.package -- PlatformIO board definitions live in the
+# platform repository rather than here, so the core cannot rely on one
+# having been updated. arduino-cli takes the same value from boards.txt,
+# which is generated and so always current.
+CH32H417xx_QEU6

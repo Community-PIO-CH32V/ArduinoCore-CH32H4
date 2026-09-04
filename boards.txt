@@ -17,6 +17,7 @@ menu.fs=Filesystem size
 ch32h417qeu6.name=CH32H417QEU6-R0-1v1
 ch32h417qeu6.build.core=ch32h4
 ch32h417qeu6.build.variant=CH32H417QEU6
+ch32h417qeu6.build.package=CH32H417xx_QEU6
 ch32h417qeu6.build.mcu=ch32h417qeu6
 ch32h417qeu6.build.f_cpu=400000000L
 ch32h417qeu6.build.board=CH32H417QEU6

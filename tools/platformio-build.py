@@ -48,6 +48,35 @@ CORE_DIR = join(FRAMEWORK_DIR, "cores", "ch32h4")
 variant = board.get("build.variant")
 VARIANT_DIR = join(FRAMEWORK_DIR, "variants", variant)
 
+# The package base the variant builds on: pin tables, alternate-function maps
+# and the memory layout, shared by every board on the same chip package. The
+# variant reaches its headers and its pin table through ordinary #includes,
+# which the compiler resolves relative to the including file, so the only
+# thing that has to be found here is the linker script.
+#
+# Found three ways, in order, because PlatformIO board definitions live in the
+# platform repository rather than in this core: a board that names its package
+# wins, then the variant's own package.txt, then the variant directory itself.
+# The middle one is what matters -- it lets a core that has been split into
+# package and board build against a board definition that has never heard of
+# the split.
+def _find_package():
+    named = board.get("build.package", "")
+    if named:
+        return named
+    marker = join(VARIANT_DIR, "package.txt")
+    if isfile(marker):
+        with open(marker) as fh:
+            for raw in fh:
+                line = raw.strip()
+                if line and not line.startswith("#"):
+                    return line
+    return variant
+
+
+package = _find_package()
+PACKAGE_DIR = join(FRAMEWORK_DIR, "variants", package)
+
 # The V3F stub owns the first 32 KB of flash; the V5F image starts here.
 # NVIC_WakeUp_V5F() masks the address with ~0x3FF without complaining, so an
 # unaligned value would start the core in the middle of whatever precedes it.
@@ -334,7 +363,7 @@ env.Append(
 # on the ld version. A generated file is also readable after the fact, which a
 # linker command line is not.
 def _generate_ldscript():
-    template = join(VARIANT_DIR, "ch32h417.ld")
+    template = join(PACKAGE_DIR, "ch32h417.ld")
     with open(template) as fh:
         text = fh.read()
 
