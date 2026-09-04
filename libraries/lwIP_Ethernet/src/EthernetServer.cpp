@@ -13,7 +13,18 @@ void EthernetServer::begin() {
      * fails to bind for a couple of minutes and looks like a broken server. */
     ip_set_option(pcb, SOF_REUSEADDR);
 
-    if (tcp_bind(pcb, IP_ANY_TYPE, _port) != ERR_OK) {
+    /* IP_ANY_TYPE binds every interface and every address family; a named
+     * address binds just that one. The distinction only matters on a board
+     * with more than one interface, but honouring it costs three lines and
+     * the alternative is a constructor argument that silently does nothing. */
+    ip_addr_t bind_addr;
+    const bool any = ((uint32_t)_addr == 0);
+    if (!any) {
+        IP4_ADDR(ip_2_ip4(&bind_addr), _addr[0], _addr[1], _addr[2], _addr[3]);
+        IP_SET_TYPE_VAL(bind_addr, IPADDR_TYPE_V4);
+    }
+
+    if (tcp_bind(pcb, any ? IP_ANY_TYPE : &bind_addr, _port) != ERR_OK) {
         tcp_close(pcb);
         return;
     }
@@ -135,4 +146,16 @@ size_t EthernetServer::write(const uint8_t *buf, size_t size) {
         }
     }
     return n;
+}
+
+bool EthernetServer::hasClientData() const {
+    /* Any queued connection with bytes already waiting. Not "any queued
+       connection": a client that has connected and said nothing is exactly
+       the case WebServer is willing to keep waiting on. */
+    for (uint8_t i = 0; i < _count; i++) {
+        if (_pending[i] && _pending[i]->available() > 0) {
+            return true;
+        }
+    }
+    return false;
 }

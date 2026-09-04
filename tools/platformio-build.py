@@ -331,6 +331,13 @@ env.Append(
         # memset in the API then fails to compile. Code reaches the API through
         # "api/ArduinoAPI.h" instead, which is what arduino-pico does.
         CORE_DIR,
+        # The AVR compatibility headers -- pgmspace, dtostrf, avr/interrupt.
+        # They were vendored with ArduinoCore-API but never reachable, so
+        # anything spelling an include the AVR way did not compile. This part
+        # has one flat address space, so PROGMEM is empty and pgm_read_* is an
+        # ordinary dereference; the headers exist for source compatibility,
+        # which is what libraries carried over from the esp8266 lineage need.
+        join(CORE_DIR, "api", "deprecated-avr-comp"),
         VARIANT_DIR,
         join(SDK_DIR, "Core"),
         join(SDK_DIR, "Peripheral", "inc"),

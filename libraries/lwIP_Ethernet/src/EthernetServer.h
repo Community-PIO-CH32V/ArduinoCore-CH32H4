@@ -18,7 +18,23 @@ extern "C" {
 
 class EthernetServer : public arduino::Server {
 public:
+    /* What kind of client this server hands out. Named because WebServer is a
+     * template over the server type and asks it this -- the same arrangement
+     * arduino-pico and the esp8266 core use, so their WebServer ports over
+     * with the typedef supplied rather than the library edited. */
+    using ClientType = EthernetClient;
+
     explicit EthernetServer(uint16_t port = 80) : _port(port) { }
+
+    /* Bind to one local address rather than every interface.
+     *
+     * Accepted for source compatibility with the WiFi servers WebServer was
+     * written against, and honoured: on a board with one interface the only
+     * addresses that can be given are that interface's own or INADDR_ANY, and
+     * both do the same thing -- but a sketch that names an address and
+     * silently gets a server on all of them is worth not writing. */
+    EthernetServer(IPAddress addr, uint16_t port) : _addr(addr), _port(port) { }
+
     ~EthernetServer() { end(); }
 
     void begin() override;
@@ -42,6 +58,23 @@ public:
     operator bool() const { return _listen != nullptr; }
     uint16_t port() const { return _port; }
 
+    /* close() is stop() under the name the Server interface and WebServer
+       both use. Same thing; two spellings exist for history. */
+    void close() { end(); }
+    void stop() { end(); }
+
+    /* Both of these exist for WebServer, which uses them to decide how long
+       to hold a connection open waiting for a request body.
+
+       A server with another client already holding data, or with its pending
+       queue full, cannot afford to wait out the full timeout on a client that
+       has gone quiet -- doing so is what makes a single stalled connection
+       lock out every other one. WebServer drops the quiet client early when
+       either is true, so answering these honestly is what keeps a browser
+       that opened a speculative connection from blocking the next request. */
+    bool hasClientData() const;
+    bool hasMaxPendingClients() const { return _count >= MAX_PENDING; }
+
     /* Applied to each accepted connection. Set it before begin(). */
     void setNoDelay(bool on) { _no_delay = on; }
     bool getNoDelay() const { return _no_delay; }
@@ -53,6 +86,7 @@ private:
     err_t _on_accept(tcp_pcb *newpcb, err_t err);
 
     tcp_pcb *_listen = nullptr;
+    IPAddress _addr = IPAddress((uint32_t)0);   /* 0.0.0.0 = every interface */
     uint16_t _port;
     bool _no_delay = false;
 

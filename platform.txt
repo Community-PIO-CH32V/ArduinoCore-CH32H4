@@ -203,7 +203,7 @@ build.tinyusb.path={runtime.platform.path}/libraries/Adafruit_TinyUSB_Arduino/sr
 # library the build decided it did not need. Held back from detection, the
 # same #include fails there, TinyUSB is pulled in, and a sketch gets USB CDC
 # without having to include anything itself.
-build.includes.detect="-I{build.core.path}" "-I{build.variant.path}" "-I{build.sdk.path}/Core" "-I{build.sdk.path}/Peripheral/inc"
+build.includes.detect="-I{build.core.path}" "-I{build.core.path}/api/deprecated-avr-comp" "-I{build.variant.path}" "-I{build.sdk.path}/Core" "-I{build.sdk.path}/Peripheral/inc"
 build.includes={build.includes.detect} "-I{build.tinyusb.path}" "-I{build.tinyusb.path}/arduino"
 
 # cores/ch32h4/api is deliberately NOT on the include path. On a

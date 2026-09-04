@@ -248,3 +248,17 @@ void yield(void);
 /* Last, because it uses the declarations above. */
 #include "CH32H4Core.h"
 #endif
+
+/* FPSTR, from the AVR/esp8266 lineage. It wraps a pointer to a string in
+   program memory so that String and Print pick the flash-aware overload. This
+   part has one flat address space and no such overload, so it is a cast to
+   the plain pointer type -- which is what arduino-pico does as well. Defined
+   here rather than only in pgmspace.h because the libraries that use it do
+   not all include pgmspace themselves. */
+#ifndef FPSTR
+#define FPSTR (const char *)
+#endif
+
+#ifndef PGM_VOID_P
+#define PGM_VOID_P const void *
+#endif
