@@ -318,7 +318,7 @@ def _sync(sketch: str) -> str:
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "dualcore_board", "adc_board", "i2s_board",
                   "lfs_board", "uart_board", "spi_board",
-                  "wire_board")
+                  "wire_board", "dog_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -446,6 +446,19 @@ def dualcore_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("dualcore")
+
+
+@pytest.fixture(scope="session")
+def dog_board():
+    """The watchdog and sleep sketch.
+
+    Its own image because one of its tests deliberately resets the board, and
+    because the IWDG cannot be switched off once armed -- a sketch that armed
+    it at boot would keep resetting while the next sketch was being flashed.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("dogtest")
 
 
 @pytest.fixture(scope="session")

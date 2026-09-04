@@ -25,3 +25,7 @@
 [submodule "system/mbedtls"]
 	path = system/mbedtls
 	url = https://github.com/Mbed-TLS/mbedtls.git
+[submodule "libraries/Adafruit_SleepyDog"]
+	path = libraries/Adafruit_SleepyDog
+	url = https://github.com/Community-PIO-CH32V/Adafruit_SleepyDog.git
+	branch = ch32h4

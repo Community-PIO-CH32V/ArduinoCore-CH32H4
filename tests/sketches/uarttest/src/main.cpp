@@ -18,8 +18,21 @@ static int len = 0;
 static void roundTrip(unsigned long baud, uint16_t cfg) {
   Serial2.end();
   Serial2.begin(baud, cfg);
-  delay(5);
-  while (Serial2.available()) { Serial2.read(); }
+
+  /* Drain until the line has been QUIET for a while, rather than draining once
+     after a fixed delay. Reconfiguring the port re-drives PA2 while PA3 is
+     already listening to it, and the edge that produces can be framed as a
+     byte -- or, under even parity, as a parity error that swallows the first
+     real byte instead. Draining once at a fixed moment leaves whether that
+     glitch has arrived yet up to timing, which is why this showed up as one
+     lost byte in a long test run and never in a short one. */
+  uint32_t quiet = millis();
+  while (millis() - quiet < 5) {
+    if (Serial2.available()) {
+      Serial2.read();
+      quiet = millis();
+    }
+  }
 
   static const char msg[] = "The quick brown fox 0123456789";
   const size_t n = sizeof(msg) - 1;
