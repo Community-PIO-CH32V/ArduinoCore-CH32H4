@@ -10,3 +10,5 @@ tools/bin/
 
 # Local toolchain paths for an arduino-cli build of this checkout.
 platform.local.txt
+.index-cache/
+ch32h4-*.zip

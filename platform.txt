@@ -17,10 +17,16 @@
 #
 # ### Python
 #
-# Two hooks need it: the SDK archive and the linker-script substitution. The
-# command is a property so it can be overridden in platform.local.txt without
-# editing this file -- a published package would declare a python tool and
-# point this at {runtime.tools.<tool>.path} instead.
+# Two hooks need it: the SDK archive and the linker-script substitution.
+#
+# On Windows it comes from the package, so a Boards Manager install needs
+# nothing preinstalled -- python.org's embeddable build, declared as a tool in
+# package_ch32h4_index.json. On Linux and macOS it is python3 from PATH, which
+# is what arduino-pico does as well: its Unix "pqt-python3" is a 292-byte
+# tarball holding a shim that execs the system python3.
+#
+# Still a property, so platform.local.txt can point it somewhere else in a
+# checkout that has no installed tool.
 
 name=CH32H41x Boards
 version=1.0.0
@@ -38,7 +44,10 @@ version=1.0.0
 compiler.path={runtime.tools.riscv-wch-elf-gcc.path}/bin/
 compiler.prefix=riscv-wch-elf-
 
-ch32h4.python=python
+ch32h4.python=python3
+# The embeddable distribution unpacks flat and its interpreter is python.exe,
+# not python3.exe -- there is no python3.exe in it to point at.
+ch32h4.python.windows={runtime.tools.python3.path}/python.exe
 
 compiler.c.cmd={compiler.prefix}gcc
 compiler.cpp.cmd={compiler.prefix}g++
@@ -254,6 +263,10 @@ recipe.size.regex.data=^(?:\.data|\.bss)\s+([0-9]+).*
 # part, which is a version problem wearing the costume of a wiring problem.
 
 tools.wlink.cmd=wlink
+# Windows needs the extension spelled out: the recipe runs an absolute path,
+# and an absolute path is not subject to the PATHEXT search that would find
+# wlink.exe from "wlink".
+tools.wlink.cmd.windows=wlink.exe
 tools.wlink.path={runtime.tools.wlink.path}
 
 tools.wlink.upload.params.verbose=-v

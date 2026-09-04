@@ -1,0 +1,172 @@
+{
+  "packages": [
+    {
+      "name": "ch32h4",
+      "maintainer": "Community-PIO-CH32V",
+      "websiteURL": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4",
+      "email": "maxi.gerhardt@googlemail.com",
+      "help": {
+        "online": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/issues"
+      },
+      "platforms": [
+        {
+          "name": "CH32H41x Boards",
+          "architecture": "ch32h4",
+          "version": "1.0.0",
+          "category": "Contributed",
+          "help": {
+            "online": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/issues"
+          },
+          "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/ch32h4-1.0.0.zip",
+          "archiveFileName": "ch32h4-1.0.0.zip",
+          "checksum": "SHA-256:d623888fe8334665ecca845c89aa10059fc014b702aff96634dd02dda95b2f8e",
+          "size": "11348095",
+          "boards": [
+            {
+              "name": "CH32H417QEU6-R0-1v1"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "ch32h4",
+              "name": "riscv-wch-elf-gcc",
+              "version": "12.2.0"
+            },
+            {
+              "packager": "ch32h4",
+              "name": "openocd-riscv-wch",
+              "version": "2.1100.260228"
+            },
+            {
+              "packager": "ch32h4",
+              "name": "wlink",
+              "version": "0.1.2"
+            },
+            {
+              "packager": "ch32h4",
+              "name": "python3",
+              "version": "3.11.9"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "name": "riscv-wch-elf-gcc",
+          "version": "12.2.0",
+          "systems": [
+            {
+              "host": "x86_64-mingw32",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/toolchain-riscv-windows/zip/d2836398c87fdc9832fd04026588c26da199b902",
+              "archiveFileName": "riscv-wch-elf-gcc-12.2.0-d2836398.zip",
+              "checksum": "SHA-256:3139969210f87d52f7e0347b0d784aeab7798db2c58f76845bcfebdc46d39d02",
+              "size": "304845934"
+            },
+            {
+              "host": "i686-mingw32",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/toolchain-riscv-windows/zip/d2836398c87fdc9832fd04026588c26da199b902",
+              "archiveFileName": "riscv-wch-elf-gcc-12.2.0-d2836398.zip",
+              "checksum": "SHA-256:3139969210f87d52f7e0347b0d784aeab7798db2c58f76845bcfebdc46d39d02",
+              "size": "304845934"
+            }
+          ]
+        },
+        {
+          "name": "openocd-riscv-wch",
+          "version": "2.1100.260228",
+          "systems": [
+            {
+              "host": "x86_64-mingw32",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/tool-openocd-riscv-wch/zip/d506207dad43ef9490c7d847ed8f57dcc78bd674",
+              "archiveFileName": "openocd-riscv-wch-2.1100.260228-d506207d.zip",
+              "checksum": "SHA-256:b18adcdfac96331d48e131cf26b42e418cfcdeea02e4862c910837b0daf693b8",
+              "size": "11821998"
+            },
+            {
+              "host": "i686-mingw32",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/tool-openocd-riscv-wch/zip/d506207dad43ef9490c7d847ed8f57dcc78bd674",
+              "archiveFileName": "openocd-riscv-wch-2.1100.260228-d506207d.zip",
+              "checksum": "SHA-256:b18adcdfac96331d48e131cf26b42e418cfcdeea02e4862c910837b0daf693b8",
+              "size": "11821998"
+            },
+            {
+              "host": "x86_64-pc-linux-gnu",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/tool-openocd-riscv-wch/zip/32fb8c1df1567108977e523fffc1dddd426daa62",
+              "archiveFileName": "openocd-riscv-wch-2.1100.260228-32fb8c1d.zip",
+              "checksum": "SHA-256:3e726ee5ac6a24b076ae19f50fe002f91b4dc4c4edc82d16304c3988a502c4f3",
+              "size": "3052724"
+            },
+            {
+              "host": "x86_64-apple-darwin",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/tool-openocd-riscv-wch/zip/20772531ff69854157a801b0e43b102dda00b226",
+              "archiveFileName": "openocd-riscv-wch-2.1100.260228-20772531.zip",
+              "checksum": "SHA-256:f1ee8338791833c088f7ac89e16cba572681f72b8d43b2ca6a67461657c5a003",
+              "size": "2504877"
+            },
+            {
+              "host": "arm64-apple-darwin",
+              "url": "https://codeload.github.com/Community-PIO-CH32V/tool-openocd-riscv-wch/zip/201d96baae1c9ce1e82416455b2a62f506ba47ee",
+              "archiveFileName": "openocd-riscv-wch-2.1100.260228-201d96ba.zip",
+              "checksum": "SHA-256:697665d77f8f20aedf6b8b2f1488e02dde2459a0b41d9e7850019dca69b41292",
+              "size": "8359071"
+            }
+          ]
+        },
+        {
+          "name": "wlink",
+          "version": "0.1.2",
+          "systems": [
+            {
+              "host": "x86_64-mingw32",
+              "url": "https://github.com/ch32-rs/wlink/releases/download/v0.1.2/wlink-v0.1.2-win-x64.zip",
+              "archiveFileName": "wlink-v0.1.2-win-x64.zip",
+              "checksum": "SHA-256:59b3989137a9d22c9c1e8c04fd9371af3f54fa43b4cb63c59d6fb4286a34c78a",
+              "size": "592257"
+            },
+            {
+              "host": "i686-mingw32",
+              "url": "https://github.com/ch32-rs/wlink/releases/download/v0.1.2/wlink-v0.1.2-win-x64.zip",
+              "archiveFileName": "wlink-v0.1.2-win-x64.zip",
+              "checksum": "SHA-256:59b3989137a9d22c9c1e8c04fd9371af3f54fa43b4cb63c59d6fb4286a34c78a",
+              "size": "592257"
+            },
+            {
+              "host": "x86_64-pc-linux-gnu",
+              "url": "https://github.com/ch32-rs/wlink/releases/download/v0.1.2/wlink-v0.1.2-linux-x64.tar.gz",
+              "archiveFileName": "wlink-v0.1.2-linux-x64.tar.gz",
+              "checksum": "SHA-256:f8f1fba2436694116fe2cf16b1572e92d116c4acd921bf12fbc0ca5bf63824bf",
+              "size": "843618"
+            },
+            {
+              "host": "arm64-apple-darwin",
+              "url": "https://github.com/ch32-rs/wlink/releases/download/v0.1.2/wlink-v0.1.2-macos-arm64.tar.gz",
+              "archiveFileName": "wlink-v0.1.2-macos-arm64.tar.gz",
+              "checksum": "SHA-256:49164d236346e4c294935412a072040eac8faaeb5f097952846807f7dc0fbf8c",
+              "size": "763735"
+            }
+          ]
+        },
+        {
+          "name": "python3",
+          "version": "3.11.9",
+          "systems": [
+            {
+              "host": "x86_64-mingw32",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-embed-amd64-rooted.zip",
+              "archiveFileName": "python3-3.11.9-embed-amd64-rooted.zip",
+              "checksum": "SHA-256:2a1076dd3fb63158267c0f86a0e5218c6920ac16fa8701ddaf494bd7375e2fa6",
+              "size": "11250043"
+            },
+            {
+              "host": "i686-mingw32",
+              "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/python3-3.11.9-embed-amd64-rooted.zip",
+              "archiveFileName": "python3-3.11.9-embed-amd64-rooted.zip",
+              "checksum": "SHA-256:2a1076dd3fb63158267c0f86a0e5218c6920ac16fa8701ddaf494bd7375e2fa6",
+              "size": "11250043"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
