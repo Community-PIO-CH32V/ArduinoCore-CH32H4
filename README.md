@@ -63,11 +63,14 @@ amplifier and a WCH-Link attached.
 | **M6** | lwIP 2.2.1, on-chip Ethernet, TCP/UDP client and server, SNTP | verified |
 | **M7** | mbedTLS 3.6.7, AES on the ECDC block, entropy from the TRNG | verified |
 | | RTC on LSI, LSE and HSE, wired into `gettimeofday()` | verified |
+| | LittleFS in the flash tail, and the EEPROM above it | verified |
+| | Arduino IDE / arduino-cli build | verified |
 
-`python -m pytest tests/hw` runs **152 hardware tests** against a connected
-board, and `python -m pytest tests/link` a 51-case matrix of build
-configurations. The suite reprograms the part eight times — once per sketch —
-and takes about three minutes.
+`python -m pytest tests/hw` runs **184 hardware tests** against a connected
+board, and `python -m pytest tests` **69 host-side** tests — the tree, the
+linker layout, and a matrix of build configurations. The hardware suite
+reprograms the part nine times — once per sketch — and takes about three
+minutes.
 
 ### What is not verified
 
