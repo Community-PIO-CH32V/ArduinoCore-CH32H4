@@ -66,11 +66,12 @@ amplifier and a WCH-Link attached.
 | | LittleFS in the flash tail, and the EEPROM above it | verified |
 | | Arduino IDE / arduino-cli build | verified |
 
-`python -m pytest tests/hw` runs **184 hardware tests** against a connected
-board, and `python -m pytest tests` **69 host-side** tests — the tree, the
-linker layout, and a matrix of build configurations. The hardware suite
-reprograms the part nine times — once per sketch — and takes about three
-minutes.
+`python -m pytest tests` runs all **258**: **74 host-side** — the tree, the
+linker layout, the Arduino IDE build description and a matrix of build
+configurations — and **184 on hardware**, against a connected board. The
+hardware half is `tests/hw`; `--ignore=tests/hw` leaves the host-side half,
+which needs no board. The hardware suite reprograms the part nine times — once
+per sketch — and takes about three minutes.
 
 ### What is not verified
 
@@ -184,8 +185,9 @@ It is gitignored.
 ## Testing
 
 ```sh
-python -m pytest tests/ -v            # host-side: tree, linker, build
-python -m pytest tests/hw/ -v         # on hardware, over the console
+python -m pytest tests --ignore=tests/hw -v   # host-side: tree, linker, build
+python -m pytest tests/hw -v                 # on hardware, over the console
+python -m pytest tests -v                    # both
 ```
 
 The hardware suite flashes the board itself and needs the WCH-Link's VCP;
