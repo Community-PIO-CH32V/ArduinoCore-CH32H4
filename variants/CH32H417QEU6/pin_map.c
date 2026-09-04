@@ -226,6 +226,32 @@ const ch32h4_periph_pin_t g_spi_mosi_map[] = {
 };
 const size_t g_spi_mosi_map_len = sizeof(g_spi_mosi_map) / sizeof(g_spi_mosi_map[0]);
 
+/* NSS, the hardware chip select, and the one SPI signal with no published
+ * table behind it.
+ *
+ * The three maps above came from the MicroPython port for this silicon, which
+ * only ever drove these peripherals as a master and so never needed NSS. WCH
+ * publish no alternate-function table we have, and no datasheet here lists
+ * one.
+ *
+ * SO THIS TABLE IS INFERRED, NOT KNOWN. PE4 is the pin that sits with SPI4's
+ * SCK, MISO and MOSI trio the way NSS does on the family this part resembles,
+ * on the same alternate function. That is a good guess and nothing more: it
+ * has NOT been confirmed on hardware, because confirming it needs a master
+ * wired to a slave and this board is not yet wired that way.
+ *
+ * Until it is confirmed, treat a slave that never answers as possibly this.
+ * tests/hw/test_spi_slave.py::test_chip_select_actually_selects is the test
+ * that settles it -- it drives a frame with CS held high, and a slave that
+ * answers anyway is a slave whose NSS is not connected to this pin. If that
+ * test fails, delete the row: SPISlave falls back to software chip select and
+ * keeps working, which is why a missing row costs less than a wrong one.
+ */
+const ch32h4_periph_pin_t g_spi_nss_map[] = {
+    { 4, PE4,  5 },   /* 3.3 V domain, next to SPI4's SCK/MISO/MOSI trio */
+};
+const size_t g_spi_nss_map_len = sizeof(g_spi_nss_map) / sizeof(g_spi_nss_map[0]);
+
 /* ---- I2C ----------------------------------------------------------------
  *
  * SCL and SDA are paired because the silicon pairs them.
@@ -236,7 +262,7 @@ const size_t g_spi_mosi_map_len = sizeof(g_spi_mosi_map) / sizeof(g_spi_mosi_map
  * missing resistor, not as a missing device.
  */
 const ch32h4_i2c_pin_t g_i2c_map[] = {
-    { 1, PB6,  PB7,  4 },   /* 3.3 V domain; the board's SSD1306 is here */
+    { 1, PB6,  PB7,  4 },   /* the board's SSD1306 is here */
     { 1, PB8,  PB9,  4 },   /* also SWCLK/SWDIO -- taking these loses debug */
     { 2, PB10, PB11, 4 },
     { 2, PC0,  PC1,  9 },

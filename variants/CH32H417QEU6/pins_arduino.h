@@ -188,6 +188,25 @@
 #define PIN_SPI_SCK      PA5    /* SPI1, AF5 */
 #define PIN_SPI_MISO     PA6    /* SPI1, AF5 */
 #define PIN_SPI_MOSI     PA7    /* SPI1, AF5 */
+
+/* A second SPI, for the slave side. SPI4's trio is the only other one on the
+   3.3 V rail, so a master on SPI1 can talk to it without either end sitting
+   below the other's input threshold, and PE3/PE4 are the last two free pins
+   on that rail -- PE3 for a master driving chip select, PE4 for the slave's
+   NSS. See g_spi_nss_map in pin_map.c for why NSS is the one signal with no
+   published table behind it. */
+#define PIN_SPI_SLAVE_SCK   PE2    /* SPI4, AF5 */
+#define PIN_SPI_SLAVE_MISO  PE5    /* SPI4, AF5 */
+#define PIN_SPI_SLAVE_MOSI  PE6    /* SPI4, AF5 */
+#define PIN_SPI_SLAVE_CS    PE4    /* SPI4 NSS, AF5 */
+
+/* A second I2C, for the slave side. I2C is multi-drop, so this shares the
+   bus the display is already on rather than needing one of its own: wire PB6
+   to PD12 and PB7 to PD13 and the display's pull-ups serve all three
+   devices. PD13 is otherwise unused and PD12 only appears as an SDMMC
+   alternate this board does not take. */
+#define PIN_WIRE_SLAVE_SCL  PD12   /* I2C4, AF4 */
+#define PIN_WIRE_SLAVE_SDA  PD13   /* I2C4, AF4 */
 /* I2S.
  *
  * WCH numbers these in a way that catches everyone once: there are TWO I2S

@@ -318,7 +318,8 @@ def _sync(sketch: str) -> str:
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "dualcore_board", "adc_board", "i2s_board",
                   "lfs_board", "uart_board", "spi_board",
-                  "wire_board", "dog_board")
+                  "wire_board", "dog_board", "spi_slave_board",
+                  "wire_slave_board")
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -485,6 +486,34 @@ def spi_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("spitest")
+
+
+@pytest.fixture(scope="session")
+def spi_slave_board():
+    """SPI1 as a master driving SPI4 as a slave, on one chip.
+
+    Needs four jumpers -- PA5-PE2, PA7-PE6, PA6-PE5, PE3-PE4 -- and needs the
+    PA6-PA7 loopback jumper REMOVED, since that one shorts the master's MOSI
+    onto its own MISO and would fight the slave. Tests that move data skip
+    without the wiring; the ones that only ask which peripheral the pins
+    resolve to do not need it.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("spislavetest")
+
+
+@pytest.fixture(scope="session")
+def wire_slave_board():
+    """I2C1 as a master addressing I2C4 as a slave, on one bus.
+
+    Needs two jumpers, PB6-PD12 and PB7-PD13, joining the second peripheral to
+    the bus the SSD1306 is already on -- whose pull-ups the whole bus depends
+    on, since this part has none of its own in open-drain mode.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("wireslavetest")
 
 
 @pytest.fixture(scope="session")

@@ -10,6 +10,18 @@
  * wrong bus gives a peripheral whose registers read back as zeroes with no
  * error at all.
  *
+ * SLAVE MODE COSTS EVERY SKETCH ABOUT 1.4 KB, master-only ones included, and
+ * that is not an oversight. ArduinoCore-API declares begin(uint8_t),
+ * onReceive() and onRequest() pure virtual on HardwareI2C, so TwoWire's
+ * vtable names them whether or not a sketch calls them, and the linker
+ * follows the vtable to the slave interrupt path and its eight handlers.
+ * Splitting the slave half into its own translation unit does not help --
+ * the reference is the vtable's, not a call site's -- and the only thing
+ * that would is not deriving from HardwareI2C, which would cost every
+ * library that holds a HardwareI2C pointer. Measured: 1406 bytes, or 0.15%
+ * of this part's flash. SPI is not in the same position, which is why
+ * SPISlave is a separate library that a master-only sketch does not link.
+ *
  * THERE ARE NO INTERNAL PULL-UPS. The F1-style open-drain encoding on this
  * part does not offer them, so both lines need real resistors. A bus with none
  * reads as permanently busy, which this library reports as such rather than as
@@ -56,6 +68,13 @@ public:
     /* Which peripheral the pins resolved to, 1-4, or 0 if none can serve them. */
     uint8_t peripheral() const { return _id; }
 
+    /* The address this device answers to, or 0 if it is a master. */
+    uint8_t slaveAddress() const { return _slaveAddr; }
+
+    /* Not for callers: the interrupt path. Public because the C dispatch in
+     * the core has to reach it. */
+    void handleEvent(bool error);
+
     /* Unwedge a bus a device is holding low.
      *
      * A stuck bus CANNOT be cleared by any register write -- the reference
@@ -82,11 +101,22 @@ private:
     uint32_t _clock = 100000;
 
     uint8_t _txAddress = 0;
+    uint8_t _slaveAddr = 0;
+    void (*_onReceive)(int) = nullptr;
+    void (*_onRequest)(void) = nullptr;
+
     static const size_t BUFFER_LENGTH = 128;
     uint8_t _txBuf[BUFFER_LENGTH];
-    size_t _txLen = 0;
+    volatile size_t _txLen = 0;
+    volatile size_t _txIndex = 0;
     uint8_t _rxBuf[BUFFER_LENGTH];
-    size_t _rxLen = 0, _rxIndex = 0;
+    volatile size_t _rxLen = 0;
+    volatile size_t _rxIndex = 0;
 };
 
+/* One object per translation unit, the same way the core does its eight
+   Serial objects, so a sketch that touches only one of them does not carry
+   the other's two 128-byte buffers. Adding a Wire2 is a new file and a line
+   here, nothing else. */
 extern TwoWire Wire;
+extern TwoWire Wire1;

@@ -1,41 +1,6 @@
 #include "SPI.h"
 
-/* SPI1 is on HB2; SPI2-4 are on HB1. Named in one place so no call site has to
- * remember, because the wrong bus is silent: the peripheral's registers read
- * back as zeroes and every write to them is discarded. */
-static void spi_clock_enable(uint8_t id) {
-    if (id == 1) {
-        ch32h4_clock_enable(CH32_BUS_HB2, RCC_HB2Periph_SPI1);
-        return;
-    }
-    static const uint32_t hb1[3] = {
-        RCC_HB1Periph_SPI2, RCC_HB1Periph_SPI3, RCC_HB1Periph_SPI4,
-    };
-    ch32h4_clock_enable(CH32_BUS_HB1, hb1[id - 2]);
-}
-
-static void spi_reset(uint8_t id) {
-    /* Configuration survives a warm reset, the debugger's reset and a
-     * re-flash, so a peripheral that is not reset inherits the previous run's
-     * mode and baud divider. */
-    if (id == 1) {
-        ch32h4_block_reset(CH32_BUS_HB2, RCC_HB2Periph_SPI1);
-        return;
-    }
-    static const uint32_t hb1[3] = {
-        RCC_HB1Periph_SPI2, RCC_HB1Periph_SPI3, RCC_HB1Periph_SPI4,
-    };
-    ch32h4_block_reset(CH32_BUS_HB1, hb1[id - 2]);
-}
-
-static SPI_TypeDef *spi_regs(uint8_t id) {
-    switch (id) {
-        case 1: return SPI1;
-        case 2: return SPI2;
-        case 3: return SPI3;
-        default: return SPI4;
-    }
-}
+#include "ch32h4_spi.h"
 
 /* BR[2:0] divides HCLK by 2..256, giving 50 MHz down to 390.6 kHz.
  *
@@ -96,8 +61,8 @@ void SPIClassCH32H4::begin() {
         return;
     }
 
-    spi_clock_enable(_id);
-    spi_reset(_id);
+    ch32h4_spi_clock_enable(_id);
+    ch32h4_spi_reset(_id);
 
     uint8_t af = 0;
     ch32h4_spi_sck_af(_id, _sck, &af);
@@ -124,7 +89,7 @@ void SPIClassCH32H4::applySettings(const arduino::SPISettings &settings) {
     if (!_running) {
         return;
     }
-    SPI_TypeDef *dev = spi_regs(_id);
+    SPI_TypeDef *dev = ch32h4_spi_regs(_id);
 
     _clock = settings.getClockFreq();
     _bitOrder = settings.getBitOrder();
@@ -156,7 +121,7 @@ void SPIClassCH32H4::end() {
     if (!_running) {
         return;
     }
-    SPI_Cmd(spi_regs(_id), DISABLE);
+    SPI_Cmd(ch32h4_spi_regs(_id), DISABLE);
     _running = false;
 }
 
@@ -176,7 +141,7 @@ uint8_t SPIClassCH32H4::transfer(uint8_t data) {
     if (!_running) {
         return 0;
     }
-    SPI_TypeDef *dev = spi_regs(_id);
+    SPI_TypeDef *dev = ch32h4_spi_regs(_id);
 
     while (SPI_I2S_GetFlagStatus(dev, SPI_I2S_FLAG_TXE) == RESET) {
     }
@@ -266,7 +231,7 @@ static inline void spi_drain(SPI_TypeDef *dev) {
 
 void SPIClassCH32H4::transferPolled(const uint8_t *tx, uint8_t *rx,
                                     size_t count) {
-    SPI_TypeDef *dev = spi_regs(_id);
+    SPI_TypeDef *dev = ch32h4_spi_regs(_id);
     for (size_t i = 0; i < count; i++) {
         while (SPI_I2S_GetFlagStatus(dev, SPI_I2S_FLAG_TXE) == RESET) {
         }
@@ -298,7 +263,7 @@ static bool dma_wait(DMA_Channel_TypeDef *ch) {
 }
 
 bool SPIClassCH32H4::transferDMA(const uint8_t *tx, uint8_t *rx, size_t count) {
-    SPI_TypeDef *dev = spi_regs(_id);
+    SPI_TypeDef *dev = ch32h4_spi_regs(_id);
     bool ok = true;
 
     RCC_HBPeriphClockCmd(RCC_HBPeriph_DMA1, ENABLE);

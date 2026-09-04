@@ -107,6 +107,10 @@ bool ch32h4_spi_mosi_af(uint8_t id, pin_size_t pin, uint8_t *af) {
     return find_periph_af(g_spi_mosi_map, g_spi_mosi_map_len, id, pin, af);
 }
 
+bool ch32h4_spi_nss_af(uint8_t id, pin_size_t pin, uint8_t *af) {
+    return find_periph_af(g_spi_nss_map, g_spi_nss_map_len, id, pin, af);
+}
+
 uint8_t ch32h4_spi_find(pin_size_t sck, pin_size_t miso, pin_size_t mosi) {
     /* All three signals have to land on ONE peripheral. Searching per-signal
      * and hoping they agree is how you end up driving SCK from SPI1 and MOSI

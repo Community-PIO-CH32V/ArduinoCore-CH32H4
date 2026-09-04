@@ -84,12 +84,19 @@ extern const ch32h4_periph_pin_t g_spi_miso_map[];
 extern const size_t g_spi_miso_map_len;
 extern const ch32h4_periph_pin_t g_spi_mosi_map[];
 extern const size_t g_spi_mosi_map_len;
+extern const ch32h4_periph_pin_t g_spi_nss_map[];
+extern const size_t g_spi_nss_map_len;
 
 /* The alternate function for `pin` on SPI `id`, or false if that pin cannot
  * carry that signal for that peripheral. */
 bool ch32h4_spi_sck_af(uint8_t id, pin_size_t pin, uint8_t *af);
 bool ch32h4_spi_miso_af(uint8_t id, pin_size_t pin, uint8_t *af);
 bool ch32h4_spi_mosi_af(uint8_t id, pin_size_t pin, uint8_t *af);
+
+/* NSS is deliberately sparse -- see the comment on g_spi_nss_map in the
+ * variant. False here means "not known to work", not "cannot work", and a
+ * slave answering false falls back to software chip select. */
+bool ch32h4_spi_nss_af(uint8_t id, pin_size_t pin, uint8_t *af);
 
 /* ---- USART --------------------------------------------------------------
  *
