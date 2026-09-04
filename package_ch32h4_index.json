@@ -19,8 +19,8 @@
           },
           "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/ch32h4-1.0.0.zip",
           "archiveFileName": "ch32h4-1.0.0.zip",
-          "checksum": "SHA-256:37b4f5812b0d6ffd47eeec87c3b19c1f16e9129d162524633089f2a9fd09939e",
-          "size": "11364926",
+          "checksum": "SHA-256:44fdd1816cf4ba64bf08456bc540bce773a983ecad75f85f69f5b17785269f18",
+          "size": "11483566",
           "boards": [
             {
               "name": "CH32H417QEU6-R0-1v1"
