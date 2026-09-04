@@ -76,6 +76,26 @@ def submodule_paths():
     return paths
 
 
+def untracked_files():
+    """Files present, not ignored, and not known to git.
+
+    They are the ones that vanish from the archive without a word. git
+    ls-files lists what is TRACKED, which is exactly the right rule for
+    keeping platform.local.txt and build output out -- and exactly the wrong
+    one for a file that was added five minutes ago and not yet committed.
+
+    That is not hypothetical: the CH32H417 SVD shipped missing this way. It
+    was copied into debug/, referenced from platform.txt, tested, packaged and
+    released, and the release had everything except the file, because the
+    packaging step ran before the commit. Nothing failed -- the debugger
+    simply had no registers.
+    """
+    out = subprocess.run(
+        ["git", "-C", ROOT, "ls-files", "--others", "--exclude-standard", "-z"],
+        stdout=subprocess.PIPE, check=True).stdout
+    return [n.decode("utf-8") for n in out.split(b"\0") if n]
+
+
 def tracked_files():
     out = subprocess.run(
         ["git", "-C", ROOT, "ls-files", "--recurse-submodules", "-z"],
@@ -96,6 +116,17 @@ def main():
     out = args.out or os.path.join(ROOT, prefix + ".zip")
 
     names = tracked_files()
+
+    stray = untracked_files()
+    if stray:
+        # Refuse rather than warn. A warning scrolls past in a release script,
+        # and the result is an archive that installs and quietly lacks a file.
+        raise SystemExit(
+            "makearchive: %d file(s) exist but are not tracked, so they would "
+            "be LEFT OUT of the archive silently:\n  %s\n"
+            "Commit them (or add them to .gitignore) and run this again."
+            % (len(stray), "\n  ".join(sorted(stray)[:20])))
+
     subs = submodule_paths()
     missing = [n for n in names
                if not os.path.isfile(os.path.join(ROOT, n))]

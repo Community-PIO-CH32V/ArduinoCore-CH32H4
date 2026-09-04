@@ -24,6 +24,8 @@ ch32h417qeu6.build.mabi=ilp32f
 ch32h417qeu6.build.flags.clock=-DSYSCLK_400M_CoreCLK_V5F_400M_V3F_100M_HSE=400000000
 ch32h417qeu6.build.svd=CH32H417xx.svd
 ch32h417qeu6.upload.tool=wlink
+ch32h417qeu6.upload.tool.default=wlink
+ch32h417qeu6.upload.protocol=wlink
 ch32h417qeu6.upload.maximum_data_size=917504
 
 # What `Serial` refers to. Serial1 is always USART1 on PA9/PA10, into the
