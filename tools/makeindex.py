@@ -175,8 +175,22 @@ TOOLS = [
         # install there. The fork restores the target by cross-compiling on the
         # Apple Silicon runner, which needs no retired hardware.
         "sources": [
-            {"hosts": ["x86_64-mingw32"], "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-win-x64.zip"},
-            {"hosts": ["i686-mingw32"], "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-win-x86.zip"},
+            # BOTH Windows hosts take the 32-BIT build, deliberately.
+            #
+            # The x64 build cannot talk to a WCH-LinkE on 64-bit Windows:
+            #
+            #   Error: USB error: incompatible driver is installed for
+            #   this interface
+            #
+            # Only the 32-bit build copes with both driver arrangements
+            # the probe turns up under -- WCH's own driver and a
+            # libusb/WinUSB one. This is not a guess from the error text:
+            # PlatformIO's ch32v platform ships an i386 wlink.exe for
+            # Windows, on x64 hosts, and that is the copy that works.
+            #
+            # The x64 asset is still built by the fork's CI. It is simply
+            # not what anyone should be handed.
+            {"hosts": WIN, "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-win-x86.zip"},
             {"hosts": LINUX, "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-linux-x64.tar.gz"},
             {"hosts": MAC_ARM, "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-macos-arm64.tar.gz"},
             {"hosts": MAC_X86, "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-macos-x64.tar.gz"},

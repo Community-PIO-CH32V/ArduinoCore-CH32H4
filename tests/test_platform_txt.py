@@ -270,3 +270,28 @@ def test_the_platform_declares_two_processors():
     assert platform.get("debug.cortex-debug.custom.numberOfProcessors") == "2", (
         "without numberOfProcessors=2 cortex-debug allocates one port and "
         "targetProcessor is clamped to 0, so the V5F becomes unreachable")
+
+
+def test_the_svd_every_board_names_exists():
+    """debug.svd_file resolves through the board's build.svd.
+
+    A missing or misnamed file is silent: the debugger simply shows no
+    peripheral registers, which looks like the feature not being wired up
+    rather than like a path that does not exist.
+    """
+    platform = read_properties(PLATFORM_TXT)
+    template = platform.get("debug.svd_file", "")
+    assert "{build.svd}" in template, (
+        "platform.txt should name the SVD through the board, so a second "
+        "variant on another part can bring its own")
+
+    boards = read_properties(BOARDS_TXT)
+    ids = sorted({k.split(".")[0] for k in boards if k.endswith(".name")})
+    for board in ids:
+        name = boards.get("%s.build.svd" % board)
+        assert name, "%s sets no build.svd" % board
+        path = DEBUG_DIR / name
+        assert path.is_file(), (
+            "%s names debug/%s, which does not exist" % (board, name))
+        head = path.read_text(encoding="utf-8", errors="replace")[:400]
+        assert "<device" in head, "%s is not an SVD" % name

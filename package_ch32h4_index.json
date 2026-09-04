@@ -19,8 +19,8 @@
           },
           "url": "https://github.com/Community-PIO-CH32V/ArduinoCore-CH32H4/releases/download/1.0.0/ch32h4-1.0.0.zip",
           "archiveFileName": "ch32h4-1.0.0.zip",
-          "checksum": "SHA-256:a1bc4a7a3bba9d181f3fb36fba4266bde8a458302f927d380c4d484e8239660f",
-          "size": "11364105",
+          "checksum": "SHA-256:37b4f5812b0d6ffd47eeec87c3b19c1f16e9129d162524633089f2a9fd09939e",
+          "size": "11364926",
           "boards": [
             {
               "name": "CH32H417QEU6-R0-1v1"
@@ -139,10 +139,10 @@
           "systems": [
             {
               "host": "x86_64-mingw32",
-              "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-win-x64.zip",
-              "archiveFileName": "wlink-v0.1.2-ch32h4.1-win-x64.zip",
-              "checksum": "SHA-256:cab9bb6baab1a131904dde3a641586647c5b78bfa4c671348bfb62ed4a87436c",
-              "size": "588127"
+              "url": "https://github.com/Community-PIO-CH32V/wlink/releases/download/v0.1.2-ch32h4.1/wlink-v0.1.2-ch32h4.1-win-x86.zip",
+              "archiveFileName": "wlink-v0.1.2-ch32h4.1-win-x86.zip",
+              "checksum": "SHA-256:20a8bf46203207ce066031ed0aa57bbf3f4a7af7ffe1d092ce5242b31b38f78b",
+              "size": "553211"
             },
             {
               "host": "i686-mingw32",

@@ -22,6 +22,7 @@ ch32h417qeu6.build.board=CH32H417QEU6
 ch32h417qeu6.build.march=rv32imafc_zba_zbb_zbc_zbs_xw
 ch32h417qeu6.build.mabi=ilp32f
 ch32h417qeu6.build.flags.clock=-DSYSCLK_400M_CoreCLK_V5F_400M_V3F_100M_HSE=400000000
+ch32h417qeu6.build.svd=CH32H417xx.svd
 ch32h417qeu6.upload.tool=wlink
 ch32h417qeu6.upload.maximum_data_size=917504
 

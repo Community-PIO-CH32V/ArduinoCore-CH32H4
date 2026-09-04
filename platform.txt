@@ -321,6 +321,14 @@ debug.server.openocd.script={runtime.platform.path}/debug/ch32h417.cfg
 # vector, so a front end that resets the part and expects to find the V5F
 # running finds it halted at nothing instead. Upload with the Upload button,
 # which uses wlink, and attach to the running image.
+# The register view. WCH's own SVD for this part, from MounRiver Studio's SDK
+# -- 87 peripherals, so the debugger shows RCC, the two SPI/I2S blocks, the
+# flash controller and the rest by name and bitfield instead of as addresses.
+#
+# Named by the board rather than hardcoded, so a second variant on a different
+# part brings its own. debug/ holds them.
+debug.svd_file={runtime.platform.path}/debug/{build.svd}
+
 debug.cortex-debug.custom.request=attach
 debug.cortex-debug.custom.objdumpPath={compiler.path}{compiler.objdump.cmd}
 

@@ -55,6 +55,8 @@ BOARDS = [
         # The 480 MHz trees put the V3F at 120 MHz, which CH32H4_EXPECTED_HCLK
         # in ch32h4_clock.c does not follow.
         "clock": "SYSCLK_400M_CoreCLK_V5F_400M_V3F_100M_HSE=400000000",
+        # The register description the debugger reads, from debug/.
+        "svd": "CH32H417xx.svd",
         # 128 KB of the 320 KB SRAM belongs to the V5F's heap; this is what the
         # IDE reports a sketch's RAM against.
         "data_size": 917504,
@@ -152,11 +154,13 @@ def generate():
             "{id}.build.march={march}\n"
             "{id}.build.mabi={mabi}\n"
             "{id}.build.flags.clock=-D{clock}\n"
+            "{id}.build.svd={svd}\n"
             "{id}.upload.tool=wlink\n"
             "{id}.upload.maximum_data_size={data}\n".format(
                 id=i, name=b["name"], variant=b["variant"], mcu=b["mcu"],
                 f_cpu=b["f_cpu"], board=b["board"], march=b["march"],
-                mabi=b["mabi"], clock=b["clock"], data=b["data_size"]))
+                mabi=b["mabi"], clock=b["clock"], svd=b["svd"],
+                data=b["data_size"]))
 
         out.append(SERIAL.format(id=i))
         out.append(EXCEPTIONS.format(id=i))
