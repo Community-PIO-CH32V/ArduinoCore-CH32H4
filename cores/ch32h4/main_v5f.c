@@ -20,6 +20,11 @@ bool ch32h4_usb_begin(void);
 
 /* wiring_time.c */
 void ch32h4_systick_init(void);
+unsigned long millis(void);
+
+/* delay.cpp / hooks.cpp. Declared here rather than by including Arduino.h:
+ * this is a C file, and Arduino.h drags in the C++ API. */
+void yield(void);
 
 /* Lives in the shared region, which is the only memory both cores reach at
  * speed. It cannot live in .bss: the V3F zeroes .bss before this core is even

@@ -6,7 +6,17 @@
  *
  * Most of what is delicate here is the clock. Getting it wrong produces a
  * device that never enumerates, with no error anywhere.
+ *
+ * The whole file is behind CH32H4_USB. It has to be: every build system
+ * that compiles this core compiles every source in it, and tusb.h is only
+ * on the include path when the USB stack is selected. Without the guard, a
+ * build with USB off -- the Arduino IDE's USART1 serial option, or
+ * board_build.usbstack=none under PlatformIO -- fails on a missing tusb.h
+ * rather than simply leaving USB out. USBFS_IRQHandler is weak in
+ * startup_v5f.S, so nothing is left dangling when this compiles to nothing.
  */
+#ifdef CH32H4_USB
+
 #include <string.h>
 
 #include "ch32h417.h"
@@ -184,3 +194,5 @@ void ch32h4_usb_serial_number(char *buf) {
     }
     buf[24] = '\0';
 }
+
+#endif /* CH32H4_USB */

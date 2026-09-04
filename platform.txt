@@ -101,6 +101,36 @@ compiler.elf2hex.extra_flags=
 # Defines and includes
 # --------------------------------------------------------------------------
 
+# Defaults for everything the menus in boards.txt set. A property that only
+# ever came from a menu would make this file depend on a particular board
+# definition, and a board without that menu would build with the placeholder
+# text in its command line rather than fail.
+
+# C++ exceptions, off by default as in arduino-pico and the ESP cores.
+# Enabling costs roughly 30 KB of unwind tables, which stay in flash and are
+# read only when something throws. One libstdc++.a serves both settings --
+# -fno-exceptions only changes codegen for our own sources -- so unlike
+# arduino-pico there is no second prebuilt library.
+build.flags.exceptions=-fno-exceptions
+build.flags.exceptions.define=
+
+# What `Serial` is. Empty means USART1, which is the conservative fallback for
+# a board definition with no Serial menu; the boards that have one default to
+# USB CDC, which sets -DCH32H4_USB -DUSE_TINYUSB -DCH32H4_SERIAL_IS_USB.
+build.flags.serial=
+
+# The filesystem, in bytes, carved out of the flash tail immediately below the
+# 16 KB EEPROM. Substituted into the linker script by prebuild hook 1, which
+# ASSERTs that the sketch region, the filesystem and the EEPROM tile the 960 KB
+# user area exactly. Must be a multiple of the 8 KB erase page; 0 disables it.
+build.fs_size=131072
+
+# The clock tree, as one of the SDK's SYSCLK_* macros. There is no sane default
+# for this and it is deliberately EMPTY here: cores/ch32h4/ch32h4_clock.c
+# refuses to compile without one, because the alternative to a build error is a
+# board that silently runs at 25 MHz off the internal RC. Every board sets it.
+build.flags.clock=
+
 build.extra_flags=
 build.usb_vid=0x1209
 build.usb_pid=0x0001
@@ -110,11 +140,34 @@ build.usb_product="CH32H417"
 # 0x00008000. The V5F's entry, which main_v3f.c asserts against the linker.
 build.v5f_start=0x00008000
 
-build.defines=-DARDUINO_ARCH_CH32H4 -DF_CPU={build.f_cpu} -DCH32_V5F_START_ADDR={build.v5f_start} -DARDUINO_{build.board} -DUSB_VID={build.usb_vid} -DUSB_PID={build.usb_pid} '-DUSB_MANUFACTURER={build.usb_manufacturer}' '-DUSB_PRODUCT={build.usb_product}' {build.flags.serial} {build.flags.exceptions.define}
+build.defines=-DARDUINO=10808 -DARDUINO_ARCH_CH32H4 -DF_CPU={build.f_cpu} -DCH32_V5F_START_ADDR={build.v5f_start} -DARDUINO_{build.board} -DUSB_VID={build.usb_vid} -DUSB_PID={build.usb_pid} '-DUSB_MANUFACTURER={build.usb_manufacturer}' '-DUSB_PRODUCT={build.usb_product}' {build.flags.serial} {build.flags.exceptions.define} {build.flags.clock}
 
 build.sdk.path={runtime.platform.path}/system/ch32h417lib
 
-build.includes="-I{build.core.path}" "-I{build.variant.path}" "-I{build.sdk.path}/Core" "-I{build.sdk.path}/Peripheral/inc"
+build.tinyusb.path={runtime.platform.path}/libraries/Adafruit_TinyUSB_Arduino/src
+
+# TWO include sets, and the difference between them is load-bearing.
+#
+# build.includes.detect is what the core, the variant and the SDK need. It is
+# also what arduino-cli uses to work out which libraries a sketch depends on:
+# that phase compiles the sketch, reads the "fatal error: X.h: No such file"
+# it gets back, finds the library providing X.h, adds it, and repeats.
+#
+# build.includes adds the TinyUSB headers on top, and is what actually
+# compiles. The core needs them -- Arduino.h declares `Serial` as an
+# Adafruit_USBD_CDC when USB CDC is selected -- and arduino-cli compiles
+# cores/ with the platform's include paths only, never a library's.
+#
+# Putting them in BOTH sets does not work, and the failure is worth stating
+# because it looks like nothing to do with include paths. With the TinyUSB
+# headers visible during detection, Arduino.h's #include resolves, the
+# detection phase sees no missing header, no library is added, and the link
+# fails on `Serial`, dcd_int_handler and tud_task_ext -- symbols from a
+# library the build decided it did not need. Held back from detection, the
+# same #include fails there, TinyUSB is pulled in, and a sketch gets USB CDC
+# without having to include anything itself.
+build.includes.detect="-I{build.core.path}" "-I{build.variant.path}" "-I{build.sdk.path}/Core" "-I{build.sdk.path}/Peripheral/inc"
+build.includes={build.includes.detect} "-I{build.tinyusb.path}" "-I{build.tinyusb.path}/arduino"
 
 # cores/ch32h4/api is deliberately NOT on the include path. On a
 # case-insensitive filesystem it makes <string.h> resolve to ArduinoCore-API's
@@ -136,13 +189,24 @@ recipe.hooks.prebuild.1.pattern="{ch32h4.python}" "{runtime.platform.path}/tools
 
 # 2. The vendor SDK, compiled into an archive. Incremental: the script skips a
 #    source whose object is newer, so only the first build pays for it.
-recipe.hooks.prebuild.2.pattern="{ch32h4.python}" "{runtime.platform.path}/tools/build_sdk.py" --sdk "{build.sdk.path}" --out "{build.path}/libch32h4sdk.a" --objdir "{build.path}/sdk" --cc "{compiler.path}{compiler.c.cmd}" --ar "{compiler.path}{compiler.ar.cmd}" --flags "{compiler.c.flags} {compiler.cpreprocessor.flags}"
+#    The flags come last, after a bare "--", and are deliberately NOT
+#    wrapped in quotes: {build.defines} contains -DUSB_MANUFACTURER="WCH",
+#    whose inner quotes would close an outer pair and hand the script a
+#    mangled command line.
+recipe.hooks.prebuild.2.pattern="{ch32h4.python}" "{runtime.platform.path}/tools/build_sdk.py" --sdk "{build.sdk.path}" --out "{build.path}/libch32h4sdk.a" --objdir "{build.path}/sdk" --cc "{compiler.path}{compiler.c.cmd}" --ar "{compiler.path}{compiler.ar.cmd}" -- {compiler.c.flags} {compiler.cpreprocessor.flags}
 
 # --------------------------------------------------------------------------
 # Recipes
 # --------------------------------------------------------------------------
 
 recipe.c.o.pattern="{compiler.path}{compiler.c.cmd}" {compiler.c.flags} {compiler.cpreprocessor.flags} {compiler.c.extra_flags} {build.extra_flags} {includes} "{source_file}" -o "{object_file}"
+
+# The library-detection pass. Defined explicitly so it uses
+# build.includes.detect; left undefined, arduino-cli derives it from
+# recipe.cpp.o.pattern and gets build.includes, which is the case described
+# above. -w because this pass exists to produce ONE kind of error and every
+# other diagnostic it prints is printed again by the real compile.
+recipe.preproc.macros="{compiler.path}{compiler.cpp.cmd}" {compiler.machine.flags} -std=gnu++17 {build.flags.exceptions} -fno-rtti -w -x c++ -E -CC {build.defines} {build.includes.detect} {includes} "{source_file}" -o "{preprocessed_file_path}"
 
 recipe.cpp.o.pattern="{compiler.path}{compiler.cpp.cmd}" {compiler.cpp.flags} {compiler.cpreprocessor.flags} {compiler.cpp.extra_flags} {build.extra_flags} {includes} "{source_file}" -o "{object_file}"
 

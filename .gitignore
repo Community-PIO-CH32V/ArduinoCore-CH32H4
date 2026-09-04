@@ -7,3 +7,6 @@ __pycache__/
 .pytest_cache/
 tools/bin/
 .vscode
+
+# Local toolchain paths for an arduino-cli build of this checkout.
+platform.local.txt
