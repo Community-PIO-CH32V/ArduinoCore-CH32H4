@@ -1008,6 +1008,38 @@ No fault is recorded on either core. It is a hang, not a trap.
 from `setup()`/`loop()` while `loop1()` is running will hang. That is a live
 hazard in shipped code, not only a constraint on a future updater.
 
+**Fix, and it is in.** `ch32h4_flash_erase()` and `ch32h4_flash_write()` park
+the other core themselves, so LittleFS, EEPROM and anything else that writes
+flash are safe without knowing any of this exists. The two cases that used to
+hang — one page, and 128 KB — now erase, program and verify with `loop1()`
+running throughout.
+
+It is done **by interrupt**, not by a flag the other core polls. A cooperative
+check was written first and it is not good enough: `loop1()` belongs to the
+sketch and may run for a long time without returning or yielding, so the park
+would quietly time out and turn a filesystem write into a failure nobody asked
+for. That is a worse bug than the one being fixed, because it is silent.
+
+Two things had to be checked rather than assumed, and the first was got wrong
+once:
+
+* **The V3F does take interrupts.** `startup_v3f.S` programs `mtvec` and
+  `mstatus` like any other core. Its vector table was sixty copies of
+  `Stray_IRQ_v3f` only because nothing had ever needed an entry — a
+  placeholder, not a limitation. Slots 18 and 19 are real now, and the rest of
+  that table is the obvious place for anything else that core should service.
+* **That table is in SRAM**, `V3F_VECTOR` at 0x2010D000, not in flash. So
+  taking the interrupt needs no flash read — which is what makes the whole
+  arrangement possible. Had the table been in flash, this could not have worked
+  at all.
+
+The handler spins in ITCM with interrupts masked, because a SysTick landing on
+the parked core would find its vector in SRAM and its handler in flash.
+
+`cores/ch32h4/ch32h4_park.c`. `tests/sketches/dualcore` keeps the manual
+`flash ... parked` form, which is what established the difference in the first
+place.
+
 **Fix.** Park the other core in ITCM for the duration. `tests/sketches/dualcore`
 has a working demonstration: a request flag and an acknowledgement in `.xcore`,
 and an `__itcm_func` spin loop the V3F sits in so that it touches no flash at
