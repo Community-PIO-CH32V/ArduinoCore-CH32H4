@@ -46,14 +46,12 @@
    the whole of the Client interface, so naming the interface is what lets
    this run over Ethernet -- or over anything else that implements it. */
 #include <Client.h>
-/* TLS is a build option -- board_build.tls = mbedtls, or the IDE's TLS menu --
+/* TLS is a library, not a build option: nothing is set anywhere, and mbedTLS
    and mbedTLS is not small. Plain HTTP must not require it, so the HTTPS half
-   of this class appears only when TLS is in the build. begin(Client&, url)
-   works either way: a sketch that configures its own secure client and passes
-   it in never touches the methods below. */
-#ifdef CH32H4_TLS
-#include <EthernetClientSecure.h>
-#endif
+   of this class lives in HTTPClientSecure.h, as a subclass -- including that
+   header is what pulls mbedTLS in, and a sketch that only speaks HTTP never
+   does. begin(Client&, url) works from either class: a sketch that configures
+   its own secure client and passes it in needs neither. */
 
 #include <memory>
 #include <vector>
@@ -446,7 +444,7 @@ private:
 class HTTPClient {
 public:
     HTTPClient() = default;
-    ~HTTPClient() {
+    virtual ~HTTPClient() {
         if (_clientMade) {
             _destroyMade();
         }
@@ -527,48 +525,18 @@ public:
     void resetCookieJar();
     void clearAllCookies();
 
-#ifdef CH32H4_TLS
-    // ------------------------------------------------------------------
-    // HTTPS.
-    //
-    // This is the subset ESP32's HTTPClient exposes, because it is the subset
-    // this core's TLS can back: EthernetClientSecure is mbedTLS, not BearSSL.
-    // arduino-pico forwards a much larger set -- setSession, setTrustAnchors,
-    // setKnownKey, setCertStore, setCiphers, setSSLVersion -- and every one of
-    // those takes a BearSSL type. They are not stubbed out here: a method that
-    // accepts a certificate store and quietly ignores it is worse than one
-    // that does not exist, because the sketch still looks like it validates.
-    //
-    // Anything beyond these four is done the way ESP32 does it too: build an
-    // EthernetClientSecure, configure it, and pass it to begin().
-    void setInsecure() {
-        _tls()->setInsecure();
-    }
-    void setCACert(const char *rootCA) {
-        _tls()->setCACert(rootCA);
-    }
-    void setCertificate(const char *client_ca) {
-        _tls()->setCertificate(client_ca);
-    }
-    void setPrivateKey(const char *private_key) {
-        _tls()->setPrivateKey(private_key);
-    }
-
 protected:
-    // HTTPS helpers
-    EthernetClientSecure *_tls() {
-        if (!_clientMade) {
-            _clientMade = new EthernetClientSecure();
-            _deleteMade = [](Client *c) {
-                delete static_cast<EthernetClientSecure *>(c);
-            };
-            _clientGiven = false;
-        }
-        _clientTLS = true;
-        return (EthernetClientSecure*)_clientMade;
+    /* Where an https:// URL gets its client, and the one thing the base class
+       cannot do for itself.
+     *
+     * HTTPClientSecure overrides it to build an EthernetClientSecure. Here it
+     * returns nullptr, which is what makes begin("https://...") fail with a
+     * message rather than connect in the clear to port 443 -- and a virtual is
+     * what keeps the declaration of this class free of any mbedTLS type, which
+     * is the whole reason plain HTTP costs nothing. */
+    virtual Client *_makeSecureClient() {
+        return nullptr;
     }
-
-#endif  // CH32H4_TLS
 
     struct RequestArgument {
         String key;

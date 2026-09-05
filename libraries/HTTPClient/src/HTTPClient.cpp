@@ -192,16 +192,17 @@ bool HTTPClient::begin(String url) {
     _port = (protocol == "https" ? 443 : 80);
     if (!_client()) {
         if (protocol == "https") {
-#ifdef CH32H4_TLS
-            _tls();
-#else
-            /* An https URL with no TLS in the build. Refusing here is the
-               point: the alternative is connecting in the clear to port 443,
-               which does not work and, if it somehow did, would be worse. */
-            DEBUG_HTTPCLIENT("[HTTP-Client][begin] https needs TLS in the "
-                             "build: board_build.tls = mbedtls\n");
-            return false;
-#endif
+            /* Refusing when there is no secure client is the point: the
+               alternative is connecting in the clear to port 443, which does
+               not work and, if it somehow did, would be worse. */
+            if (!_makeSecureClient()) {
+                DEBUG_HTTPCLIENT("[HTTP-Client][begin] an https URL needs "
+                                 "HTTPClientSecure -- include "
+                                 "<HTTPClientSecure.h> and use that class, or "
+                                 "pass your own EthernetClientSecure to "
+                                 "begin(client, url)\n");
+                return false;
+            }
         } else {
             /* A concrete client, not the interface: this is the default one
                for sketches that call begin(url) without supplying their own. */
@@ -250,13 +251,14 @@ bool HTTPClient::begin(String host, uint16_t port, String uri, bool https) {
     _protocol = (https ? "https" : "http");
     if (!_client()) {
         if (https) {
-#ifdef CH32H4_TLS
-            _tls();
-#else
-            DEBUG_HTTPCLIENT("[HTTP-Client][begin] https needs TLS in the "
-                             "build: board_build.tls = mbedtls\n");
-            return false;
-#endif
+            if (!_makeSecureClient()) {
+                DEBUG_HTTPCLIENT("[HTTP-Client][begin] an https URL needs "
+                                 "HTTPClientSecure -- include "
+                                 "<HTTPClientSecure.h> and use that class, or "
+                                 "pass your own EthernetClientSecure to "
+                                 "begin(client, url)\n");
+                return false;
+            }
         } else {
             {
                 EthernetClient *made = new EthernetClient();

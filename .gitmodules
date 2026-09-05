@@ -22,10 +22,26 @@
 [submodule "system/lwip"]
 	path = system/lwip
 	url = https://github.com/lwip-tcpip/lwip.git
-[submodule "system/mbedtls"]
-	path = system/mbedtls
-	url = https://github.com/Mbed-TLS/mbedtls.git
 [submodule "libraries/Adafruit_SleepyDog"]
 	path = libraries/Adafruit_SleepyDog
 	url = https://github.com/Community-PIO-CH32V/Adafruit_SleepyDog.git
+	branch = ch32h4
+# A fork, on branch ch32h4, because mbedTLS's own layout cannot be an Arduino
+# library and this core wants it to be one -- so that a sketch's #include
+# decides whether TLS is in the build, rather than a flag someone has to know
+# to set.
+#
+# The cryptography is untouched. The branch prunes programs/, tests/,
+# scripts/, framework/ and 3rdparty/ -- arduino-cli compiles every directory
+# under a library's src/ recursively with no way to exclude one, and
+# programs/ is full of main() -- flattens include/mbedtls and library/ into
+# the single include root an Arduino library gets, carries this core's
+# mbedtls_config.h in the place mbedTLS looks by default, and brings the
+# CH32H41x port (aes_alt.c on the ECDC block, entropy from the TRNG) with it.
+#
+# README-ch32h4.md on that branch says all of this again, for someone who
+# arrives at the fork without this file.
+[submodule "libraries/mbedtls/src"]
+	path = libraries/mbedtls/src
+	url = https://github.com/Community-PIO-CH32V/mbedtls.git
 	branch = ch32h4

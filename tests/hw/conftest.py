@@ -426,11 +426,12 @@ def fs_board():
 
 @pytest.fixture(scope="session")
 def tls_board():
-    """The sketch built with board_build.tls = mbedtls.
+    """The sketch that includes EthernetClientSecure, and so gets mbedTLS.
 
-    Its own image because mbedtls is about 250 KB of flash: every other sketch
+    Its own image because mbedTLS is about 250 KB of flash: every other sketch
     would pay for it, and the AES and DRBG tests need it while nothing else
-    does.
+    does. Nothing switches it on -- the #include does, which is the point of
+    mbedTLS being a library.
     """
     if serial is None:
         pytest.skip("pyserial is not installed")

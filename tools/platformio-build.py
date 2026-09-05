@@ -42,8 +42,6 @@ SDK_DIR = join(FRAMEWORK_DIR, "system", "ch32h417lib")
 ADAFRUIT_DIR = join(FRAMEWORK_DIR, "libraries", "Adafruit_TinyUSB_Arduino", "src")
 TINYUSB_DIR = ADAFRUIT_DIR
 LWIP_DIR = join(FRAMEWORK_DIR, "system", "lwip", "src")
-MBEDTLS_DIR = join(FRAMEWORK_DIR, "system", "mbedtls")
-MBEDTLS_PORT_DIR = join(FRAMEWORK_DIR, "system", "mbedtls-port")
 CORE_DIR = join(FRAMEWORK_DIR, "cores", "ch32h4")
 variant = board.get("build.variant")
 VARIANT_DIR = join(FRAMEWORK_DIR, "variants", variant)
@@ -125,16 +123,19 @@ if network not in ("ethernet", "none"):
     env.Exit(1)
 net_enabled = network == "ethernet"
 
-# TLS. Mbed TLS 3.6 LTS, with AES on the ECDC block and entropy from the TRNG.
+# TLS is NOT a build option, and used to be.
 #
-# Off unless a sketch asks for it, and for a bigger reason than lwIP's: this is
-# about 250 KB of flash and tens of kilobytes of heap per connection. Set
-# board_build.tls = mbedtls to turn it on.
+# mbedTLS is libraries/mbedtls now -- an ordinary Arduino library, resolved
+# because a sketch included EthernetClientSecure or WebServerSecure, the same
+# way any other library is. board_build.tls is gone: there is nothing left for
+# it to switch, and a sketch that wants TLS says so by including it.
 #
-# It requires networking, but not for a technical reason -- mbedtls itself has
-# no idea what a socket is. It is refused without it because a TLS stack with
-# nothing to talk to is a quarter of a megabyte of flash doing nothing, and
-# almost certainly a typo in the sketch's configuration.
+# What made it a build option for so long was MBEDTLS_CONFIG_FILE, which had to
+# be defined for every translation unit including the sketch's -- and a define
+# that global can only come from the build. The fork carries the configuration
+# as mbedtls/mbedtls_config.h instead, which is where mbedTLS looks when the
+# define is absent. Nothing has to be told anything.
+
 # Link-time optimization.
 #
 # On by default. The whole image is one compilation unit as far as the
@@ -153,25 +154,6 @@ if lto not in ("enabled", "disabled"):
                      " got %r\n" % lto)
     env.Exit(1)
 lto_enabled = lto == "enabled"
-
-#
-# Client AND server, from the one setting. The server half was a separate value
-# until it was measured: 29,900 bytes of flash, not one byte of RAM, and not
-# collectable -- see the note in ch32h4_mbedtls_config.h for why neither
-# --gc-sections nor LTO can drop it. 29 KB is 3% of the sketch region and only
-# paid by sketches that already asked for a 250 KB TLS stack, which is not
-# worth a build-option axis. "mbedtls-server" is still accepted as an alias so
-# configurations written against the old spelling keep working.
-tls = str(board.get("build.tls", "none")).lower()
-if tls not in ("mbedtls", "mbedtls-server", "none"):
-    sys.stderr.write("Error: board_build.tls must be 'mbedtls' or 'none',"
-                     " got %r\n" % tls)
-    env.Exit(1)
-tls_enabled = tls in ("mbedtls", "mbedtls-server")
-if tls_enabled and not net_enabled:
-    sys.stderr.write("Error: board_build.tls = %s needs"
-                     " board_build.network = ethernet\n" % tls)
-    env.Exit(1)
 
 # The LittleFS partition, in the flash tail.
 #
@@ -391,13 +373,9 @@ env.Append(
         join(CORE_DIR, "lwip"),
         join(LWIP_DIR, "include"),
     ] if net_enabled else [])
-      + ([
-        # The port directory first: it carries aes_alt.h, which mbedtls
-        # includes by that bare name when MBEDTLS_AES_ALT is set.
-        MBEDTLS_PORT_DIR,
-        join(MBEDTLS_DIR, "include"),
-        join(MBEDTLS_DIR, "library"),
-    ] if tls_enabled else []),
+,
+    # Nothing for mbedTLS: libraries/mbedtls carries its own include root, and
+    # the dependency finder adds it only for sketches that asked for it.
 
     LIBSOURCE_DIRS=[join(FRAMEWORK_DIR, "libraries")],
 )
@@ -568,35 +546,10 @@ if net_enabled:
         join("$BUILD_DIR", "FrameworkLwIP_apps", "sntp.o"),
         join(LWIP_DIR, "apps", "sntp", "sntp.c")))
 
-# Mbed TLS. Its own environment, warnings off, and its own config file.
-#
-# MBEDTLS_CONFIG_FILE has to reach every translation unit including the
-# library's own, so it goes on the whole environment rather than on the mbedtls
-# one -- a sketch that includes an mbedtls header must see the same
-# configuration the library was built with, or the struct layouts differ and
-# the failure is a corrupted context rather than a compile error.
-if tls_enabled:
-    env.Append(CPPDEFINES=[
-        ("MBEDTLS_CONFIG_FILE", r'\"ch32h4_mbedtls_config.h\"'),
-        "CH32H4_TLS",
-    ])
-    mbedtls_env = env.Clone()
-    mbedtls_env.Append(CCFLAGS=["-w"])
-    libs.append(mbedtls_env.BuildLibrary(
-        join("$BUILD_DIR", "FrameworkMbedTLS"), join(MBEDTLS_DIR, "library")))
-
-    # The port layer: the ECDC AES accelerator, and the entropy and clock
-    # hooks. Compiled here rather than left in libraries/ for the dependency
-    # finder to pick up -- a sketch includes mbedtls/ssl.h, which resolves to
-    # the submodule, so the finder never sees a reason to build the port and
-    # the link fails on mbedtls_aes_init. Warnings off with the rest of
-    # mbedtls: aes_alt.c is vendor-derived and noisy.
-    for src, name in (
-        (join(MBEDTLS_PORT_DIR, "aes_alt.c"), "aes_alt"),
-        (join(MBEDTLS_PORT_DIR, "ch32h4_mbedtls_port.c"), "mbedtls_port"),
-    ):
-        env.Append(PIOBUILDFILES=mbedtls_env.StaticObject(
-            join("$BUILD_DIR", "FrameworkMbedTLS_port", name + ".o"), src))
+# NOTHING HERE FOR MBEDTLS. It is libraries/mbedtls, found by the dependency
+# finder, built with the same flags as everything else -- its 109 sources
+# compile clean under -Wall -Wextra, measured, so it needs no exemption -- and
+# its library.json supplies the src/include layout.
 
 libs.append(env.BuildLibrary(
     join("$BUILD_DIR", "FrameworkArduino"),

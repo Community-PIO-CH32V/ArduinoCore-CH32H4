@@ -86,26 +86,29 @@ def _defines(elf: pathlib.Path, symbol: str) -> bool:
     return False
 
 
-def test_board_build_tls_gives_you_both_halves():
-    """board_build.tls = mbedtls means client AND server.
+def test_including_the_tls_header_is_what_pulls_mbedtls_in():
+    """mbedTLS is a library, resolved from a sketch's includes, not a flag.
 
-    It meant client-only for a while, with the server behind a second value.
-    That was dropped after measuring what the second value was worth: 29,900
-    bytes of flash, no RAM, and unremovable by --gc-sections or LTO, because
-    mbedtls_ssl_handshake_step() chooses between the two state machines with a
-    run-time test on ssl->conf->endpoint -- from a function the client calls,
-    so the server side is reachable and stays.
+    Both directions have to hold or the arrangement is not doing its job:
+    a sketch that includes EthernetClientSecure gets the whole of mbedTLS --
+    including the SERVER handshake, which is not separable, see the note in
+    mbedtls_config.h -- and a sketch that does not include it gets none of it.
 
-    mbedtls_ssl_handshake_server_step is the entry point to that state machine.
-    Asserting it is in BOTH images is what says the fold actually happened:
-    tlstest asks only for a client and gets a server too.
+    The second half is the one worth a test. If the dependency finder ever
+    reached mbedTLS from somewhere else -- an unincluded header in a library
+    that IS used, say -- every sketch would quietly gain a quarter of a
+    megabyte and nothing would fail.
     """
     symbol = "mbedtls_ssl_handshake_server_step"
     for sketch in ("tlstest", "tlsserver"):
         elf = SKETCHES / sketch / ".pio/build/ch32h417/firmware.elf"
         assert _defines(elf, symbol), \
-            "%s should carry the server handshake -- board_build.tls = mbedtls " \
-            "is supposed to give you both halves now" % sketch
+            "%s includes a TLS header and should have all of mbedTLS" % sketch
+
+    for sketch in ("webserver", "ethernet", "minimal"):
+        elf = SKETCHES / sketch / ".pio/build/ch32h417/firmware.elf"
+        assert not _defines(elf, symbol), \
+            "%s includes no TLS header and must not be paying for mbedTLS" % sketch
 
 
 OBJDUMP = (pathlib.Path.home()

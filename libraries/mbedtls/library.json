@@ -1,0 +1,19 @@
+{
+  "name": "mbedtls",
+  "version": "3.6.7",
+  "description": "Mbed TLS 3.6 LTS for the CH32H41x, with AES on the ECDC accelerator and entropy from the TRNG.",
+  "keywords": "tls, ssl, crypto, x509",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Community-PIO-CH32V/mbedtls.git"
+  },
+  "frameworks": "arduino",
+  "platforms": "ch32v",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "srcFilter": ["+<*.c>"],
+    "libArchive": true
+  }
+}
