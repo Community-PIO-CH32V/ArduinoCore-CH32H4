@@ -149,6 +149,13 @@ board = ch32h417qeu6_evt_r0
 framework = arduino
 ```
 
+**The two LEDs need a jumper.** They are fitted but not wired to the
+microcontroller: LED1 sits behind a header pin under PE2 and LED2 under PE3, so
+`LED_BUILTIN` (which is LED1) drives a pin connected to nothing until you
+bridge one of them. Both pins have another default job — PE2 is SPI4's clock
+and PE3 is what the SPI-slave test uses as chip select — so a board with the
+LED jumpers on cannot also run SPI4 as a slave on the default pins.
+
 `Serial` is USB CDC by default and `Serial1` is USART1 on PA9/PA10. To swap
 them — worth doing while debugging anything that can fault before USB
 enumerates:

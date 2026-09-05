@@ -20,6 +20,29 @@
 #define PIN_ETH_LED_LINK PF0    /* driven by the PHY itself, AF10 */
 #define PIN_ETH_LED_ACT  PF2
 
+/* The two user LEDs.
+ *
+ * NOT CONNECTED OUT OF THE BOX. The LEDs are fitted, but neither is wired to
+ * the microcontroller: each sits behind a header pin that has to be jumpered
+ * to the pin below it. LED1 is under PE2 and LED2 is under PE3, which is why
+ * these are the two.
+ *
+ * So digitalWrite(LED_BUILTIN, HIGH) on an untouched board does exactly what
+ * it says and lights nothing. That is worth knowing before spending an
+ * evening on it.
+ *
+ * PE2-PE6 are on the 3.3 V rail, unlike most of this part, so an LED driven
+ * from here gets a real 3.3 V swing rather than VIO18's 1.8 V.
+ *
+ * BOTH PINS HAVE ANOTHER JOB by default. PE2 is SPI4's clock -- the slave-mode
+ * SPI, PIN_SPI_SLAVE_SCK below -- and PE3 is what the SPI-slave test uses as
+ * the master's chip select. A board with the LED jumpers on cannot also run
+ * SPI4 as a slave on the default pins. Nothing enforces that; it is one pin
+ * driving two things, and the LED wins whichever was configured last. */
+#define PIN_LED1         PE2
+#define PIN_LED2         PE3
+#define LED_BUILTIN      PIN_LED1
+
 /* The board's two test jumpers, both there so a test can prove a wire rather
    than a register: PA6-PA7 is the SPI1 loopback, PC3-PC4 crosses the
    VIO18/VDDIO domain boundary. */

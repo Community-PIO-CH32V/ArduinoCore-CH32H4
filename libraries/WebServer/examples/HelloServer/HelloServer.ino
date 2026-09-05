@@ -9,8 +9,12 @@
    WebServer library itself is.
 
    ---
-   For the CH32H41x core. The WiFi setup of the original is Ethernet here, and
-   there is no LED on this board, so the counter goes to Serial instead.
+   For the CH32H41x core. The WiFi setup of the original is Ethernet here.
+
+   THE LED NEEDS A JUMPER. LED_BUILTIN is LED1, which sits behind a header pin
+   under PE2 and is not wired to the microcontroller until that pin is
+   jumpered. The sketch works either way; without the jumper the LED simply
+   does not light.
 
    handleClient() must be called often. It is where a request is read, routed
    and answered -- a loop() that blocks for a second answers requests once a
@@ -25,8 +29,10 @@ WebServer server(80);
 static uint32_t hits = 0;
 
 void handleRoot() {
+  digitalWrite(LED_BUILTIN, HIGH);
   hits++;
   server.send(200, "text/plain", "hello from ch32h4!\r\n");
+  digitalWrite(LED_BUILTIN, LOW);
 }
 
 void handleNotFound() {
@@ -49,6 +55,9 @@ void setup() {
   while (!Serial) {
     delay(10);
   }
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 
   if (Ethernet.begin() == 0) {
     Serial.println("Failed to configure Ethernet using DHCP");
