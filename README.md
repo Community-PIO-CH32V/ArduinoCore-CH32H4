@@ -69,13 +69,17 @@ amplifier and a WCH-Link attached.
 | | Arduino IDE / arduino-cli build | verified |
 | | Debugging both cores over OpenOCD and GDB | verified — see the gaps below |
 
-`python -m pytest tests` runs all **272**: **88 host-side** — the tree, the
+`python -m pytest tests` runs all **382**: **109 host-side** — the tree, the
 linker layout, the Arduino IDE build description, the debug configuration, the
-Boards Manager index and a matrix of build configurations — and **184 on
+Boards Manager index and a matrix of build configurations — and **273 on
 hardware**, against a connected board. The
 hardware half is `tests/hw`; `--ignore=tests/hw` leaves the host-side half,
-which needs no board. The hardware suite reprograms the part nine times — once
-per sketch — and takes about three minutes.
+which needs no board. The hardware suite reprograms the part seventeen times —
+once per sketch — and takes about seven minutes.
+
+29 of the hardware tests skip on this bench: they are the SPI-slave and
+I2C-slave suites, which need jumpers between two of the chip's own peripherals
+that are not currently fitted.
 
 ### What is not verified
 
@@ -162,6 +166,14 @@ board_build.exceptions = enabled
 Both settings build, link and run; a `throw` is caught on hardware. Enabling
 costs roughly 30 KB of unwind tables, which stay in flash.
 
+Link-time optimization is **on** by default, and worth 3–7% of flash — 24 KB
+off a TLS sketch. Turn it off for a backtrace that has not been inlined flat,
+or to rule LTO out as the cause of something:
+
+```ini
+board_build.lto = disabled
+```
+
 Networking and TLS are options too, because both are large and most sketches
 want neither:
 
@@ -211,8 +223,8 @@ contain no submodules and five of this core's dependencies are submodules.
 `platform.txt` and `boards.txt` build the same core through arduino-cli and the
 IDE. Put the checkout where the IDE looks for third-party hardware —
 `<sketchbook>/hardware/ch32h4/ch32h4` — and the board appears as
-`ch32h4:ch32h4:ch32h417qeu6`, with menus for the serial port, C++ exceptions
-and the filesystem size.
+`ch32h4:ch32h4:ch32h417qeu6`, with menus for the USB stack, the serial port,
+C++ exceptions, link-time optimization and the filesystem size.
 
 Two things the IDE cannot do for itself, so `platform.txt` runs them as
 prebuild hooks, both needing Python on `PATH`:
