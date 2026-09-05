@@ -166,7 +166,10 @@ void ch32h4_fault_dump(void) {
     puts_raw("\nstack:");
     for (uint32_t i = 0; i < 24; i++) {
         uint32_t w = ((volatile uint32_t *)ch32h4_fault_sp)[i];
-        if ((w >= 0x00000000u && w < 0x00100000u)
+        /* No lower bound on the first range: w is unsigned, so >= 0 is
+           always true and -Wtype-limits says so. The three ranges are the
+           flash alias at zero, the flash proper, and RAM. */
+        if (w < 0x00100000u
             || (w >= 0x08000000u && w < 0x08100000u)
             || (w >= 0x20000000u && w < 0x20180000u)) {
             puts_raw(" ");

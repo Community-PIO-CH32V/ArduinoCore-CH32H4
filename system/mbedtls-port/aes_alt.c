@@ -88,6 +88,11 @@ static void aes_hw_init(void) {
 }
 
 static void print_hex(const char *label, const uint8_t *data, size_t len) {
+    /* AES_TRACE is empty unless tracing is compiled in, and then nothing reads
+       these. Cast rather than drop the parameters: the signature is what makes
+       the call sites readable. */
+    (void)label;
+    (void)data;
     AES_TRACE("%s: ", label);
     for (size_t i = 0; i < len; i++)
     {
@@ -97,6 +102,8 @@ static void print_hex(const char *label, const uint8_t *data, size_t len) {
 }
 
 static void print_words(const char *label, const uint32_t *words, size_t count) {
+    (void)label;
+    (void)words;
     AES_TRACE("%s: ", label);
     for (size_t i = 0; i < count; i++)
     {

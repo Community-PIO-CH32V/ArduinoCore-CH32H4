@@ -119,14 +119,14 @@ void tone(uint8_t pin, unsigned int frequency, unsigned long duration) {
         prescaler = 0x10000u;
     }
 
-    TIM_TimeBaseInitTypeDef t = {0};
+    TIM_TimeBaseInitTypeDef t = {};
     t.TIM_Prescaler = (uint16_t)(prescaler - 1u);
     t.TIM_CounterMode = TIM_CounterMode_Up;
     t.TIM_Period = (uint16_t)(top - 1u);
     t.TIM_ClockDivision = TIM_CKD_DIV1;
     TIM_TimeBaseInit(dev, &t);
 
-    TIM_OCInitTypeDef oc = {0};
+    TIM_OCInitTypeDef oc = {};
     oc.TIM_OCMode = TIM_OCMode_PWM1;
     oc.TIM_OutputState = TIM_OutputState_Enable;
     oc.TIM_Pulse = (uint16_t)(top / 2u);      /* 50% */
