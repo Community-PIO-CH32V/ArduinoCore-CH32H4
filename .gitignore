@@ -12,3 +12,4 @@ tools/bin/
 platform.local.txt
 .index-cache/
 ch32h4-*.zip
+tests/.examples-build/
