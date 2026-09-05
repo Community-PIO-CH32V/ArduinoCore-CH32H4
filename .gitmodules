@@ -19,9 +19,6 @@
 	path = libraries/Adafruit_TinyUSB_Arduino
 	url = https://github.com/Community-PIO-CH32V/Adafruit_TinyUSB_Arduino.git
 	branch = ch32h417
-[submodule "system/lwip"]
-	path = system/lwip
-	url = https://github.com/lwip-tcpip/lwip.git
 [submodule "libraries/Adafruit_SleepyDog"]
 	path = libraries/Adafruit_SleepyDog
 	url = https://github.com/Community-PIO-CH32V/Adafruit_SleepyDog.git
@@ -44,4 +41,18 @@
 [submodule "libraries/mbedtls/src"]
 	path = libraries/mbedtls/src
 	url = https://github.com/Community-PIO-CH32V/mbedtls.git
+	branch = ch32h4
+# A fork, on branch ch32h4, for the same reasons as the mbedTLS one above: an
+# Arduino library gets one include root and its whole src/ compiled, and lwIP's
+# layout suits neither.
+#
+# The stack is unmodified. The branch prunes what a NO_SYS=1 Ethernet port does
+# not build -- api/, ppp, SLIP, 6LoWPAN, and every app but SNTP and mDNS --
+# flattens src/include and src/ into that single root, and carries this port's
+# lwipopts.h and arch/cc.h there too. lwIP ships neither of those and includes
+# them by bare name, so putting them in lwIP's own include root is what removes
+# any question of which -I comes first.
+[submodule "libraries/lwip/src"]
+	path = libraries/lwip/src
+	url = https://github.com/Community-PIO-CH32V/lwip.git
 	branch = ch32h4

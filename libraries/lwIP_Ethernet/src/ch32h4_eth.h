@@ -12,6 +12,9 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Not for the declarations -- for the dependency resolver. See the header
+   itself: it is the only name arduino-cli can match to find lwIP. */
+#include "lwip_arduino.h"
 #include "lwip/netif.h"
 
 typedef struct _eth_t eth_t;

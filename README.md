@@ -66,7 +66,7 @@ amplifier and a WCH-Link attached.
 | | HTTPS: `EthernetServerSecure`, `WebServerSecure`, mutual TLS | verified |
 | | RTC on LSI, LSE and HSE, wired into `gettimeofday()` | verified |
 | | LittleFS in the flash tail, and the EEPROM above it | verified |
-| | Arduino IDE / arduino-cli build | verified |
+| | Arduino IDE / arduino-cli build, networking and TLS included | verified |
 | | Debugging both cores over OpenOCD and GDB | verified — see the gaps below |
 
 `python -m pytest tests` runs all **382**: **109 host-side** — the tree, the
@@ -174,26 +174,34 @@ or to rule LTO out as the cause of something:
 board_build.lto = disabled
 ```
 
-Networking and TLS are options too, because both are large and most sketches
-want neither:
+Networking and TLS are **not** options, and used to be. lwIP is
+`libraries/lwip` and mbedTLS is `libraries/mbedtls` — ordinary Arduino
+libraries, resolved because a sketch included `LwipEthernet.h` or
+`EthernetClientSecure.h`, the same way any other library is. There is nothing
+to set:
 
-```ini
-board_build.network = ethernet
-board_build.tls = mbedtls
+```cpp
+#include <LwipEthernet.h>        // a TCP/IP stack
+#include <EthernetClientSecure.h> // and TLS on top of it
 ```
 
-`mbedtls` is about 250 KB of flash and gives you both directions —
-`EthernetClientSecure` and `HTTPClient` for fetching, `EthernetServerSecure`
-and `WebServerSecure` for serving.
+A sketch that includes neither pays for neither — no flash, no compile time —
+and the link matrix asserts exactly that: `minimal`, `ethernet` and `webserver`
+must contain no mbedTLS at all.
 
-The server half was a separate setting for a while, on the theory that a sketch
-fetching an HTTPS endpoint should not carry a handshake it never enters. It was
-measured instead: 29,900 bytes of flash and no RAM, and neither `--gc-sections`
-nor LTO can remove it, because `mbedtls_ssl_handshake_step()` picks between the
-client and server state machines with a **run-time** test on
-`ssl->conf->endpoint`, from a function the client calls too. 29 KB was not
-worth a second setting to get wrong. `mbedtls-server` is still accepted as an
-alias.
+`board_build.network` and `board_build.tls` are gone. What kept them was that
+both libraries needed a configuration header visible to *every* translation
+unit including the sketch's — `MBEDTLS_CONFIG_FILE`, and lwIP's `lwipopts.h`
+having to precede lwIP's own include directory — and a define that global can
+only come from the build. Both forks carry their configuration where the
+library itself looks for it, so nothing has to be told anything.
+
+The forks exist for one more reason: arduino-cli compiles every directory under
+a library's `src/` recursively and cannot be told to skip one, and upstream
+mbedTLS ships `programs/` full of `main()`. Each `ch32h4` branch prunes what
+this core does not build and flattens the rest into the single include root an
+Arduino library gets. `README-ch32h4.md` on each branch says what was changed
+and why.
 
 One thing that catches people, and is not a bug in the library: **a board
 cannot connect to its own address.** lwIP here is built without
@@ -232,7 +240,13 @@ IDE. Put the checkout where the IDE looks for third-party hardware —
 `ch32h4:ch32h4:ch32h417qeu6`, with menus for the USB stack, the serial port,
 C++ exceptions, link-time optimization and the filesystem size.
 
-Two things the IDE cannot do for itself, so `platform.txt` runs them as
+Networking and TLS work here too, and did not until lwIP and mbedTLS became
+libraries: arduino-cli compiles `cores/`, `variants/` and the libraries a
+sketch includes, and nothing else, so a stack living under `system/` was
+invisible to it. A sketch that includes `<LwipEthernet.h>` and
+`<EthernetClientSecure.h>` compiles in the IDE with nothing configured.
+
+One thing the IDE cannot do for itself, so `platform.txt` runs them as
 prebuild hooks, both needing Python on `PATH`:
 
 - `tools/simplesub.py` substitutes the chosen filesystem size into the

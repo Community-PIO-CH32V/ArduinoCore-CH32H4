@@ -4,7 +4,11 @@
  * retransmission, ARP ageing -- and the core-locked assert is the only thing
  * standing between a dual-core sketch and a corrupted pbuf chain.
  */
-#ifdef CH32H4_ETHERNET
+/* This file used to be wrapped in an ifdef on a build define, because it
+   lived in cores/ch32h4 and was compiled into every sketch whether or not it
+   had a network. It lives in libraries/lwIP_Ethernet now, so it is compiled
+   only for sketches that included LwipEthernet -- which is what the guard was
+   simulating, done by the build system instead of the preprocessor. */
 
 #include "Arduino.h"
 #include "ch32h4_xcore.h"
@@ -58,5 +62,3 @@ uint32_t ch32h4_lwip_rand(void) {
     state ^= state << 5;
     return state;
 }
-
-#endif /* CH32H4_ETHERNET */

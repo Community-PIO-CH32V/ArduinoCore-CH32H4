@@ -41,7 +41,6 @@ SDK_DIR = join(FRAMEWORK_DIR, "system", "ch32h417lib")
 # symbol and, worse, would drift.
 ADAFRUIT_DIR = join(FRAMEWORK_DIR, "libraries", "Adafruit_TinyUSB_Arduino", "src")
 TINYUSB_DIR = ADAFRUIT_DIR
-LWIP_DIR = join(FRAMEWORK_DIR, "system", "lwip", "src")
 CORE_DIR = join(FRAMEWORK_DIR, "cores", "ch32h4")
 variant = board.get("build.variant")
 VARIANT_DIR = join(FRAMEWORK_DIR, "variants", variant)
@@ -111,17 +110,17 @@ if usbstack not in ("tinyusb", "none"):
     env.Exit(1)
 usb_enabled = usbstack == "tinyusb"
 
-# Networking. lwIP plus the on-chip Ethernet MAC and 100M PHY.
+# NETWORKING IS NOT A BUILD OPTION EITHER, and used to be.
 #
-# Off unless a sketch asks for it: lwIP is roughly 60 KB of flash and 32 KB of
-# heap, which a blink sketch should not pay for. Set board_build.network =
-# ethernet to turn it on.
-network = str(board.get("build.network", "none")).lower()
-if network not in ("ethernet", "none"):
-    sys.stderr.write("Error: board_build.network must be 'ethernet' or"
-                     " 'none', got %r\n" % network)
-    env.Exit(1)
-net_enabled = network == "ethernet"
+# lwIP is libraries/lwip and the Ethernet driver is libraries/lwIP_Ethernet, so
+# a sketch that includes LwipEthernet gets a TCP/IP stack and one that does not
+# gets none of it. board_build.network is gone with board_build.tls.
+#
+# What kept it a build option was the same shape as mbedTLS's: lwipopts.h and
+# arch/cc.h are the port's to supply and lwIP includes them by bare name, so
+# something had to guarantee our copies came first on the include path. They
+# live in the fork's own include root now. There is one of each and no ordering
+# to get wrong.
 
 # TLS is NOT a build option, and used to be.
 #
@@ -327,7 +326,6 @@ env.Append(
         ("F_CPU", board.get("build.f_cpu")),
         ("CH32_V5F_START_ADDR", V5F_START_ADDR),
     ] + (["CH32H4_EXCEPTIONS"] if exceptions else [])
-      + (["CH32H4_NETWORK", "CH32H4_ETHERNET"] if net_enabled else [])
       + (["CH32H4_USB", "USE_TINYUSB",
           # Adafruit_USBD_Device builds the descriptor from these.
           #
@@ -367,12 +365,6 @@ env.Append(
         ADAFRUIT_DIR,
         join(ADAFRUIT_DIR, "arduino"),
     ] if usb_enabled else [])
-      + ([
-        # cores/ch32h4/lwip carries lwipopts.h and arch/cc.h, and must come
-        # before lwIP's own include directory.
-        join(CORE_DIR, "lwip"),
-        join(LWIP_DIR, "include"),
-    ] if net_enabled else [])
 ,
     # Nothing for mbedTLS: libraries/mbedtls carries its own include root, and
     # the dependency finder adds it only for sketches that asked for it.
@@ -516,35 +508,11 @@ if usb_enabled:
         ignored.append("Adafruit TinyUSB Library")
     platform.config.set(env_section, "lib_ignore", ignored)
 
-# lwIP. Third-party, so its own environment with warnings off -- and it is
-# large enough that its warnings would drown everything else.
-#
-# Only the parts NO_SYS=1 uses are compiled: core, core/ipv4, and the netif
-# helpers. api/ is the socket and netconn layer, which needs threads and is
-# switched off in lwipopts.h; apps/ is a pile of optional protocols.
-if net_enabled:
-    lwip_env = env.Clone()
-    lwip_env.Append(CCFLAGS=["-w"])
-    # `core` only: BuildLibrary recurses, so naming core/ipv4 as well compiles
-    # every file in it twice and the link fails on multiple definitions.
-    libs.append(lwip_env.BuildLibrary(
-        join("$BUILD_DIR", "FrameworkLwIP_core"), join(LWIP_DIR, "core")))
-    # netif/: only ethernet.c and the ARP glue are wanted. The rest is PPP,
-    # SLIP and 6LoWPAN, none of which this board has an interface for.
-    for src, name in (
-        (join(LWIP_DIR, "netif", "ethernet.c"), "lwip_ethernet"),
-    ):
-        env.Append(PIOBUILDFILES=lwip_env.StaticObject(
-            join("$BUILD_DIR", "FrameworkLwIP_netif", name + ".o"), src))
-
-    # apps/: one of them. SNTP is not optional in the way the rest are --
-    # certificate validity is checked against the clock, and a board with no
-    # battery has no idea what time it is until something tells it. Named
-    # individually rather than by building apps/, which would drag in httpd,
-    # mdns, MQTT and the rest.
-    env.Append(PIOBUILDFILES=lwip_env.StaticObject(
-        join("$BUILD_DIR", "FrameworkLwIP_apps", "sntp.o"),
-        join(LWIP_DIR, "apps", "sntp", "sntp.c")))
+# NOTHING HERE FOR LWIP EITHER. It is libraries/lwip, pruned on its own branch
+# to exactly what a NO_SYS=1 Ethernet port compiles -- api/, ppp, SLIP, 6LoWPAN
+# and every app but SNTP and mDNS are gone from that branch rather than left to
+# their #if guards, because arduino-cli compiles a library's src/ recursively
+# and cannot be told to skip a directory.
 
 # NOTHING HERE FOR MBEDTLS. It is libraries/mbedtls, found by the dependency
 # finder, built with the same flags as everything else -- its 109 sources

@@ -1,7 +1,11 @@
 /* Only built when the board asks for networking. This file lives in cores/,
  * so without the guard it would compile for every sketch -- including ones
  * built without lwIP on the include path. */
-#ifdef CH32H4_ETHERNET
+/* This file used to be wrapped in an ifdef on a build define, because it
+   lived in cores/ch32h4 and was compiled into every sketch whether or not it
+   had a network. It lives in libraries/lwIP_Ethernet now, so it is compiled
+   only for sketches that included LwipEthernet -- which is what the guard was
+   simulating, done by the build system instead of the preprocessor. */
 
 #include <errno.h>
 
@@ -851,5 +855,3 @@ int eth_link_status(eth_t *self) {
     }
     return self->link_up ? 1 : 0;
 }
-
-#endif /* CH32H4_ETHERNET */

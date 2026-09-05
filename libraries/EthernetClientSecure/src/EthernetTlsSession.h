@@ -22,6 +22,9 @@
 
 #include "EthernetClient.h"
 
+/* Not for the declarations -- for the dependency resolver. See the header
+   itself: it is the only name arduino-cli can match to find mbedTLS. */
+#include "mbedtls_arduino.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/pk.h"
