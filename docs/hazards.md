@@ -1057,3 +1057,46 @@ test that made flash writes look safe was run with the second core asleep.
 
 **Where.** `cores/ch32h4/ch32h4_flash.c`, `tests/sketches/dualcore/src/main.cpp`,
 `tests/hw/test_dualcore.py`.
+
+---
+
+## Multicast reception never worked, and mDNS is how it showed up
+
+**Symptom.** The mDNS responder announces perfectly — a packet capture shows a
+well-formed `ch32h4.local` A record leaving the board — and answers no query at
+all. Everything on the board reports success: the netif is up, `NETIF_FLAG_IGMP`
+is set, `mdns_resp_add_netif()` and `mdns_resp_add_service()` both return OK.
+
+**Cause, and there were two.**
+
+The MAC was configured `ETH_MulticastFramesFilter_Perfect`, which compares
+against the MAC address registers. Those hold this interface's own address and
+nothing else, so *every* multicast frame was dropped in hardware. mDNS lives on
+01:00:5E:00:00:FB. The queries never reached lwIP.
+
+And `NETIF_FLAG_IGMP` was set without an `igmp_mac_filter` callback, so even
+with a hash filter lwIP had no way to tell the hardware which groups to accept.
+The flag says "this interface can do multicast"; the callback is what makes it
+true.
+
+**The bit that cost an afternoon.** With hash filtering enabled and a filter
+callback installed, it still did not work. The hash bin is *not* the top six
+bits of the CRC32 of the destination MAC, which is the obvious reading of every
+datasheet that says "the upper 6 bits of the CRC". It is the top six bits of the
+**bit-reversed** CRC — what Linux's stmmac driver and ST's HAL both compute.
+
+For 01:00:5E:00:00:FB the naive formula gives bin 30 and the hardware wants bin
+48. Found by opening every bin (`MACHTHR = MACHTLR = 0xFFFFFFFF`), watching mDNS
+start answering, then setting one bin at a time until it answered again.
+
+**Fix.** `ETH_MulticastFramesFilter_HashTable`, an `eth_igmp_filter()` installed
+with `netif_set_igmp_mac_filter()`, and the reversed-CRC index. The bins are
+reference-counted, because several groups can hash to one bin and leaving one
+group must not deafen the interface to another that collided with it.
+
+**What else this was breaking.** Anything multicast: SSDP, mDNS, and any
+sketch joining a group with `igmp_joingroup()`. Nothing tested multicast
+reception before, which is why a driver that could not receive it at all
+passed everything.
+
+**Where.** `libraries/lwIP_Ethernet/src/ch32h4_eth.c`.

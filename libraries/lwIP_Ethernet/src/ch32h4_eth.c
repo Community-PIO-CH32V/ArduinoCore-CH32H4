@@ -51,6 +51,7 @@ const char *ch32h4_eth_hostname = "ch32h417";
 #include "lwip/etharp.h"
 #include "lwip/init.h"
 #include "lwip/netif.h"
+#include "lwip/igmp.h"
 #include "netif/ethernet.h"
 
 
@@ -288,7 +289,18 @@ static int eth_mac_init(eth_t *self) {
 
     ETH->MACFFR = ETH_ReceiveAll_Disable | ETH_PromiscuousMode_Disable
         | ETH_BroadcastFramesReception_Enable
-        | ETH_MulticastFramesFilter_Perfect
+        /* Hash table, not perfect matching.
+         *
+         * Perfect matching compares against the MAC address registers, which
+         * hold this interface's own address and nothing else -- so every
+         * multicast frame was dropped by the hardware. mDNS lives on
+         * 01:00:5E:00:00:FB, which is how the responder could announce
+         * perfectly and answer no query at all: it never saw one.
+         *
+         * The hash table is 64 bins indexed by the top six bits of the CRC32
+         * of the destination MAC. eth_igmp_filter() below maintains it as lwIP
+         * joins and leaves groups. */
+        | ETH_MulticastFramesFilter_HashTable
         | ETH_UnicastFramesFilter_Perfect
         | ETH_PassControlFrames_BlockAll
         | ETH_DestinationAddrFilter_Normal
@@ -722,6 +734,95 @@ static err_t eth_netif_init(struct netif *netif) {
 /******************************************************************************/
 // Public interface
 
+/* ---- multicast filtering ------------------------------------------------
+ *
+ * The MAC filters multicast through a 64-bin hash table: bin = the top six
+ * bits of the CRC32 of the destination address. Several groups can land in one
+ * bin, so a bin is only cleared when the last group in it has gone -- hence
+ * the counts. Without them, leaving one group would deafen the interface to
+ * another that happened to collide.
+ *
+ * lwIP calls this on IGMP join and leave, because netif_add() below installs
+ * it and sets NETIF_FLAG_IGMP. That flag was already set; the callback was
+ * not, so nothing ever reached the hardware.
+ */
+static uint8_t s_hash_count[64];
+
+static uint32_t eth_crc32(const uint8_t *data, size_t len) {
+    /* The standard Ethernet CRC32, which is what the MAC computes. */
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int b = 0; b < 8; b++) {
+            crc = (crc & 1u) ? ((crc >> 1) ^ 0xEDB88320u) : (crc >> 1);
+        }
+    }
+    return ~crc;
+}
+
+static void eth_hash_apply(void) {
+    uint32_t low = 0, high = 0;
+    for (int i = 0; i < 64; i++) {
+        if (s_hash_count[i] == 0u) {
+            continue;
+        }
+        if (i < 32) {
+            low |= (1u << i);
+        } else {
+            high |= (1u << (i - 32));
+        }
+    }
+    ETH->MACHTLR = low;
+    ETH->MACHTHR = high;
+}
+
+static err_t eth_igmp_filter(struct netif *netif, const ip4_addr_t *group,
+                             enum netif_mac_filter_action action) {
+    (void)netif;
+
+    /* The IPv4-to-Ethernet multicast mapping: 01:00:5E, then the low 23 bits
+     * of the address. Two groups differing only in bit 23 share a MAC, which
+     * is normal and is why software still filters afterwards. */
+    const uint32_t g = ip4_addr_get_u32(group);
+    uint8_t mac[6];
+    mac[0] = 0x01;
+    mac[1] = 0x00;
+    mac[2] = 0x5E;
+    mac[3] = (uint8_t)((g >> 8) & 0x7F);
+    mac[4] = (uint8_t)((g >> 16) & 0xFF);
+    mac[5] = (uint8_t)((g >> 24) & 0xFF);
+
+    /* The bin is the top six bits of the BIT-REVERSED CRC, which is not the
+     * same as the top six bits of the CRC and was worth an afternoon.
+     *
+     * Taking (crc >> 26) directly -- the obvious reading of every datasheet
+     * that says "the upper 6 bits of the CRC" -- puts 01:00:5E:00:00:FB in bin
+     * 30. The hardware wants bin 48. Linux stmmac and ST HAL both reverse
+     * first, and this MAC agrees with them; verified on hardware by setting
+     * one bin at a time and seeing which one made mDNS answer. */
+    uint32_t crc = eth_crc32(mac, sizeof(mac));
+    uint32_t rev = 0;
+    for (int i = 0; i < 32; i++) {
+        rev = (rev << 1) | ((crc >> i) & 1u);
+    }
+    const uint32_t bin = (rev >> 26) & 0x3Fu;
+
+    if (action == NETIF_ADD_MAC_FILTER) {
+        if (s_hash_count[bin] < 255u) {
+            s_hash_count[bin]++;
+        }
+    } else if (action == NETIF_DEL_MAC_FILTER) {
+        if (s_hash_count[bin] > 0u) {
+            s_hash_count[bin]--;
+        }
+    } else {
+        return ERR_ARG;
+    }
+
+    eth_hash_apply();
+    return ERR_OK;
+}
+
 int eth_init(eth_t *self) {
     if (self->netif.input != NULL) {
         return 0;  // already initialised
@@ -753,6 +854,12 @@ int eth_init(eth_t *self) {
      * eth_init(); the default is what shows up in a router's client list. */
     netif_set_hostname(&self->netif, ch32h4_eth_hostname);
     netif_set_default(&self->netif);
+
+    /* Multicast reception. NETIF_FLAG_IGMP says the interface can do it; this
+     * is what actually programs the hardware when lwIP joins a group. Setting
+     * the flag without this is what made mDNS announce correctly and answer
+     * nothing -- the queries never got past the MAC. */
+    netif_set_igmp_mac_filter(&self->netif, eth_igmp_filter);
 
     NVIC_SetPriority(ETH_IRQn, 1);
     NVIC_EnableIRQ(ETH_IRQn);
@@ -800,6 +907,7 @@ int eth_stop(eth_t *self) {
 bool eth_is_active(eth_t *self) {
     return self->active;
 }
+
 
 struct netif *eth_netif(eth_t *self) {
     return &self->netif;
