@@ -1178,15 +1178,21 @@ advertised escape hatch needed the probe it had locked out.
 with it, the probe attaches to a fault-guarded board and can dump all 182 KB of
 flash, which was impossible before.
 
-**`wlink status` is not a liveness test.** It reported "Probe is not attached
-to an MCU, or debug is not enabled" on a board `openocd` attached to in the
-same minute, finding both harts and examining the target successfully. Believing
-it cost several unnecessary NRST-and-erase rescues of a perfectly healthy part.
-Check with `openocd -c init` before concluding anything is wrong.
+**Use the right wlink: `tools/bin/wlink.exe`, 0.1.2.** PlatformIO's
+`packages/tool-wlink/wlink.exe` is **0.1.1**, which reports "Probe is not
+attached to an MCU, or debug is not enabled" on this part regardless of how
+healthy it is. `tests/hw/conftest.py` has said so since the harness was
+written, and pins 0.1.2 for exactly this reason.
 
-**But wlink is still the right tool to PROGRAM with.** It has explicit
-CH32H417 support and writes the whole flash; openocd fails to program the
-higher flash addresses, which is why the hardware test harness uses wlink and
-should keep doing so. That was established the hard way in the MicroPython and
-libhal work before this core existed. `wlink --chip` not listing CH32H417 says
-nothing about this — do not infer from it, as was done here.
+Believing 0.1.1 cost four NRST-and-erase rescues of a board that was fine —
+`openocd` attached to it and examined both harts in the same minute — and
+produced a confident but wrong story about wlink lacking CH32H417 support,
+inferred from CH32H417 not appearing in `wlink --chip`. It does support it:
+`Community-PIO-CH32V/wlink` is a fork carrying that support, and the Boards
+Manager index ships it.
+
+**wlink is the right tool to PROGRAM with**, and openocd is not: openocd fails
+to program the higher flash addresses, which is why the hardware harness uses
+wlink. That was established the hard way in the MicroPython and libhal work
+before this core existed. openocd is fine for *attaching* — which is what makes
+it a good second opinion when wlink says nothing is there.
