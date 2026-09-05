@@ -202,3 +202,44 @@ def test_without_the_mutex_the_same_test_fails(dualcore_board):
     assert int(d["x_tears"]) > 0, (
         "two cores wrote one object with no lock and nothing tore -- this "
         "test can no longer tell a working mutex from an absent one", d)
+
+
+def test_flash_writes_are_safe_while_the_other_core_runs(dualcore_board):
+    """The one that used to hang the board, and cost a bench rescue.
+
+    A page program does not complete while the V3F is fetching from the array
+    being written -- it has no instruction cache, unlike the V5F, so every
+    instruction it executes comes from the flash the other core is busy with.
+    Erasing is fine; programming is not.
+
+    The flash driver now parks the other core for the duration, through an IPC
+    interrupt whose handler spins in ITCM. `fs_parked=0` below says the SKETCH
+    did not park anything -- if this passes, the driver did it unasked, which
+    is the whole point: LittleFS and EEPROM get it without knowing it exists.
+    """
+    d = _kv(dualcore_board.command("flash write1", timeout=20.0))
+    assert d["fs_parked"] == "0", ("the sketch should not be parking here -- "
+                                   "the driver should", d)
+    assert d["fs_ok"] == "1", d
+    assert d["fs_verify_bad"] == "0", d
+    assert d["fs_v3f_fault"] == "0x0", d
+
+
+def test_a_large_flash_write_is_safe_while_the_other_core_runs(dualcore_board):
+    """128 KB of it -- an OTA-sized image, erased, programmed and read back,
+    with loop1() running throughout. Sixteen page erases and 512 page
+    programs, any one of which used to be enough to hang the part."""
+    d = _kv(dualcore_board.command("flash big", timeout=30.0))
+    assert d["fs_parked"] == "0", d
+    assert d["fs_ok"] == "1", d
+    assert d["fs_verify_bad"] == "0", d
+    assert d["fs_v3f_fault"] == "0x0", d
+
+
+def test_the_other_core_survives_the_flash_write(dualcore_board):
+    """Parked is not the same as dead. The V3F has to come back and keep
+    running loop1() afterwards, or the fix has traded a hang for a stall."""
+    dualcore_board.command("flash big", timeout=30.0)
+    d = _kv(dualcore_board.command("core1alive", timeout=6.0))
+    assert d["core1_iterations_moved"] == "1", d
+    assert int(d["core1_delta"]) > 100, d

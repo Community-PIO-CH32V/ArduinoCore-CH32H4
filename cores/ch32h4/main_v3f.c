@@ -7,6 +7,7 @@
 #include "ch32h4_console.h"
 #include "ch32h4_fault.h"
 #include "ch32h4_xcore.h"
+#include "ch32h4_park.h"
 #include "ch32h417.h"
 
 /* NVIC_WakeUp_V5F() masks the address with ~0x3FF and does not complain, so an
@@ -292,10 +293,20 @@ void ch32h4_v3f_main(void) {
         ch32h4_console_puts("V3F: running setup1/loop1\n");
         ch32h4_console_flush();
 
+        /* From here this core is executing sketch code out of flash, so
+           anything writing flash has to park it first. Said before setup1()
+           runs, because setup1() may write flash itself. */
+        ch32h4_park_live_here();
+
         if (setup1) {
             setup1();
         }
         for (;;) {
+            /* Once per iteration. yield() has the same check, so a loop1()
+               that delays parks promptly; one that spins without returning or
+               yielding does not, and ch32h4_park_other() reports that rather
+               than letting the write hang. */
+            ch32h4_park_check();
             if (loop1) {
                 loop1();
             }

@@ -2,6 +2,7 @@
 
 #include "Arduino.h"
 #include "ch32h4_itcm.h"
+#include "ch32h4_park.h"
 
 #include <string.h>
 
@@ -36,6 +37,14 @@ bool ch32h4_flash_is_erased(uint32_t addr, uint32_t len) {
     return true;
 }
 
+/* How long to wait for the other core to park.
+ *
+ * It parks from its main loop and from yield(), so a loop1() that returns or
+ * delays is in within a millisecond or two. A hundred is generous enough to
+ * cover a slow iteration and short enough that a sketch which is never going
+ * to park gets its answer rather than waiting. */
+#define PARK_TIMEOUT_MS  100u
+
 bool ch32h4_flash_erase(uint32_t addr, uint32_t len) {
     const uint32_t page = ch32h4_flash_page_size();
 
@@ -47,15 +56,25 @@ bool ch32h4_flash_erase(uint32_t addr, uint32_t len) {
         return false;
     }
 
+    /* The other core must not be fetching from flash while this runs. See
+     * ch32h4_park.c: a page program with the V3F running does not complete,
+     * and the board hangs. Refusing is the only safe answer when it will not
+     * park -- a caller gets a failed write it can see. */
+    if (!ch32h4_park_other(PARK_TIMEOUT_MS)) {
+        return false;
+    }
+
     FLASH_Unlock();
+    bool ok = true;
     for (uint32_t off = 0; off < len; off += page) {
         if (FLASH_ErasePage(addr + off) != FLASH_COMPLETE) {
-            FLASH_Lock();
-            return false;
+            ok = false;
+            break;
         }
     }
     FLASH_Lock();
-    return true;
+    ch32h4_unpark_other();
+    return ok;
 }
 
 /* ---- programming ---------------------------------------------------------
@@ -223,6 +242,15 @@ bool ch32h4_flash_write(uint32_t addr, const void *src, uint32_t len) {
     uint32_t page[CH32H4_FLASH_PROG_PAGE / 4u];
     const uint8_t *s = (const uint8_t *)src;
 
+    /* The other core must not be fetching from flash while this runs -- a page
+     * program does not complete if it is, and the board hangs. Parked ONCE
+     * around the whole write rather than per page: the other core is stopped
+     * either way, and per page would multiply the handshake by the page
+     * count. */
+    if (!ch32h4_park_other(PARK_TIMEOUT_MS)) {
+        return false;
+    }
+
     bool ok = true;
     flash_unlock_fast();
     for (uint32_t off = 0; ok && off < len; off += CH32H4_FLASH_PROG_PAGE) {
@@ -233,6 +261,7 @@ bool ch32h4_flash_write(uint32_t addr, const void *src, uint32_t len) {
      * cleared: an unlocked flash controller is a debug probe that cannot
      * connect. */
     flash_lock_fast();
+    ch32h4_unpark_other();
     if (!ok) {
         return false;
     }

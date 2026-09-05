@@ -44,7 +44,30 @@ _vector_base_v3f:
     .word   0
     .word   NMI_Handler_v3f
     .word   HardFault_Handler_v3f
-    .rept   60
+
+    /* Slots 4..17: nothing this core has been given a use for yet. The slot
+       index IS the IRQ number, the same as the V5F's table next door, so a
+       handler added here has to go in the right place. */
+    .rept   14
+    .word   Stray_IRQ_v3f
+    .endr
+
+    /* 18, 19: the IPC channels. This core parks itself in CH2's handler while
+       the other one writes flash -- a page program does not complete while
+       this core is fetching from the array being written, and this core has
+       no instruction cache to hide behind. See cores/ch32h4/ch32h4_park.c.
+
+       An interrupt rather than a flag loop1() has to notice, because loop1()
+       is the sketch's and may never look at anything.
+
+       THIS TABLE IS IN SRAM -- V3F_VECTOR, not flash -- so taking the
+       interrupt does not itself need a flash read. That is what makes the
+       whole arrangement possible. */
+    .word   IPC_CH2_Handler_v3f
+    .word   IPC_CH3_Handler_v3f
+
+    /* 20..63. */
+    .rept   44
     .word   Stray_IRQ_v3f
     .endr
 
@@ -53,9 +76,15 @@ _vector_base_v3f:
     .weak   NMI_Handler_v3f
     .weak   HardFault_Handler_v3f
     .weak   Stray_IRQ_v3f
+    /* Weak, so a build with no parking still links: they fall through to the
+       stray handler, which records and resets. */
+    .weak   IPC_CH2_Handler_v3f
+    .weak   IPC_CH3_Handler_v3f
     .align  2
 NMI_Handler_v3f:
 HardFault_Handler_v3f:
+IPC_CH2_Handler_v3f:
+IPC_CH3_Handler_v3f:
 Stray_IRQ_v3f:
     /* Record and reset. Nothing is printed here: this core may be mid-line on
      * the shared UART, or the V5F may own it, so a print would produce

@@ -1,5 +1,10 @@
 #include "Arduino.h"
 #include "ch32h4_xcore.h"
+#include "ch32h4_park.h"
+
+extern volatile uint32_t ch32h4_park_req[2];
+extern volatile uint32_t ch32h4_park_ack[2];
+extern volatile uint32_t ch32h4_park_live[2];
 
 /* One ring per direction. Named for the core that READS them, because that is
  * what the code below has to reason about: this core pops from its own and
@@ -36,6 +41,13 @@ void ch32h4_xcore_init(void) {
         s_mutex_depth[i][0] = 0;
         s_mutex_depth[i][1] = 0;
     }
+
+    /* And the core-parking flags, for the third time in this function and the
+     * same reason. A stale request parks a core at boot before anything asks;
+     * a stale "live" makes a flash write wait for a core that is asleep. */
+    ch32h4_park_req[0] = ch32h4_park_req[1] = 0;
+    ch32h4_park_ack[0] = ch32h4_park_ack[1] = 0;
+    ch32h4_park_live[0] = ch32h4_park_live[1] = 0;
 }
 
 bool ch32h4_mutex_try_lock_rec(uint8_t id) {

@@ -29,8 +29,14 @@ extern "C" void ch32h4_ticker_update(void) __attribute__((weak));
 extern "C" void ch32h4_net_update(void) __attribute__((weak));
 
 extern "C" {
+#include "ch32h4_park.h"
 
 void yield(void) {
+    /* Park if the other core is about to write flash. First, and on both
+       cores: a core that reaches yield() and then goes off to run the network
+       stack is a core still fetching from flash. */
+    ch32h4_park_check();
+
 #ifdef CH32H4_USB
     /* The USB stack belongs to the V5F. loop1() on the V3F calls delay(),
      * which calls yield(), and letting that reach tud_task() would put two
