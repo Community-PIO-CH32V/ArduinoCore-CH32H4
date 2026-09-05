@@ -441,11 +441,9 @@ def tls_board():
 def tls_server_board():
     """The sketch that SERVES HTTPS, rather than fetching it.
 
-    A separate image from tlstest for a reason beyond flash: it is built with
-    board_build.tls = mbedtls-server, which is what compiles MBEDTLS_SSL_SRV_C
-    in. The two builds are the thing being distinguished -- a server that
-    accidentally worked in the client-only build would mean the option does
-    nothing.
+    A separate image from tlstest because it is a different sketch, not a
+    different build: mbedTLS is compiled with both halves now, so the two
+    differ only in what they do with it.
     """
     if serial is None:
         pytest.skip("pyserial is not installed")

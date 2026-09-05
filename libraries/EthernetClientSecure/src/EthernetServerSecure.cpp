@@ -1,22 +1,3 @@
-/* THE WHOLE FILE IS CONDITIONAL, and the guard has to come before the include.
- *
- * Both PlatformIO's dependency finder and arduino-cli compile every source in
- * a library a sketch used, not only the ones it included. So a sketch that
- * only wants EthernetClientSecure -- the TLS client -- still gets this file
- * compiled, and without the server build that means the #error in the header
- * fires for a sketch that never asked for a server.
- *
- * Guarding on CH32H4_TLS_SERVER rather than MBEDTLS_SSL_SRV_C is deliberate:
- * the latter is only defined once the mbedtls config has been included, and
- * including it is exactly what must not happen here. The two say the same
- * thing -- CH32H4_TLS_SERVER is what makes MBEDTLS_SSL_SRV_C survive the
- * config header.
- *
- * A sketch that DOES include EthernetServerSecure.h without the option still
- * gets the header's #error, which is the case worth reporting.
- */
-#if defined(CH32H4_TLS_SERVER)
-
 #include "EthernetServerSecure.h"
 
 extern "C" {
@@ -99,5 +80,3 @@ String EthernetServerSecure::lastVerifyErrorString() const {
     }
     return s;
 }
-
-#endif  /* CH32H4_TLS_SERVER */

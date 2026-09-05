@@ -86,26 +86,26 @@ def _defines(elf: pathlib.Path, symbol: str) -> bool:
     return False
 
 
-def test_the_tls_server_option_is_what_decides():
-    """board_build.tls = mbedtls-server has to actually change the image.
+def test_board_build_tls_gives_you_both_halves():
+    """board_build.tls = mbedtls means client AND server.
 
-    The server half of mbedtls is about 45 KB, which is the whole reason it is
-    a build option rather than always on. An option that quietly did nothing
-    would look identical from every other angle: the client build would still
-    work, the server build would still work, and every sketch would pay.
+    It meant client-only for a while, with the server behind a second value.
+    That was dropped after measuring what the second value was worth: 29,900
+    bytes of flash, no RAM, and unremovable by --gc-sections or LTO, because
+    mbedtls_ssl_handshake_step() chooses between the two state machines with a
+    run-time test on ssl->conf->endpoint -- from a function the client calls,
+    so the server side is reachable and stays.
 
-    mbedtls_ssl_handshake_server_step is the entry point to the server-side
-    state machine and exists in no other configuration, so its presence is the
-    option, observed rather than assumed.
+    mbedtls_ssl_handshake_server_step is the entry point to that state machine.
+    Asserting it is in BOTH images is what says the fold actually happened:
+    tlstest asks only for a client and gets a server too.
     """
-    client_only = SKETCHES / "tlstest/.pio/build/ch32h417/firmware.elf"
-    with_server = SKETCHES / "tlsserver/.pio/build/ch32h417/firmware.elf"
     symbol = "mbedtls_ssl_handshake_server_step"
-    assert not _defines(client_only, symbol), \
-        "tlstest is built with board_build.tls = mbedtls and should have no " \
-        "server handshake in it at all"
-    assert _defines(with_server, symbol), \
-        "tlsserver is built with board_build.tls = mbedtls-server and must have it"
+    for sketch in ("tlstest", "tlsserver"):
+        elf = SKETCHES / sketch / ".pio/build/ch32h417/firmware.elf"
+        assert _defines(elf, symbol), \
+            "%s should carry the server handshake -- board_build.tls = mbedtls " \
+            "is supposed to give you both halves now" % sketch
 
 
 OBJDUMP = (pathlib.Path.home()

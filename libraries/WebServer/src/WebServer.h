@@ -44,5 +44,5 @@
    HTTPS is WebServerSecure.h, deliberately a separate header: including it is
    what drags in mbedTLS, and a sketch serving plain HTTP should not pay a
    quarter of a megabyte of flash for a stack it never calls. It needs
-   board_build.tls = mbedtls-server. */
+   board_build.tls = mbedtls, the same setting the TLS client uses. */
 using WebServer = WebServerTemplate<EthernetServer>;

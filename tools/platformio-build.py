@@ -135,12 +135,6 @@ net_enabled = network == "ethernet"
 # no idea what a socket is. It is refused without it because a TLS stack with
 # nothing to talk to is a quarter of a megabyte of flash doing nothing, and
 # almost certainly a typo in the sketch's configuration.
-#
-# The server half of mbedtls is a further step up -- the handshake state
-# machine, the session cache and the certificate-request paths are only
-# reachable from a server, and a sketch that just fetches HTTPS should not
-# carry them. board_build.tls = mbedtls-server turns it on; that is what
-# EthernetServerSecure and WebServerSecure need.
 # Link-time optimization.
 #
 # On by default. The whole image is one compilation unit as far as the
@@ -160,13 +154,20 @@ if lto not in ("enabled", "disabled"):
     env.Exit(1)
 lto_enabled = lto == "enabled"
 
+#
+# Client AND server, from the one setting. The server half was a separate value
+# until it was measured: 29,900 bytes of flash, not one byte of RAM, and not
+# collectable -- see the note in ch32h4_mbedtls_config.h for why neither
+# --gc-sections nor LTO can drop it. 29 KB is 3% of the sketch region and only
+# paid by sketches that already asked for a 250 KB TLS stack, which is not
+# worth a build-option axis. "mbedtls-server" is still accepted as an alias so
+# configurations written against the old spelling keep working.
 tls = str(board.get("build.tls", "none")).lower()
 if tls not in ("mbedtls", "mbedtls-server", "none"):
-    sys.stderr.write("Error: board_build.tls must be 'mbedtls',"
-                     " 'mbedtls-server' or 'none', got %r\n" % tls)
+    sys.stderr.write("Error: board_build.tls must be 'mbedtls' or 'none',"
+                     " got %r\n" % tls)
     env.Exit(1)
 tls_enabled = tls in ("mbedtls", "mbedtls-server")
-tls_server = tls == "mbedtls-server"
 if tls_enabled and not net_enabled:
     sys.stderr.write("Error: board_build.tls = %s needs"
                      " board_build.network = ethernet\n" % tls)
@@ -579,12 +580,6 @@ if tls_enabled:
         ("MBEDTLS_CONFIG_FILE", r'\"ch32h4_mbedtls_config.h\"'),
         "CH32H4_TLS",
     ])
-    # Must reach the mbedtls sources and the sketch alike: it decides whether
-    # MBEDTLS_SSL_SRV_C survives the config header, and a sketch compiled with
-    # a different answer than the library sees a different mbedtls_ssl_context
-    # layout -- a corrupted context at runtime rather than a compile error.
-    if tls_server:
-        env.Append(CPPDEFINES=["CH32H4_TLS_SERVER"])
     mbedtls_env = env.Clone()
     mbedtls_env.Append(CCFLAGS=["-w"])
     libs.append(mbedtls_env.BuildLibrary(

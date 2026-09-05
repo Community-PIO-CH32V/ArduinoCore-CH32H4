@@ -4514,17 +4514,29 @@
  * does not need the legacy key exchanges, and each one is flash and RAM that a
  * sketch fetching an HTTPS endpoint would otherwise pay for. */
 
-/* The server half is a build option, because it is not small: the handshake
- * state machine, the session cache and the certificate-request paths are only
- * reachable from it. A sketch that only fetches HTTPS should not carry them.
+/* MBEDTLS_SSL_SRV_C IS LEFT ON, and it was a build option until it was
+ * measured.
  *
- * Turned on by board_build.tls = mbedtls-server, or the IDE's TLS menu, both
- * of which define CH32H4_TLS_SERVER. EthernetServerSecure and WebServerSecure
- * exist only in that build; the #error in EthernetServerSecure.h says so
- * rather than letting it fail as an undefined reference at link time. */
-#ifndef CH32H4_TLS_SERVER
-#undef MBEDTLS_SSL_SRV_C
-#endif
+ * It costs 29,900 bytes of flash and not one byte of RAM -- the same TLS client
+ * sketch built both ways, with -flto and --gc-sections both on. It cannot be
+ * collected, and the reason is worth knowing before anyone tries again:
+ * ssl_tls.c's mbedtls_ssl_handshake_step() dispatches on
+ * `ssl->conf->endpoint == MBEDTLS_SSL_IS_SERVER` at RUN time, from a function
+ * the client calls too. So the server state machine is a live, direct call
+ * from a function that is definitely linked. --gc-sections works on
+ * reachability and it is reachable; LTO would have to prove that nothing
+ * anywhere in the program ever stores MBEDTLS_SSL_IS_SERVER into that field,
+ * which is written at run time through one pointer and read back through
+ * another, and it does not.
+ *
+ * 29 KB is 3% of the sketch region, paid only by sketches that already asked
+ * for a 250 KB TLS stack. Against that: a build-option axis to document in
+ * three places, a conditionally-empty translation unit, and a compile error as
+ * the way people discover that serving HTTPS is possible. The 29 KB is the
+ * better deal.
+ *
+ * board_build.tls = mbedtls-server is still accepted, as an alias, so
+ * configurations written against the old spelling keep working. */
 
 #undef MBEDTLS_SSL_PROTO_DTLS
 #undef MBEDTLS_SSL_DTLS_ANTI_REPLAY

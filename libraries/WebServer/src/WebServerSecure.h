@@ -38,6 +38,9 @@
  * This is a separate header from WebServer.h on purpose. Including it is what
  * pulls in mbedTLS -- a quarter of a megabyte of flash -- so a sketch that
  * only wants HTTP never pays for it.
+ *
+ * It needs board_build.tls = mbedtls, the same setting EthernetClientSecure
+ * uses -- one mbedTLS build serves both directions.
  */
 #pragma once
 

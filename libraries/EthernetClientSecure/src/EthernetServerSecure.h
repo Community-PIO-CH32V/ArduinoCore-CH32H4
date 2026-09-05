@@ -32,10 +32,6 @@
 #include "EthernetClientSecure.h"
 #include "EthernetServer.h"
 
-#if !defined(MBEDTLS_SSL_SRV_C)
-#error "EthernetServerSecure needs the server half of mbedTLS, which is a build option: set board_build.tls = mbedtls-server. The default, board_build.tls = mbedtls, is the client only -- without MBEDTLS_SSL_SRV_C mbedtls has no server handshake at all, and this would otherwise fail at link time with an unhelpful message about mbedtls_ssl_handshake_server_step."
-#endif
-
 class EthernetServerSecure : public arduino::Server {
 public:
     /* What WebServerTemplate asks a server for. */

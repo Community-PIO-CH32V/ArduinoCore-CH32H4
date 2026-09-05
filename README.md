@@ -179,15 +179,21 @@ want neither:
 
 ```ini
 board_build.network = ethernet
-board_build.tls = mbedtls          ; a TLS client
-board_build.tls = mbedtls-server   ; a client and a server
+board_build.tls = mbedtls
 ```
 
-`mbedtls` is about 250 KB of flash. `mbedtls-server` adds another 45 KB for the
-server-side handshake, which is why it is separate: a sketch that only fetches
-an HTTPS endpoint should not carry a state machine it never enters.
-`EthernetServerSecure` and `WebServerSecure` exist only in that build, and say
-so with a `#error` rather than an undefined reference.
+`mbedtls` is about 250 KB of flash and gives you both directions —
+`EthernetClientSecure` and `HTTPClient` for fetching, `EthernetServerSecure`
+and `WebServerSecure` for serving.
+
+The server half was a separate setting for a while, on the theory that a sketch
+fetching an HTTPS endpoint should not carry a handshake it never enters. It was
+measured instead: 29,900 bytes of flash and no RAM, and neither `--gc-sections`
+nor LTO can remove it, because `mbedtls_ssl_handshake_step()` picks between the
+client and server state machines with a **run-time** test on
+`ssl->conf->endpoint`, from a function the client calls too. 29 KB was not
+worth a second setting to get wrong. `mbedtls-server` is still accepted as an
+alias.
 
 One thing that catches people, and is not a bug in the library: **a board
 cannot connect to its own address.** lwIP here is built without
