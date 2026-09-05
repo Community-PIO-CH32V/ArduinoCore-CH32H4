@@ -582,6 +582,14 @@ SECTIONS
     _FS_end   = _EEPROM_start;
     _FS_start = _FS_end - __fs_size;
 
+    /* The sketch region, named so that nothing has to hardcode 0x08008000.
+       An over-the-air update erases exactly this and no more: below it is the
+       V3F stub that brings the part up, above it the filesystem and the
+       EEPROM, and an updater that ran past either end would take out the boot
+       code or the user's stored settings. */
+    _sketch_start = _flash_physical_base + ORIGIN(FLASH_V5F);
+    _sketch_end   = _FS_start;
+
     /DISCARD/ : {
         *(.note.*)
         *(.comment)

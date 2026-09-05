@@ -228,7 +228,11 @@ void ch32h4_v3f_main(void) {
         ch32h4_console_puts(" vs ");
         ch32h4_console_puthex((uint32_t)CH32_V5F_START_ADDR);
         ch32h4_console_puts(")\n");
+        /* __WFI() for the same reason as the guard below: a tight spin here
+           would wedge the debug probe on the one failure this core can still
+           report, leaving no way to flash the fix. */
         for (;;) {
+            __WFI();
         }
     }
 
@@ -256,7 +260,21 @@ void ch32h4_v3f_main(void) {
         /* Two resets clears it: this store lands before the next boot
          * reads it, so a plain reset here is the escape hatch. */
         ch32h4_fault_log.boot_faults = 0;
+        /* __WFI(), NOT a bare `for (;;) {}`.
+         *
+         * A core spinning at full clock wedges the WCH-Link with a 0x55
+         * protocol error, and the probe then cannot attach at all. That turns
+         * this guard into the exact opposite of its purpose: it exists to keep
+         * a board whose V5F keeps faulting reachable and reflashable, and a
+         * tight spin here makes it unreachable -- with an escape hatch ("reset
+         * twice") that needs the very probe it locked out. It cost four bench
+         * rescues before the loop, rather than the crash, was recognised as
+         * what made the board unreachable.
+         *
+         * ch32h4_fault_dump() carries the same warning, which is why the fault
+         * handler resets instead of looping. It applies here just as much. */
         for (;;) {
+            __WFI();
         }
     }
 

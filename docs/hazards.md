@@ -1100,3 +1100,85 @@ reception before, which is why a driver that could not receive it at all
 passed everything.
 
 **Where.** `libraries/lwIP_Ethernet/src/ch32h4_eth.c`.
+
+## Next-line branch prediction makes the V5F execute the wrong code
+
+**Symptom.** A wild pointer deep inside lwIP, on every boot, at the same
+address — but only for some builds. Any unrelated change moves it or makes it
+disappear: a compiler flag, an added string, enabling an assert. It was first
+found as "`-mno-save-restore` stops the board booting", which is not what it is.
+
+```
+=== TRAP ===
+mcause=0x00000004 mepc=0x0000eeea mtval=0xe339e345
+sp=0x200def70 ra=0x0000ee5a a0=0x000cf050 a1=0x0000eea2
+```
+
+**Cause.** `corecfgr` (CSR `0xBC0`) bit 15, `NLP_EN`, next-line branch
+prediction. The core mispredicts and resumes execution at an address it was
+never sent to. Measured three ways on one unchanged build:
+
+| I-cache | NLP | result |
+|---|---|---|
+| on | on | faults, deterministically |
+| off | on | runs (NLP does nothing without the cache) |
+| on | off | runs, at full cached speed |
+
+The middle row is why this looks like a cache bug and is not one. Disabling the
+cache masks it, because the predictor only feeds a cached fetch path.
+
+**What it actually did.** Execution ran off from the middle of `memp_malloc()`
+into the middle of `memp_free()` — `0xF8` further on, between two
+byte-identical `sh2add` instructions — so lwIP's pool index was computed twice:
+
+```
+edec:  sh2add a0,a0,a5   ; memp_malloc: a0 = &memp_pools[7] = 0x2967C
+                         ;   ...execution resumes here...
+eee4:  sh2add a0,a0,a5   ; memp_free:   a0 = memp_pools + 0x2967C*4 = 0xCF050
+eee8:  lw a5,0(a0)       ; unprogrammed flash -> 0xE339E339
+eeea:  lw a5,12(a5)      ; FAULT
+```
+
+The arithmetic identifies it beyond doubt: `a0 = 5*memp_pools + 112` held in
+every build observed, which is `&memp_pools[7]` fed through `sh2add` a second
+time. The register state is the tell — `ra` belonged to one function and `pc`
+to another, which no legitimate call can produce.
+
+**Fix.** Do not set bit 15. `startup_v5f.S` composes `CORECFGR_V5F` without it;
+`-DCH32H4_V5F_NLP` puts it back for anyone wanting to re-measure. WCH's own
+startup sets it, so either their silicon needs a workaround we do not have or
+the feature is broken on this part. The cache stays on, so the 145x above is
+kept.
+
+**What this cost, and the lesson.** Four bench rescues and a long detour
+through lwIP. Ruled out first, each by measurement rather than argument:
+`MEMP_OVERFLOW_CHECK=2` and `MEM_OVERFLOW_CHECK=2` silent through a 144 KB
+transfer; no ISR touches lwIP; all 31 interrupt handlers correctly attributed;
+`sp` 192 bytes below `_estack_v5f`, so no overflow; the `xw` extension
+innocent; and flash byte-identical to the ELF. **A fault that moves when you
+change something unrelated is not a memory bug — look at the fetch path.**
+The fault record now captures `ra`/`a0`/`a1`, which is what finally cracked it,
+and `-DCH32H4_LWIP_ASSERT_CONSOLE` wires lwIP's asserts to the raw UART.
+
+## A spin loop wedges the debug probe, including the one guarding against crashes
+
+**Symptom.** The board is unreachable: `openocd` reports "WCH-Link failed to
+connect with riscvchip", and only NRST held through a `wlink erase` recovers
+it. Looks exactly like a bricked part.
+
+**Cause.** `main_v3f.c` stopped waking the V5F after
+`CH32H4_FAULT_REBOOT_LIMIT` consecutive faults, printed "reflash, or reset
+twice to try again", and then sat in `for (;;) {}`. A core spinning at full
+clock wedges the WCH-Link — which `ch32h4_fault_dump()` already warned about,
+and is why the fault handler resets rather than looping. So the guard meant to
+keep a faulting board reachable was the thing making it unreachable, and its
+advertised escape hatch needed the probe it had locked out.
+
+**Fix.** `for (;;) { __WFI(); }`, in both of that file's fatal paths. Verified:
+with it, the probe attaches to a fault-guarded board and can dump all 182 KB of
+flash, which was impossible before.
+
+**Do not use `wlink status` to decide whether this board is alive.** wlink has
+no CH32H417 support — its `--chip` list stops at CH32V317 — so it fails
+unconditionally here, on a perfectly healthy part. Flashing goes through
+openocd; use openocd to test liveness.

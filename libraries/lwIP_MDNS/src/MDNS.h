@@ -75,6 +75,17 @@ public:
      * not see one added later, so add them straight after addService(). */
     bool addServiceTxt(int slot, const char *key, const char *value);
 
+    /* Advertise _arduino._tcp, which is what makes the board appear under
+     * Tools -> Port in the Arduino IDE, and what PlatformIO's mDNS scan finds.
+     *
+     * `auth` must say whether ArduinoOTA was given a password: the IDE reads
+     * it back to decide whether to prompt for one, so a board that requires a
+     * password but advertises auth_upload=no gets an upload without one and
+     * rejects it, with nothing on screen explaining why.
+     *
+     * ArduinoOTA::begin() calls this; a sketch rarely needs to. */
+    int enableArduino(uint16_t port, bool auth = false);
+
     /* Nothing to do; the responder runs from lwIP's timers. Here so sketches
      * written for ESP8266mDNS compile unchanged. */
     void update() { }

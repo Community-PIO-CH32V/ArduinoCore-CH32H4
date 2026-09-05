@@ -197,8 +197,41 @@ handle_reset_v5f:
      * Only this core's composed register values are spelled out here. */
 #include "ch32h4_csr.h"
 
+/* NEXT-LINE BRANCH PREDICTION IS OFF, and that is not a tuning choice.
+ *
+ * CORECFGR bit 15 (NLP_EN) makes this core mispredict and resume execution at
+ * an address it was never sent to. Measured, three ways, on one unchanged
+ * build:
+ *
+ *   I-cache on,  NLP on   -> faults, deterministically
+ *   I-cache off, NLP on   -> runs   (NLP does nothing without the cache)
+ *   I-cache on,  NLP off  -> runs, at full cached speed
+ *
+ * The symptom is savage and looks like anything but a predictor. Execution ran
+ * off from the middle of memp_malloc() into the middle of memp_free() -- 0xF8
+ * further on, between two byte-identical `sh2add` instructions -- so lwIP's
+ * pool index was computed twice and the second result indexed hundreds of
+ * kilobytes past the table into unprogrammed flash. It presents as a wild
+ * pointer inside lwIP, with a register state that no legitimate call could
+ * produce (`ra` from one function, `pc` in another).
+ *
+ * IT MOVES WITH CODE LAYOUT, which is what makes it so expensive to chase: any
+ * unrelated change -- a compiler flag, an added string -- moves it or hides it.
+ * It was first found as "-mno-save-restore breaks the board", which it is not.
+ *
+ * WCH's startup sets this bit. Whether their silicon needs a workaround we do
+ * not have, or the feature is simply broken here, is not something this core
+ * can determine; what it can do is not enable it. -DCH32H4_V5F_NLP puts it
+ * back for anyone wanting to re-measure.
+ */
+#ifdef CH32H4_V5F_NLP
+#define CORECFGR_V5F_NLP CORECFGR_NLP_EN
+#else
+#define CORECFGR_V5F_NLP 0
+#endif
+
 #define CORECFGR_V5F (CORECFGR_FADD_DIV | CORECFGR_FMUL_DIV | CORECFGR_FMAC_DIV | \
-                      CORECFGR_FDIV_DIV | CORECFGR_NLP_EN | CORECFGR_WCH_13_12 | \
+                      CORECFGR_FDIV_DIV | CORECFGR_V5F_NLP | CORECFGR_WCH_13_12 | \
                       CORECFGR_WCH_9_8 | CORECFGR_CSTA_FAULT_IE | CORECFGR_WCH_6 | \
                       CORECFGR_IE_REMAP_EN)
 #define INTSYSCR_V5F  (INTSYSCR_PMTCFG_3 | INTSYSCR_INESTEN | INTSYSCR_HWSTKEN)

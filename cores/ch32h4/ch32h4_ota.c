@@ -53,14 +53,20 @@ __itcm_func void ch32h4_ota_commit(uint32_t dest, const uint8_t *image,
     }
 
     for (uint32_t off = 0; off < len; off += CH32H4_OTA_PROG_PAGE) {
-        /* Copied a word at a time rather than through memcpy, which is in
-         * flash. The source is RAM and word-aligned by the caller. */
-        uint32_t page[CH32H4_OTA_PROG_PAGE / 4u];
+        /* STRAIGHT FROM THE STAGING BUFFER, with no bounce buffer in between.
+         *
+         * There used to be one, filled by a word-at-a-time loop, with a comment
+         * saying it was written that way rather than memcpy() because memcpy is
+         * in flash. GCC recognised the loop and turned it back into a call to
+         * memcpy -- a `jalr` from ITCM into the region this function had just
+         * erased. It executed 0xE339E339, and the board needed a probe and a
+         * `wlink erase` to come back.
+         *
+         * The bounce buffer bought nothing: the caller's image is already in
+         * RAM and word-aligned. Not having it is what makes the loop unable to
+         * become a libcall. */
         const uint32_t *src = (const uint32_t *)(const void *)(image + off);
-        for (uint32_t i = 0; i < CH32H4_OTA_PROG_PAGE / 4u; i++) {
-            page[i] = src[i];
-        }
-        if (!ch32h4_flash_ll_program_page(dest + off, page)) {
+        if (!ch32h4_flash_ll_program_page(dest + off, src)) {
             reset_now();
         }
     }

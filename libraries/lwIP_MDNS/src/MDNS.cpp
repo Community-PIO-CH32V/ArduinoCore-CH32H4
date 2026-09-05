@@ -139,4 +139,27 @@ bool MDNSClass::addServiceTxt(int slot, const char *key, const char *value) {
     return true;
 }
 
+/* The Arduino IDE and this core's PlatformIO builder both define this. A
+ * hand-rolled build that does not still has to produce a listable board. */
+#ifndef ARDUINO_BOARD
+#define ARDUINO_BOARD "CH32H4"
+#endif
+
+int MDNSClass::enableArduino(uint16_t port, bool auth) {
+    const int slot = addService("arduino", "tcp", port);
+    if (slot < 0) {
+        return -1;
+    }
+
+    /* The four keys the IDE's port discovery reads. It will list a board that
+     * advertises _arduino._tcp without them, but it decides how to talk to it
+     * from these -- get auth_upload wrong and it uploads without asking for
+     * the password, then the board rejects it. */
+    addServiceTxt(slot, "board", ARDUINO_BOARD);
+    addServiceTxt(slot, "tcp_check", "no");
+    addServiceTxt(slot, "ssh_upload", "no");
+    addServiceTxt(slot, "auth_upload", auth ? "yes" : "no");
+    return slot;
+}
+
 MDNSClass MDNS;

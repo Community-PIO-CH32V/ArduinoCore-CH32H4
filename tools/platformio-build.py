@@ -85,7 +85,29 @@ machine_flags = [
     "-march=%s" % board.get("build.march"),
     "-mabi=%s" % board.get("build.mabi"),
     "-msmall-data-limit=8",
-    "-msave-restore",
+    # NO -msave-restore.
+    #
+    # It moves function prologues and epilogues into libgcc helpers
+    # (__riscv_save_N / __riscv_restore_N) which live in .text, in flash. That
+    # breaks ITCM code that has to keep running while flash is erased: the OTA
+    # committer's primitives got a `jalr` into the erased region in their
+    # PROLOGUES, which is what made the first over-the-air commit fail, and no
+    # amount of care in the source could have prevented it.
+    #
+    # The flag cannot be turned off per-file -- it is per translation unit, and
+    # arduino-cli cannot set per-file flags at all -- so it is off everywhere.
+    # It costs about 5 KB of flash on a 912 KB part.
+    #
+    # Turning it off used to make the board fault on every boot, which is why
+    # it was left on for a while. That was NOT this flag: it was the V5F's
+    # next-line branch predictor, which mispredicts and resumes execution at
+    # the wrong address, and which any change to code layout moves or hides.
+    # See the long note in cores/ch32h4/startup_v5f.S. With the predictor off
+    # this flag is unremarkable again.
+    #
+    # tools/check_itcm.py fails the build if anything in ITCM ever calls out
+    # of it again.
+    "-mno-save-restore",
 ]
 
 # C++ exceptions are a build option, as in arduino-pico and the ESP cores.
@@ -323,6 +345,13 @@ env.Append(
     CPPDEFINES=[
         ("ARDUINO", 10808),
         "ARDUINO_ARCH_CH32H4",
+        # The Arduino IDE defines both of these from boards.txt, and sketches
+        # and libraries use them -- MDNS puts ARDUINO_BOARD in the TXT record
+        # the IDE reads back to identify a network port. PlatformIO does not
+        # set them for us, so a sketch that built under the IDE would fail
+        # here for no reason a user could see.
+        ("ARDUINO_BOARD", '\\"%s\\"' % board.get("build.variant", "CH32H4")),
+        ("ARDUINO_VARIANT", '\\"%s\\"' % board.get("build.variant", "CH32H4")),
         ("F_CPU", board.get("build.f_cpu")),
         ("CH32_V5F_START_ADDR", V5F_START_ADDR),
     ] + (["CH32H4_EXCEPTIONS"] if exceptions else [])
@@ -540,4 +569,86 @@ libs.append(env.BuildLibrary(
 env.Append(_LIBFLAGS=" -lc")
 
 env.Append(LIBS=libs)
+
+
+
+# ---------------------------------------------------------------------------
+# The over-the-air image.
+#
+# firmware.bin is the whole flash image: the V3F stub at 0, then the sketch at
+# CH32_V5F_START_ADDR. A network upload must send only the second half, because
+# the OTA committer writes to the sketch region and nothing else -- see
+# libraries/Updater. Uploading the full binary would put the V3F stub where the
+# sketch belongs; the Updater rejects that, but not sending it is better than
+# being told off for sending it.
+#
+# So the build also drops firmware_ota.bin, which is firmware.bin from
+# CH32_V5F_START_ADDR onwards. `upload_protocol = espota` uploads that one.
+# The V3F half, by section name. objcopy drops these and the lowest remaining
+# LMA is the sketch, so the output starts there with no leading padding. The
+# IDE's platform.txt runs the same list -- one definition of what an OTA image
+# is, in two build systems -- and the size check below is what keeps the list
+# honest if the linker script ever grows another V3F section.
+V3F_SECTIONS = [".v3f_init", ".v3f_vectoralign", ".v3f_vector", ".v3f_text",
+                ".loadcodealign", ".loadcode"]
+
+
+def _make_ota_image(source, target, env):
+    import os
+    import subprocess
+    binpath = env.subst(join("$BUILD_DIR", "${PROGNAME}.bin"))
+    otapath = env.subst(join("$BUILD_DIR", "${PROGNAME}_ota.bin"))
+    elfpath = env.subst(join("$BUILD_DIR", "${PROGNAME}.elf"))
+    if not isfile(elfpath) or not isfile(binpath):
+        return
+
+    cmd = [env.subst("$OBJCOPY"), "-O", "binary"]
+    for sec in V3F_SECTIONS:
+        cmd += ["-R", sec]
+    cmd += [elfpath, otapath]
+    if subprocess.call(cmd) != 0:
+        sys.stderr.write("Error: could not build the OTA image\n")
+        env.Exit(1)
+
+    # The two have to differ by exactly the sketch offset. If they do not, the
+    # section list above has gone stale against the linker script, and the OTA
+    # image would be written to flash at the wrong place -- which is a bricked
+    # board and a trip to the bench, so it fails the build instead.
+    off = int(V5F_START_ADDR, 0)
+    delta = os.path.getsize(binpath) - os.path.getsize(otapath)
+    if delta != off:
+        sys.stderr.write(
+            "Error: OTA image is %d bytes smaller than the full image, "
+            "expected %d (0x%X). V3F_SECTIONS in %s no longer matches the "
+            "linker script.\n" % (delta, off, off, __file__))
+        env.Exit(1)
+
+
+env.AddPostAction(join("$BUILD_DIR", "${PROGNAME}.bin"), _make_ota_image)
+
+# Nothing in ITCM may call out of ITCM.
+#
+# The OTA committer erases the flash it would otherwise be running from, so its
+# ITCM residency has to be real and not merely intended. The compiler emits
+# calls the source does not contain -- -msave-restore prologues, and memcpy
+# from a recognised copy loop -- and both of those shipped once and cost a
+# bench rescue. tools/check_itcm.py explains it at length.
+#
+# Checked on every link, because the offending instruction is not in the source
+# and no review will find it.
+def _check_itcm(source, target, env):
+    import subprocess
+    elf = env.subst(join("$BUILD_DIR", "${PROGNAME}.elf"))
+    if not isfile(elf):
+        return
+    script = join(FRAMEWORK_DIR, "tools", "check_itcm.py")
+    if not isfile(script):
+        return
+    rc = subprocess.call([env.subst("$PYTHONEXE"), script,
+                          env.subst("$OBJDUMP"), elf])
+    if rc != 0:
+        env.Exit(1)
+
+
+env.AddPostAction(join("$BUILD_DIR", "${PROGNAME}.elf"), _check_itcm)
 

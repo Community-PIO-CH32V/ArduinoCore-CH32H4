@@ -75,7 +75,11 @@ compiler.objdump.cmd={compiler.prefix}objdump
 build.march=rv32imafc_zba_zbb_zbc_zbs_xw
 build.mabi=ilp32f
 
-compiler.machine.flags=-march={build.march} -mabi={build.mabi} -msmall-data-limit=8 -msave-restore
+# NO -msave-restore: it puts function prologues in libgcc helpers that live in
+# flash, which breaks the ITCM code that must keep running while flash is
+# erased (the OTA committer). The long version is in
+# tools/platformio-build.py; keep the two in step.
+compiler.machine.flags=-march={build.march} -mabi={build.mabi} -msmall-data-limit=8 -mno-save-restore
 
 # -Wno-comment: the vendor's ch32h417_eth.h has nested "/*" in its register
 # banner comments and is included by anything touching the SDK. Left on it
@@ -280,6 +284,20 @@ recipe.c.combine.pattern="{compiler.path}{compiler.c.elf.cmd}" {compiler.c.elf.f
 
 recipe.objcopy.bin.pattern="{compiler.path}{compiler.elf2hex.cmd}" {compiler.elf2hex.flags} {compiler.elf2hex.extra_flags} "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.bin"
 
+# The over-the-air image: the sketch half of the binary, and nothing else.
+#
+# firmware.bin is the whole flash image -- the V3F boot stub at 0, then the
+# sketch 32 KB in. A network upload must send only the second half, because the
+# OTA committer writes the sketch region and nothing else. Dropping the V3F
+# sections leaves the sketch as the lowest LMA, so objcopy's binary output
+# starts exactly where the committer will put it.
+#
+# THIS LIST MIRRORS THE LINKER SCRIPT, and tools/platformio-build.py runs the
+# same one. That build checks the result is smaller by exactly the sketch
+# offset; there is no equivalent check here, so if a V3F section is ever added
+# to variants/*/ch32h417.ld, add it in all three places.
+recipe.hooks.objcopy.postobjcopy.1.pattern="{compiler.path}{compiler.objcopy.cmd}" -O binary -R .v3f_init -R .v3f_vectoralign -R .v3f_vector -R .v3f_text -R .loadcodealign -R .loadcode "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}_ota.bin"
+
 recipe.output.tmp_file={build.project_name}.bin
 recipe.output.save_file={build.project_name}.{build.variant}.bin
 
@@ -316,6 +334,30 @@ tools.wlink.erase.pattern="{path}/{cmd}" erase
 tools.wlink.program.params.verbose=-v
 tools.wlink.program.params.quiet=-q
 tools.wlink.program.pattern="{path}/{cmd}" flash "{build.path}/{build.project_name}.bin"
+
+# Network upload, over ArduinoOTA.
+#
+# The board appears under Tools -> Port as a network port once it is on the
+# network and running ArduinoOTA.handle(): the IDE finds it by the
+# _arduino._tcp record MDNS.enableArduino() publishes, and reads the board name
+# and whether a password is needed out of that record's TXT fields.
+#
+# espota.py is the ESP's, unmodified -- the protocol is theirs and this core
+# speaks it. It is handed firmware_ota.bin, NOT firmware.bin: see the objcopy
+# hook above for why.
+#
+# THE SKETCH ON THE BOARD IS PART OF THE UPLOAD PATH. A sketch that stops
+# calling handle(), hangs, or faults takes the network port down with it, and
+# the next upload has to go over the probe. That is true of every OTA
+# implementation; it is worth knowing before flashing something adventurous
+# over the network.
+tools.espota.cmd={ch32h4.python}
+tools.espota.upload.protocol=network
+tools.espota.upload.params.verbose=-d -r
+tools.espota.upload.params.quiet=
+tools.espota.upload.field.password=Password
+tools.espota.upload.field.password.secret=true
+tools.espota.upload.pattern="{cmd}" "{runtime.platform.path}/tools/espota.py" -i "{upload.port.address}" -p "{upload.port.properties.port}" "--auth={upload.field.password}" -f "{build.path}/{build.project_name}_ota.bin" {upload.verbose}
 
 # --------------------------------------------------------------------------
 # Debugging

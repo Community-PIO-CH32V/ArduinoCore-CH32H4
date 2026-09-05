@@ -160,6 +160,15 @@ void ch32h4_fault_dump(void) {
     puts_raw("\nsp=");
     puthex_raw(ch32h4_fault_sp);
 
+    /* Who called, and with what. A wild pointer usually arrives as an
+       argument, so these three often identify the bug on their own. */
+    puts_raw(" ra=");
+    puthex_raw(ch32h4_fault_log.ra);
+    puts_raw(" a0=");
+    puthex_raw(ch32h4_fault_log.a0);
+    puts_raw(" a1=");
+    puthex_raw(ch32h4_fault_log.a1);
+
     puts_raw("\nstack:");
     for (uint32_t i = 0; i < 24; i++) {
         uint32_t w = ((volatile uint32_t *)ch32h4_fault_sp)[i];
@@ -214,6 +223,11 @@ void HardFault_Handler(void) {
         "csrr t1, mstatus            ;"
         "sw   t1, 16(t0)             ;"
         "sw   sp, 20(t0)             ;"
+        /* ra, a0, a1 of the faulting context -- see the note in the struct.
+           Offsets 48/52/56, past boot_faults at 44. */
+        "sw   ra, 48(t0)             ;"
+        "sw   a0, 52(t0)             ;"
+        "sw   a1, 56(t0)             ;"
         "li   t1, %0                 ;"
         "sw   t1, 0(t0)              ;"
         "la   t0, ch32h4_fault_sp    ;"

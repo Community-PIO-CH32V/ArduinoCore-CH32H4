@@ -32,6 +32,21 @@ typedef struct {
      * waking the V5F once there have been too many; the V5F clears it once it
      * reaches its runtime-ready point. See CH32H4_FAULT_REBOOT_LIMIT. */
     uint32_t boot_faults;
+
+    /* The faulting context's ra, a0 and a1.
+     *
+     * mepc says which instruction faulted; on its own that is often not
+     * enough. A wild pointer usually arrives as an ARGUMENT, so a0/a1 name the
+     * bad value and ra names who passed it -- which is the difference between
+     * "something called memp_free with a bad type" and knowing which caller.
+     *
+     * Readable because HardFault_Handler is naked: no prologue has run, so
+     * these still hold what the faulting code had. Appended at the end so the
+     * numeric offsets the handler's asm uses for the fields above do not move.
+     */
+    uint32_t ra;
+    uint32_t a0;
+    uint32_t a1;
 } ch32h4_fault_log_t;
 
 /* How many crash-reboots in a row before the V3F stops relaunching the V5F.
