@@ -2,6 +2,7 @@
 
 #include "Arduino.h"
 #include "ch32h4_itcm.h"
+#include "ch32h4_flash_ll.h"
 #include "ch32h4_park.h"
 
 #include <string.h>
@@ -64,15 +65,19 @@ bool ch32h4_flash_erase(uint32_t addr, uint32_t len) {
         return false;
     }
 
-    FLASH_Unlock();
+    ch32h4_flash_ll_unlock();
     bool ok = true;
     for (uint32_t off = 0; off < len; off += page) {
-        if (FLASH_ErasePage(addr + off) != FLASH_COMPLETE) {
+        /* The ITCM primitive, not the SDK's FLASH_ErasePage(). That one is
+         * flash-resident, so the core was executing from the array it was
+         * erasing and got away with it only because the V5F's instruction
+         * cache happened to hold the loop. */
+        if (!ch32h4_flash_ll_erase_page(addr + off)) {
             ok = false;
             break;
         }
     }
-    FLASH_Lock();
+    ch32h4_flash_ll_lock();
     ch32h4_unpark_other();
     return ok;
 }
@@ -106,28 +111,10 @@ bool ch32h4_flash_erase(uint32_t addr, uint32_t len) {
  * and the failure it produces is silent data corruption rather than an error.
  */
 
-#define CR_PAGE_PG   ((uint32_t)0x00010000)
-#define CR_PG_STRT   ((uint32_t)0x00200000)
-#define CR_LOCK_Set  ((uint32_t)0x00000080)
-#define CR_FLOCK_Set ((uint32_t)0x00008000)
-#define SR_BSY       ((uint32_t)0x00000001)
-#define SR_WR_BSY    ((uint32_t)0x00000002)
-#define FLASH_KEY1   ((uint32_t)0x45670123)
-#define FLASH_KEY2   ((uint32_t)0xCDEF89AB)
 
-#define CH32H4_FLASH_PROG_PAGE 256u
+#define CH32H4_FLASH_LL_PROG_PAGE 256u
 
-static void flash_unlock_fast(void) {
-    FLASH->KEYR = FLASH_KEY1;
-    FLASH->KEYR = FLASH_KEY2;
-    FLASH->MODEKEYR = FLASH_KEY1;
-    FLASH->MODEKEYR = FLASH_KEY2;
-}
 
-static void flash_lock_fast(void) {
-    FLASH->CTLR |= CR_FLOCK_Set;
-    FLASH->CTLR |= CR_LOCK_Set;
-}
 
 /* One 256-byte page. `addr` is page-aligned and `src` holds 64 words.
  *
@@ -165,62 +152,10 @@ static void flash_lock_fast(void) {
  * outside ITCM. A page program takes microseconds; a million iterations is
  * several orders of magnitude of headroom and still returns.
  */
-#define FLASH_SPIN_LIMIT 1000000u
 
-__itcm_func static bool flash_program_page(uint32_t addr, const uint32_t *src) {
-    uint32_t prev;
-    __asm volatile("csrrci %0, mstatus, 8" : "=r"(prev));
-
-    uint32_t guard;
-    bool ok = true;
-
-    FLASH->CTLR |= CR_PAGE_PG;
-    for (guard = FLASH_SPIN_LIMIT; (FLASH->STATR & SR_BSY) && guard; guard--) {
-    }
-    if (!guard) {
-        ok = false;
-    }
-    for (guard = FLASH_SPIN_LIMIT; ok && (FLASH->STATR & SR_WR_BSY) && guard; guard--) {
-    }
-    if (!guard) {
-        ok = false;
-    }
-
-    for (uint32_t i = 0; ok && i < CH32H4_FLASH_PROG_PAGE / 4u; i++) {
-        *(volatile uint32_t *)(uintptr_t)(addr + i * 4u) = src[i];
-        /* The one the SDK compiles out. Without it the buffer writes and the
-         * WR_BSY poll below can be seen out of order, and words go missing. */
-        __asm volatile ("fence" ::: "memory");
-        for (guard = FLASH_SPIN_LIMIT;
-             (FLASH->STATR & SR_WR_BSY) && guard; guard--) {
-        }
-        if (!guard) {
-            ok = false;
-        }
-    }
-
-    if (ok) {
-        FLASH->CTLR |= CR_PG_STRT;
-        for (guard = FLASH_SPIN_LIMIT;
-             (FLASH->STATR & SR_BSY) && guard; guard--) {
-        }
-        if (!guard) {
-            ok = false;
-        }
-    }
-
-    /* Cleared on EVERY path, including the failing ones. Leaving CR_PAGE_PG
-     * set is what turns a failed write into a board that needs unplugging. */
-    FLASH->CTLR &= ~CR_PAGE_PG;
-
-    if (prev & 8u) {
-        __asm volatile("csrsi mstatus, 8");
-    }
-    return ok;
-}
 
 uint32_t ch32h4_flash_prog_size(void) {
-    return CH32H4_FLASH_PROG_PAGE;
+    return CH32H4_FLASH_LL_PROG_PAGE;
 }
 
 bool ch32h4_flash_write(uint32_t addr, const void *src, uint32_t len) {
@@ -231,15 +166,15 @@ bool ch32h4_flash_write(uint32_t addr, const void *src, uint32_t len) {
     if (len == 0u) {
         return true;
     }
-    if ((addr % CH32H4_FLASH_PROG_PAGE) != 0u
-        || (len % CH32H4_FLASH_PROG_PAGE) != 0u) {
+    if ((addr % CH32H4_FLASH_LL_PROG_PAGE) != 0u
+        || (len % CH32H4_FLASH_LL_PROG_PAGE) != 0u) {
         return false;
     }
 
     /* Copied through an aligned buffer: the page loop reads whole words, and
      * LittleFS hands out pointers into its own cache with no alignment
      * promise. */
-    uint32_t page[CH32H4_FLASH_PROG_PAGE / 4u];
+    uint32_t page[CH32H4_FLASH_LL_PROG_PAGE / 4u];
     const uint8_t *s = (const uint8_t *)src;
 
     /* The other core must not be fetching from flash while this runs -- a page
@@ -252,15 +187,15 @@ bool ch32h4_flash_write(uint32_t addr, const void *src, uint32_t len) {
     }
 
     bool ok = true;
-    flash_unlock_fast();
-    for (uint32_t off = 0; ok && off < len; off += CH32H4_FLASH_PROG_PAGE) {
-        memcpy(page, s + off, CH32H4_FLASH_PROG_PAGE);
-        ok = flash_program_page(addr + off, page);
+    ch32h4_flash_ll_unlock();
+    for (uint32_t off = 0; ok && off < len; off += CH32H4_FLASH_LL_PROG_PAGE) {
+        memcpy(page, s + off, CH32H4_FLASH_LL_PROG_PAGE);
+        ok = ch32h4_flash_ll_program_page(addr + off, page);
     }
     /* Relocked even when a page failed, for the same reason CR_PAGE_PG is
      * cleared: an unlocked flash controller is a debug probe that cannot
      * connect. */
-    flash_lock_fast();
+    ch32h4_flash_ll_lock();
     ch32h4_unpark_other();
     if (!ok) {
         return false;

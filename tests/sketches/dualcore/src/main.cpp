@@ -15,6 +15,8 @@ extern "C" {
 #include "ch32h4_flash.h"
 #include "ch32h4_fault.h"
 #include "ch32h4_itcm.h"
+#include "ch32h4_ota.h"
+#include "ch32h4_park.h"
 #include "ch32h4_xcore.h"
 }
 
@@ -423,6 +425,49 @@ static void handle(const String &cmd) {
 
   } else if (cmd.startsWith("flash ")) {
     flashTest(cmd.substring(6));
+
+  } else if (cmd == "otacommit") {
+    /* The OTA committer, pointed at spare flash rather than at the sketch.
+       Everything else about it is the real path: the image is staged in RAM,
+       the V3F is parked, and ch32h4_ota_commit() runs from ITCM and resets
+       the part. What it does NOT do here is erase the code that called it --
+       that is the one thing this cannot rehearse, and it is why the region
+       below is 352 KB into the sketch area rather than at its start. */
+    const uint32_t len = 32u * 1024u;
+    uint8_t *img = (uint8_t *)malloc(len + 8u);
+    if (!img) {
+      Serial1.println("ota_alloc=0");
+      Serial1.print("> ");
+      return;
+    }
+    /* Word-aligned, because the committer copies words. */
+    uint8_t *aligned = (uint8_t *)(((uintptr_t)img + 3u) & ~(uintptr_t)3u);
+    for (uint32_t i = 0; i < len; i++) {
+      aligned[i] = (uint8_t)((i * 73u) ^ (i >> 8));
+    }
+
+    Serial1.print("ota_len="); Serial1.println((unsigned)len);
+    Serial1.print("ota_parked=");
+    Serial1.println(ch32h4_park_other(200) ? 1 : 0);
+    Serial1.println("ota_committing");
+    Serial1.flush();
+
+    /* Does not return: it resets. Verify with otaverify after the reboot. */
+    ch32h4_ota_commit(STRESS_ADDR, aligned, len, 8192u);
+
+  } else if (cmd == "otaverify") {
+    const uint32_t len = 32u * 1024u;
+    uint32_t bad = 0;
+    for (uint32_t i = 0; i < len; i++) {
+      const uint8_t want = (uint8_t)((i * 73u) ^ (i >> 8));
+      if (((const uint8_t *)(uintptr_t)STRESS_ADDR)[i] != want) {
+        bad++;
+        if (bad == 1u) {
+          Serial1.print("ota_first_bad="); Serial1.println((unsigned)i);
+        }
+      }
+    }
+    Serial1.print("ota_bad="); Serial1.println((unsigned)bad);
   }
   Serial1.print("> ");
 }

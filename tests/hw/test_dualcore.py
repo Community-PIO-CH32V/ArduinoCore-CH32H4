@@ -243,3 +243,32 @@ def test_the_other_core_survives_the_flash_write(dualcore_board):
     d = _kv(dualcore_board.command("core1alive", timeout=6.0))
     assert d["core1_iterations_moved"] == "1", d
     assert int(d["core1_delta"]) > 100, d
+
+
+def test_the_ota_committer_writes_a_staged_image(dualcore_board):
+    """The last step of an over-the-air update, rehearsed on spare flash.
+
+    ch32h4_ota_commit() is the piece that erases and reprograms the flash it is
+    stored in, so it runs entirely from ITCM and calls nothing outside itself
+    -- not memcpy, not the SDK's erase, not the flash driver. It parks the
+    other core and then does not return: it resets the part.
+
+    Everything here is the real path except the destination, which is 352 KB
+    into the sketch area rather than at its start. Erasing the code that called
+    it is the one thing this cannot rehearse.
+
+    The image is 32 KB of a pattern, staged in RAM. After the reset the region
+    has to match it exactly -- a committer that programs the first page and
+    stops looks identical from the outside until you read the rest back, which
+    is how the first version of this was caught.
+    """
+    dualcore_board.command("otacommit", timeout=20.0)
+    # It reset itself; wait for the prompt to come back.
+    dualcore_board.reboot()
+
+    d = _kv(dualcore_board.command("otaverify", timeout=15.0))
+    assert d["ota_bad"] == "0", ("the committed image does not match what was "
+                                 "staged", d)
+
+    alive = _kv(dualcore_board.command("core1alive", timeout=6.0))
+    assert alive["core1_iterations_moved"] == "1", alive
