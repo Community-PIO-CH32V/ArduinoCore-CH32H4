@@ -395,19 +395,50 @@ SECTIONS
     .usbram (NOLOAD) : {
         . = ALIGN(8);
         _susbram = .;
-        /* Matched on FILENAME, not path.
-           
-           On Windows the linker sees object paths with backslashes --
-           `.piouild\ch32h417\FrameworkTinyUSB	usb.o` -- so any wildcard
-           written with forward slashes matches nothing at all, silently. The
-           build script names every TinyUSB object tusb*.o precisely so this
-           pattern can be path-independent.
-           
-           Getting this wrong is not a link error: TinyUSB's buffers simply
-           stay in DTCM, which the USB controller's bus master cannot reach,
-           and the device enumerates but transfers nothing. `size -A` showing
-           .usbram at 0 is the tell. */
+
+        /* THIS IS A MEMORY BUDGET, NOT A CORRECTNESS REQUIREMENT, and it was
+           written here for years as though it were the opposite.
+
+           The comment this replaces said the USB controller's bus master
+           cannot see DTCM, so buffers left there would give a device that
+           enumerates and transfers nothing. That is true of the Ethernet DMA,
+           which is why .ethram below exists, and it was assumed to be true of
+           USB by analogy. It is not: building with every TinyUSB buffer in
+           DTCM -- .usbram empty -- gives a device that enumerates, transfers,
+           and passes all seven of tests/hw/test_usb.py. Measured, on hardware,
+           rather than reasoned about.
+
+           What the placement is actually worth: USB_RAM is 8 KB of the shared
+           region that nothing else claims, and putting a few kilobytes of
+           TinyUSB there is a few kilobytes of DTCM back. Small, free, and kept
+           for that reason -- but if it ever gets in the way, it can go, and
+           nothing will break.
+
+           .usbram is NOLOAD and outside the _sbss.._ebss range the startup
+           code clears, so ch32h4_usb_init() zeroes it explicitly. That part
+           IS load-bearing: skipping it leaves TinyUSB starting from whatever
+           survived in RAM. */
+
+        /* By SECTION. cores/ch32h4/tusb_config.h defines CFG_TUSB_MEM_SECTION
+           as .usbram and the CH32 device driver marks its endpoint buffers
+           with it, so this rule means the same thing under every build system
+           and under LTO. */
+        *(.usbram)
+        *(.usbram.*)
+
+        /* And by FILENAME, which sweeps up the rest of TinyUSB's .bss.
+
+           This one only matches under PlatformIO, whose build script renames
+           every TinyUSB object to tusb*.o for the purpose; arduino-cli names
+           them after their sources -- usbd.c.o, dcd_ch32_usbfs.c.o -- and an
+           LTO link replaces both with ccXXXXXX.ltrans0.ltrans.o. So it is a
+           bonus where it applies rather than something to rely on, which is
+           exactly why the section rule above was added. Matched on the
+           filename and not the path because on Windows the linker sees object
+           paths with backslashes, and a wildcard written with forward slashes
+           matches nothing at all, silently. */
         *tusb*.o(.bss .bss.* COMMON)
+
         . = ALIGN(8);
         _eusbram = .;
     } >USB_RAM

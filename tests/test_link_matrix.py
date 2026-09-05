@@ -42,16 +42,20 @@ def test_no_region_overflows(sketch):
     assert "region `" not in out or "overflowed" not in out, out[-3000:]
 
 
-def test_usb_buffers_are_in_reachable_memory():
-    """TinyUSB's .bss must be in USB_RAM, in the shared region.
+def test_usb_buffers_land_in_usb_ram():
+    """TinyUSB's transfer buffers should end up in USB_RAM.
 
-    The USB controller's own bus master cannot see DTCM -- unlike DMA1/2, which
-    reach everything -- so buffers left in .bss give a device that enumerates
-    and then transfers nothing. The linker matches on object FILENAME because
-    on Windows the paths it sees use backslashes and a `*/dir/*` wildcard
-    matches nothing at all, silently.
+    NOT a correctness requirement, and this test used to say it was. The claim
+    was that the USB controller's bus master cannot see DTCM -- true of the
+    Ethernet DMA, assumed of USB by analogy, and wrong: a build with .usbram
+    empty and every buffer in DTCM passes all of tests/hw/test_usb.py. The
+    linker script has the measurement.
 
-    .usbram at zero is exactly that failure."""
+    It is still worth asserting. USB_RAM is 8 KB of shared memory nothing else
+    claims, the placement is deliberate, and .usbram silently falling to zero
+    would mean the section attribute in tusb_config.h had stopped taking
+    effect -- which is a thing that has happened, twice, and which nothing else
+    here would notice."""
     size = pathlib.Path.home() / ".platformio/packages/toolchain-riscv/bin/riscv-wch-elf-size.exe"
     elf = SKETCHES / "coretest/.pio/build/ch32h417/firmware.elf"
     if not size.is_file() or not elf.is_file():

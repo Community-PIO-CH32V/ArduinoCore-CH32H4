@@ -114,9 +114,18 @@ static void puthex_raw(uint32_t v) {
  * the CURRENT sp -- exactly what a stack overflow has destroyed -- so the
  * naked entry below switches to this fixed buffer before any C code runs, and
  * hands the original sp to fault_dump() for the call-chain walk. */
-uint8_t ch32h4_fault_stack[512] __attribute__((aligned(16)));
-uint32_t ch32h4_fault_sp;
+/* __attribute__((used)) on all three, and on ch32h4_fault_log where it is
+ * defined: HardFault_Handler below is the only thing that names them, and it
+ * names them inside an inline-asm string. The compiler does not parse that
+ * string, so under -flto it sees three globals nothing references, drops them,
+ * and the link fails with "undefined reference to ch32h4_fault_sp" pointing at
+ * an <artificial> file. Without LTO it happens to work, because the symbols
+ * survive to the assembler within their own translation unit -- which is why
+ * this is exactly the kind of thing that only breaks when LTO is turned on. */
+uint8_t ch32h4_fault_stack[512] __attribute__((aligned(16), used));
+uint32_t ch32h4_fault_sp __attribute__((used));
 
+__attribute__((used))
 void ch32h4_fault_dump(void) {
     __disable_irq();
 

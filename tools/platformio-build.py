@@ -141,6 +141,25 @@ net_enabled = network == "ethernet"
 # reachable from a server, and a sketch that just fetches HTTPS should not
 # carry them. board_build.tls = mbedtls-server turns it on; that is what
 # EthernetServerSecure and WebServerSecure need.
+# Link-time optimization.
+#
+# On by default. The whole image is one compilation unit as far as the
+# optimizer is concerned, which on this core matters more than usual: the
+# vendor SDK, lwIP and the Arduino layer are built as separate archives, and
+# without LTO a one-line SDK accessor called from a sketch is a real function
+# call across an archive boundary.
+#
+# board_build.lto = disabled turns it off. Reasons to: a fault whose backtrace
+# is unreadable because everything inlined, or a suspicion that LTO itself is
+# the bug -- turning it off is the first thing to try, and having to edit the
+# build script to do that would be the wrong place to find out.
+lto = str(board.get("build.lto", "enabled")).lower()
+if lto not in ("enabled", "disabled"):
+    sys.stderr.write("Error: board_build.lto must be 'enabled' or 'disabled',"
+                     " got %r\n" % lto)
+    env.Exit(1)
+lto_enabled = lto == "enabled"
+
 tls = str(board.get("build.tls", "none")).lower()
 if tls not in ("mbedtls", "mbedtls-server", "none"):
     sys.stderr.write("Error: board_build.tls must be 'mbedtls',"
@@ -252,6 +271,19 @@ if serial_iface == "usb" and not usb_enabled:
                      " board_build.usbstack = tinyusb\n")
     env.Exit(1)
 
+# ar and ranlib have to go through the gcc wrappers when LTO is on.
+#
+# An LTO object holds GIMPLE, not symbols plain ar can see, so a plain ar
+# writes an archive index with nothing in it. The link then fails on symbols
+# that are demonstrably in the archive -- or, worse, quietly drops an archive
+# member whose only definition was one the index did not list. gcc-ar passes
+# --plugin, which is the whole difference.
+if lto_enabled:
+    env.Replace(
+        AR=env.subst("$CC").replace("-gcc", "-gcc-ar"),
+        RANLIB=env.subst("$CC").replace("-gcc", "-gcc-ranlib"),
+    )
+
 env.Append(
     ASFLAGS=machine_flags,
     ASPPFLAGS=["-x", "assembler-with-cpp"],
@@ -272,7 +304,7 @@ env.Append(
         "-ffunction-sections",
         "-fdata-sections",
         "-fno-common",
-    ],
+    ] + (["-flto"] if lto_enabled else []),
 
     CXXFLAGS=exc_flags + [
         "-fno-threadsafe-statics",
@@ -281,7 +313,7 @@ env.Append(
         "-std=gnu++17",
     ],
 
-    LINKFLAGS=machine_flags + [
+    LINKFLAGS=machine_flags + (["-flto"] if lto_enabled else []) + [
         "-Os",
         "-nostartfiles",
         "-Wl,--gc-sections",

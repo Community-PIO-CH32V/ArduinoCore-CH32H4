@@ -9,6 +9,7 @@
 menu.usbstack=USB stack
 menu.serial=Serial port
 menu.exceptions=C++ Exceptions
+menu.lto=Link-time optimization
 menu.fs=Filesystem size
 
 # --------------------------------------------------------------------------
@@ -75,6 +76,31 @@ ch32h417qeu6.menu.exceptions.Disabled.build.flags.exceptions.define=
 ch32h417qeu6.menu.exceptions.Enabled=Enabled
 ch32h417qeu6.menu.exceptions.Enabled.build.flags.exceptions=-fexceptions
 ch32h417qeu6.menu.exceptions.Enabled.build.flags.exceptions.define=-DCH32H4_EXCEPTIONS
+
+# Link-time optimization: the whole image optimized as one unit.
+#
+# It is worth 3-7% of flash here, more on the large builds -- 24 KB off a TLS
+# sketch -- because the SDK, lwIP, mbedTLS and the Arduino layer are separate
+# archives, and without it every call across one of those boundaries is a real
+# call to a function nothing can inline.
+#
+# On by default, and the same default PlatformIO uses -- the two build
+# descriptions should not produce differently optimized images from the same
+# source.
+#
+# The one thing that was ever build-system-specific here is gone: the linker
+# script used to place TinyUSB's buffers by matching the object FILENAME, which
+# LTO erases, and arduino-cli never matched anyway. They are placed by section
+# now, which means the same thing under both and under LTO. Verified on
+# hardware from an arduino-cli-built image: USB CDC enumerates and transfers.
+#
+# Disabled is here for the two occasions it is worth having: a fault whose
+# backtrace is unreadable because everything inlined, and a suspicion that LTO
+# itself is the bug.
+ch32h417qeu6.menu.lto.Enabled=Enabled
+ch32h417qeu6.menu.lto.Enabled.build.flags.lto=-flto
+ch32h417qeu6.menu.lto.Disabled=Disabled
+ch32h417qeu6.menu.lto.Disabled.build.flags.lto=
 
 # The filesystem partition, immediately below the 16 KB EEPROM at the top of
 # flash. LittleFS mounts it; tools/simplesub.py substitutes the size into the

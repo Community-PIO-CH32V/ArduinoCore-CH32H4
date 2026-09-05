@@ -100,7 +100,7 @@ compiler.optimization_flags.release=-Os
 compiler.optimization_flags.debug=-Og -g3
 compiler.optimization_flags={compiler.optimization_flags.release}
 
-compiler.common.flags={compiler.machine.flags} {compiler.optimization_flags} {compiler.warning_flags} -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common
+compiler.common.flags={compiler.machine.flags} {compiler.optimization_flags} {compiler.warning_flags} -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common {build.flags.lto}
 
 compiler.c.flags={compiler.common.flags} -std=gnu17 -MMD -c
 compiler.cpp.flags={compiler.common.flags} -std=gnu++17 {build.flags.exceptions} -fno-threadsafe-statics -fno-rtti -fno-use-cxa-atexit -MMD -c
@@ -119,7 +119,7 @@ compiler.size.flags=-A
 # NOT -Wl,--no-relax-gp either: this is GNU ld 2.38, which does not have the
 # option, and passing it is a hard link error. If "relocation truncated to fit:
 # R_RISCV_GPREL_I" ever appears, the fix is -msmall-data-limit=0.
-compiler.c.elf.flags={compiler.machine.flags} {compiler.optimization_flags} -nostartfiles -Wl,--gc-sections -Wl,--print-memory-usage --specs=nosys.specs
+compiler.c.elf.flags={compiler.machine.flags} {compiler.optimization_flags} {build.flags.lto} -nostartfiles -Wl,--gc-sections -Wl,--print-memory-usage --specs=nosys.specs
 
 compiler.c.extra_flags=
 compiler.cpp.extra_flags=
@@ -154,6 +154,12 @@ build.flags.exceptions.define=
 # combination that needs the least from a board definition. The boards in
 # boards.txt default to TinyUSB and USB CDC.
 build.flags.usbstack=
+
+# Empty unless the Link-time optimization menu says otherwise. The menu entry
+# in boards.txt explains why the default is off in the IDE and on in
+# PlatformIO -- it comes down to TinyUSB's buffers being placed by object
+# filename, which LTO erases.
+build.flags.lto=
 build.flags.serial=
 
 # The filesystem, in bytes, carved out of the flash tail immediately below the

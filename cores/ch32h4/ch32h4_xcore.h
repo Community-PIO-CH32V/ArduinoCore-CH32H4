@@ -23,7 +23,15 @@
 extern "C" {
 #endif
 
-#define CH32H4_XCORE  __attribute__((section(".xcore")))
+/* `used` as well as the section, because of what this section is FOR.
+ *
+ * Everything marked CH32H4_XCORE is read or written by the OTHER core's half
+ * of the image. One ELF holds both, so under -flto the optimizer sees the two
+ * halves at once and is entitled to conclude that a variable only the V3F
+ * writes and only the V5F reads is dead in whichever half it is looking at.
+ * `used` says it is not, and it costs nothing: these are a handful of words
+ * that must exist at fixed addresses regardless. */
+#define CH32H4_XCORE  __attribute__((section(".xcore"), used))
 
 /* A magic value rather than 1, because the region is uninitialised at reset
  * and a stale or random word must not read as "ready". */

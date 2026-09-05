@@ -7,7 +7,7 @@
  * refuses a second take from it, so re-entrancy is counted here rather than
  * relying on the semaphore to be recursive. It lives in .xcore because .bss is
  * shared between the two cores and this must not be. */
-static volatile uint32_t s_lock_depth[2] __attribute__((section(".xcore")));
+static volatile uint32_t s_lock_depth[2] CH32H4_XCORE;
 
 void ch32h4_console_init(uint32_t baud) {
     /* The depth counters live in .xcore, which is NOLOAD -- on a cold boot

@@ -31,7 +31,7 @@ void yield(void);
  * awake, and the V5F's I-cache is not coherent with anything, so cross-core
  * state must be somewhere both cores agree about. Its section is NOLOAD, so
  * nothing initialises it -- the V3F clears it explicitly before the wake. */
-volatile uint32_t ch32h4_runtime_ready __attribute__((section(".xcore")));
+volatile uint32_t ch32h4_runtime_ready CH32H4_XCORE;
 
 extern void (*__init_array_start[])(void);
 extern void (*__init_array_end[])(void);

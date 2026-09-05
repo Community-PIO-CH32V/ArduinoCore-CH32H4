@@ -92,6 +92,7 @@ HEADER = """# Arduino IDE board definitions for the CH32H41x.
 menu.usbstack=USB stack
 menu.serial=Serial port
 menu.exceptions=C++ Exceptions
+menu.lto=Link-time optimization
 menu.fs=Filesystem size
 """
 
@@ -110,6 +111,33 @@ EXCEPTIONS = """
 {id}.menu.exceptions.Enabled=Enabled
 {id}.menu.exceptions.Enabled.build.flags.exceptions=-fexceptions
 {id}.menu.exceptions.Enabled.build.flags.exceptions.define=-DCH32H4_EXCEPTIONS
+"""
+
+LTO = """
+# Link-time optimization: the whole image optimized as one unit.
+#
+# It is worth 3-7% of flash here, more on the large builds -- 24 KB off a TLS
+# sketch -- because the SDK, lwIP, mbedTLS and the Arduino layer are separate
+# archives, and without it every call across one of those boundaries is a real
+# call to a function nothing can inline.
+#
+# On by default, and the same default PlatformIO uses -- the two build
+# descriptions should not produce differently optimized images from the same
+# source.
+#
+# The one thing that was ever build-system-specific here is gone: the linker
+# script used to place TinyUSB's buffers by matching the object FILENAME, which
+# LTO erases, and arduino-cli never matched anyway. They are placed by section
+# now, which means the same thing under both and under LTO. Verified on
+# hardware from an arduino-cli-built image: USB CDC enumerates and transfers.
+#
+# Disabled is here for the two occasions it is worth having: a fault whose
+# backtrace is unreadable because everything inlined, and a suspicion that LTO
+# itself is the bug.
+{id}.menu.lto.Enabled=Enabled
+{id}.menu.lto.Enabled.build.flags.lto=-flto
+{id}.menu.lto.Disabled=Disabled
+{id}.menu.lto.Disabled.build.flags.lto=
 """
 
 USBSTACK = """
@@ -199,6 +227,7 @@ def generate():
         out.append(USBSTACK.format(id=i))
         out.append(SERIAL.format(id=i))
         out.append(EXCEPTIONS.format(id=i))
+        out.append(LTO.format(id=i))
         out.append(FS_INTRO.format(user=USER_FLASH, eeprom=EEPROM_SIZE))
 
         # The board's default goes FIRST. arduino-cli takes the first entry of

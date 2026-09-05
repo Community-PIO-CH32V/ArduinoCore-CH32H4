@@ -904,3 +904,60 @@ top. The buffered output is effectively rail to rail.
 for drive strength rather than for range. Note what the measurement cannot
 say: the ADC input is a high-impedance load, which is precisely the load an
 unbuffered DAC copes with best, so nothing here compares drive strength.
+
+---
+
+## The USB buffers did not need to be in USB_RAM, and the linker rule that put them there was matching nothing under arduino-cli
+
+**Symptom.** None, in either direction. That is what makes this one worth
+writing down: a placement rule that had never fired under one of the two build
+systems, guarding against a failure that does not happen.
+
+**Cause.** Two separate mistakes that hid each other.
+
+The linker script swept TinyUSB's `.bss` into `USB_RAM` with
+`*tusb*.o(.bss .bss.* COMMON)` -- matched on the object FILENAME, because
+PlatformIO's build script renames every TinyUSB object to `tusb*.o` for exactly
+this. arduino-cli names them after their sources: `usbd.c.o`,
+`dcd_ch32_usbfs.c.o`. So under the Arduino IDE the rule matched nothing at all,
+`.usbram` was zero, and every endpoint buffer sat in DTCM.
+
+And the reason given for the rule -- "the USB controller's own bus master
+cannot see DTCM, so buffers left there give a device that enumerates and then
+transfers nothing" -- is not true. It is true of the Ethernet DMA, which is why
+`.ethram` exists and is verified. It was assumed of USB by analogy and never
+tested.
+
+**How it was found.** Turning `-flto` on. LTO replaces the object names with
+`ccXXXXXX.ltrans0.ltrans.o`, so the filename rule stopped matching under
+PlatformIO too and `tests/test_link_matrix.py` failed on `.usbram` being zero
+-- a test written for a hazard that turned out not to exist, catching a rule
+that turned out not to work.
+
+Then, rather than trusting either statement: an arduino-cli build was flashed
+and USB CDC came up and transferred, with `.usbram` at zero. And a PlatformIO
+build with both placement rules removed -- every TinyUSB buffer in DTCM --
+passed all seven of `tests/hw/test_usb.py`.
+
+**Fix.** `CFG_TUSB_MEM_SECTION` is defined as `__attribute__((section(".usbram")))`
+in `cores/ch32h4/tusb_config.h` and in the TinyUSB fork's
+`tusb_config_ch32h4.h`, and the CH32 device driver marks its endpoint buffer
+struct with it. Placement is now by section, which means the same thing under
+both build systems and under LTO. The filename rule stays as a bonus sweep
+where it applies.
+
+The placement itself is kept, but it is now documented as what it is: `USB_RAM`
+is 8 KB of shared memory nothing else claims, so it is a few kilobytes of DTCM
+back. Not a correctness requirement. `ch32h4_usb_init()` zeroing the region
+before use IS one, because `.usbram` is `NOLOAD` and outside the `_sbss.._ebss`
+range the startup code clears.
+
+**The lesson worth keeping.** Two of these hazards -- this one and `.ethram` --
+have the same shape and only one of them is real. "This master cannot reach
+that memory" is a claim about silicon, and on this part it differs per master.
+Test it per master; do not carry it across by analogy.
+
+**Where.** `variants/CH32H417xx_QEU6/ch32h417.ld`,
+`cores/ch32h4/tusb_config.h`,
+`libraries/Adafruit_TinyUSB_Arduino/src/arduino/ports/ch32h4/tusb_config_ch32h4.h`,
+`libraries/Adafruit_TinyUSB_Arduino/src/portable/wch/dcd_ch32_usbfs.c`.

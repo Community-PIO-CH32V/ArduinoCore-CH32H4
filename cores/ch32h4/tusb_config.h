@@ -27,11 +27,27 @@ extern "C" {
 #define CFG_TUSB_DEBUG              0
 #endif
 
-/* Every TinyUSB buffer must be reachable by the USB controller's own bus
- * master, which cannot see DTCM. The linker script places TinyUSB's .bss in
- * USB_RAM, in the shared region, and ch32h4_usb_init() zeroes it -- the startup
- * code's .bss clear does not reach there. */
-#define CFG_TUSB_MEM_SECTION
+/* Where TinyUSB's transfer buffers go.
+ *
+ * .usbram is 8 KB of the shared region that nothing else claims, so putting
+ * them there is a few kilobytes of DTCM back. That is the whole of the reason:
+ * this is a memory budget, not a correctness requirement.
+ *
+ * It was written here as a correctness requirement -- "the USB controller's
+ * bus master cannot see DTCM" -- and that is wrong. It is true of the Ethernet
+ * DMA; it was assumed of USB by analogy and never tested. Building with these
+ * buffers in DTCM instead gives a device that enumerates, transfers, and
+ * passes all of tests/hw/test_usb.py.
+ *
+ * .usbram is NOLOAD and outside the _sbss.._ebss range the startup code
+ * clears; ch32h4_usb_init() zeroes it explicitly, and THAT part is required.
+ *
+ * THIS FILE HAS A TWIN, libraries/Adafruit_TinyUSB_Arduino/src/arduino/ports/ch32h4/tusb_config_ch32h4.h.
+ * The same configuration reached by two include paths -- tusb_option.h
+ * includes "tusb_config.h" in quotes and finds src/tusb_config.h next to
+ * itself before any -I is consulted, so under arduino-cli the fork's copy
+ * wins and under PlatformIO this one does. They must be changed together. */
+#define CFG_TUSB_MEM_SECTION        __attribute__((section(".usbram")))
 #define CFG_TUSB_MEM_ALIGN          __attribute__((aligned(4)))
 
 #define CFG_TUD_ENDPOINT0_SIZE      64
