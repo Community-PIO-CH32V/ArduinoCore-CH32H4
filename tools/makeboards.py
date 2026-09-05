@@ -79,6 +79,11 @@ BOARDS = [
 # selected port -- so a plain Upload fails with "a programmer is required",
 # while Upload Using Programmer works, because that path reads program.tool
 # instead. Both are emitted below.
+#
+# upload.tool.network is the same mechanism for a port the IDE discovered over
+# mDNS rather than over USB: selecting a network port picks espota instead of
+# wlink. The board puts itself on that list through ArduinoOTA, which
+# advertises _arduino._tcp -- see MDNS::enableArduino().
 
 
 HEADER = """# Arduino IDE board definitions for the CH32H41x.
@@ -216,6 +221,7 @@ def generate():
             "{id}.build.svd={svd}\n"
             "{id}.upload.tool=wlink\n"
             "{id}.upload.tool.default=wlink\n"
+            "{id}.upload.tool.network=espota\n"
             "{id}.upload.protocol=wlink\n"
             "{id}.upload.maximum_data_size={data}\n".format(
                 id=i, name=b["name"], variant=b["variant"],

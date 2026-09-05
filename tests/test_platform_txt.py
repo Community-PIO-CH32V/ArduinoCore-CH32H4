@@ -37,6 +37,14 @@ IDE_PROVIDED = {
     "runtime.platform.path", "runtime.hardware.path", "runtime.ide.path",
     "runtime.ide.version", "runtime.os", "serial.port", "serial.port.file",
     "upload.verbose", "program.verbose", "path", "cmd", "config.path",
+    # Network upload. The first two come from pluggable discovery -- the
+    # address of the selected port and the properties the discovery attached to
+    # it, which for a board found over mDNS is where its OTA port number lives.
+    # The third is the value the IDE prompts for, declared by
+    # tools.espota.upload.field.password; the field declaration names it, but
+    # nothing in platform.txt defines a value for it.
+    "upload.port.address", "upload.port.properties.port",
+    "upload.field.password",
 }
 
 # Tools resolved from an installed package. A checkout has none, which is what
