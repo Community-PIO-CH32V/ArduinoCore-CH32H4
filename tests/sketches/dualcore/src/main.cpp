@@ -12,6 +12,66 @@
 static volatile uint32_t core1Iterations = 0;
 static volatile uint32_t core1Echoed = 0;
 
+/* CH32H4Mutex, under contention from both cores.
+ *
+ * The shared object is deliberately WIDER THAN A WORD and written one word at
+ * a time: a struct that is only ever half-written by one core while the other
+ * reads it is the failure a mutex exists to prevent, and a single word would
+ * not show it because a 32-bit store is atomic on this part anyway.
+ *
+ * Every writer stamps the same counter value into all sixteen words. Any
+ * reader that sees two different values has caught a torn write. With the
+ * lock that must never happen; WITHOUT it, it must -- which is why the
+ * unlocked mode exists. A test that only checks the locked case passes just as
+ * well when the lock does nothing at all.
+ */
+static const int XWORDS = 16;
+static volatile uint32_t xshared[XWORDS];
+CH32H4Mutex xmutex;
+
+static volatile bool xrun = false;
+static volatile bool xlocked = true;
+static volatile uint32_t xwrites[2];
+static volatile uint32_t xreads[2];
+static volatile uint32_t xtears[2];
+
+static void xstamp(uint8_t core) {
+  const uint32_t v = xwrites[core] + 1u;
+  for (int i = 0; i < XWORDS; i++) {
+    xshared[i] = v;
+    /* Widen the window. Without this the whole store fits between two of the
+       other core's instructions often enough that an unlocked run can look
+       clean, and then the negative half of the test proves nothing. */
+    __asm volatile("nop; nop; nop; nop");
+  }
+  xwrites[core] = v;
+}
+
+static void xcheck(uint8_t core) {
+  const uint32_t first = xshared[0];
+  for (int i = 1; i < XWORDS; i++) {
+    if (xshared[i] != first) {
+      xtears[core]++;
+      break;
+    }
+  }
+  xreads[core]++;
+}
+
+static void xwork(uint8_t core) {
+  if (!xrun) {
+    return;
+  }
+  if (xlocked) {
+    CH32H4MutexGuard g(xmutex);
+    xstamp(core);
+    xcheck(core);
+  } else {
+    xstamp(core);
+    xcheck(core);
+  }
+}
+
 void setup() {
   Serial1.begin(115200);
   Serial1.print("core0_num=");
@@ -34,6 +94,7 @@ void loop1() {
     core1Echoed++;
     CH32H4.fifo.push(v ^ 0xFFFFFFFFu);
   }
+  xwork(0);
 }
 
 static void handle(const String &cmd) {
@@ -99,6 +160,51 @@ static void handle(const String &cmd) {
     Serial1.print("mutex_first="); Serial1.println(first ? 1 : 0);
     Serial1.print("mutex_second="); Serial1.println(second ? 1 : 0);
     Serial1.print("mutex_after_unlock="); Serial1.println(third ? 1 : 0);
+
+  } else if (cmd == "mutexrecurse") {
+    /* CH32H4Mutex is recursive per core: the raw HSEM refuses a second take
+       from the same core, so without the depth count this would deadlock. */
+    CH32H4Mutex m;
+    Serial1.print("rec_valid="); Serial1.println(m.valid() ? 1 : 0);
+    Serial1.print("rec_id="); Serial1.println(m.id());
+    m.lock();
+    m.lock();
+    bool inner = m.tryLock();
+    m.unlock();
+    m.unlock();
+    m.unlock();
+    /* Fully released, so a fresh take must succeed. */
+    bool after = m.tryLock();
+    m.unlock();
+    Serial1.print("rec_inner="); Serial1.println(inner ? 1 : 0);
+    Serial1.print("rec_after="); Serial1.println(after ? 1 : 0);
+
+  } else if (cmd.startsWith("xmutex ")) {
+    /* Both cores hammering one wider-than-a-word object. */
+    const String mode = cmd.substring(7);
+    xlocked = (mode == "on");
+    for (int i = 0; i < 2; i++) {
+      xwrites[i] = 0;
+      xreads[i] = 0;
+      xtears[i] = 0;
+    }
+    for (int i = 0; i < XWORDS; i++) {
+      xshared[i] = 0;
+    }
+    xrun = true;
+    const uint32_t until = millis() + 1500;
+    while (millis() < until) {
+      xwork(1);
+    }
+    xrun = false;
+    delay(20);          /* let the V3F finish whatever round it is in */
+
+    Serial1.print("x_locked="); Serial1.println(xlocked ? 1 : 0);
+    Serial1.print("x_v5f_writes="); Serial1.println((unsigned)xwrites[1]);
+    Serial1.print("x_v3f_writes="); Serial1.println((unsigned)xwrites[0]);
+    Serial1.print("x_v5f_reads="); Serial1.println((unsigned)xreads[1]);
+    Serial1.print("x_v3f_reads="); Serial1.println((unsigned)xreads[0]);
+    Serial1.print("x_tears="); Serial1.println((unsigned)(xtears[0] + xtears[1]));
   }
   Serial1.print("> ");
 }

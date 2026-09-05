@@ -15,6 +15,7 @@
 
 #include <Arduino.h>
 #include "ch32h4_xcore.h"
+#include "CH32H4Mutex.h"
 
 class CH32H4FIFO {
 public:
@@ -53,8 +54,10 @@ public:
         for (int i = 0; i < 8; i++) { out[i] = id[i]; }
     }
 
-    /* Hardware semaphores, so a lock genuinely excludes the other core. IDs
-     * 0-3 belong to the core; use 4 and up. */
+    /* Hardware semaphores, raw. CH32H4Mutex is the one to use -- it is
+     * recursive, it allocates its own id, and it has a scope guard. These
+     * three are here for code that needs a specific numbered semaphore.
+     * IDs 0-3 belong to the core; use CH32H4_HSEM_USER_FIRST and up. */
     bool mutexTryLock(uint8_t id) { return ch32h4_mutex_try_lock(id); }
     void mutexLock(uint8_t id) { ch32h4_mutex_lock(id); }
     void mutexUnlock(uint8_t id) { ch32h4_mutex_unlock(id); }

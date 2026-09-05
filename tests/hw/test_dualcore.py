@@ -151,3 +151,54 @@ def test_the_previous_run_ended_cleanly(dualcore_board):
     assert "NOT waking it" not in report, \
         ("the V3F refused to start the V5F, which means "
          "CH32H4_FAULT_REBOOT_LIMIT crash-reboots in a row", report)
+
+
+def test_the_mutex_is_recursive_within_one_core(dualcore_board):
+    """CH32H4Mutex counts recursion; the raw HSEM underneath cannot.
+
+    HSEM records the taking core as the owner and refuses a second take from
+    it, so a lock() inside a lock() on the bare semaphore spins until the
+    watchdog. The depth counter in CH32H4Mutex is what makes the nested case
+    return instead -- and what makes CH32H4MutexGuard usable inside a function
+    whose caller already holds the lock, which is most of why a scope guard is
+    worth having.
+    """
+    d = _kv(dualcore_board.command("mutexrecurse"))
+    assert d["rec_valid"] == "1", d
+    # Allocated from the user range, never the core's 0-3.
+    assert int(d["rec_id"]) >= 4, d
+    assert d["rec_inner"] == "1", ("a nested tryLock() must succeed -- the "
+                                   "depth count is what makes it", d)
+    assert d["rec_after"] == "1", ("after as many unlocks as locks it must be "
+                                   "free again", d)
+
+
+def test_the_mutex_actually_excludes_the_other_core(dualcore_board):
+    """Both cores stamping one sixteen-word object, for a second and a half.
+
+    Every writer puts the same value in all sixteen words, and every reader
+    checks they agree. A reader that sees two different values caught the
+    other core mid-write. Under the lock that must never happen.
+    """
+    d = _kv(dualcore_board.command("xmutex on", timeout=8.0))
+    assert d["x_locked"] == "1", d
+    # Both cores must actually have run, or the test proved nothing.
+    assert int(d["x_v5f_writes"]) > 100, d
+    assert int(d["x_v3f_writes"]) > 100, d
+    assert d["x_tears"] == "0", ("the lock let a torn write through", d)
+
+
+def test_without_the_mutex_the_same_test_fails(dualcore_board):
+    """The negative half, and the reason the positive one means anything.
+
+    The identical loop with the lock taken out must tear. If it does not, the
+    test is not sensitive enough to detect a mutex that does nothing -- and a
+    mutex that does nothing passes the test above perfectly.
+    """
+    d = _kv(dualcore_board.command("xmutex off", timeout=8.0))
+    assert d["x_locked"] == "0", d
+    assert int(d["x_v5f_writes"]) > 100, d
+    assert int(d["x_v3f_writes"]) > 100, d
+    assert int(d["x_tears"]) > 0, (
+        "two cores wrote one object with no lock and nothing tore -- this "
+        "test can no longer tell a working mutex from an absent one", d)

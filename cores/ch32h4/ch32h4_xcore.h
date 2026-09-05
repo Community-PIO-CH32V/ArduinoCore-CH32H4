@@ -96,12 +96,37 @@ uint8_t ch32h4_core_num(void);
  * memory flag on a part with no coherent atomics would not.
  *
  * IDs 0..3 are reserved for the core; a sketch should use 4 and up.
+ *
+ * CH32H4Mutex is the C++ face of this and is what a sketch should reach for:
+ * it allocates from the user range, is recursive per core, and has a scope
+ * guard. These three are what it is built on.
  */
 #define CH32H4_HSEM_COUNT  16u
+
+/* The first semaphore a sketch may take. Below this is the core's: 0 is the
+ * USART1 console, which Serial1 also takes, so a sketch holding it would
+ * deadlock against its own print. */
+#define CH32H4_HSEM_USER_FIRST  4u
 
 bool ch32h4_mutex_try_lock(uint8_t id);
 void ch32h4_mutex_lock(uint8_t id);
 void ch32h4_mutex_unlock(uint8_t id);
+
+/* The same three, made RECURSIVE PER CORE by a depth count.
+ *
+ * HSEM records the taking core as the owner and refuses a second take from
+ * it, so ch32h4_mutex_lock() twice from one core spins until the watchdog.
+ * These count instead, and still exclude the other core throughout. This is
+ * what CH32H4Mutex is built on.
+ *
+ * The counters live in .xcore and are cleared by ch32h4_xcore_init(), which
+ * is why they are here rather than beside their user: .xcore is NOLOAD, so a
+ * counter that nobody clears starts at whatever the SRAM held -- and a
+ * non-zero start means lock() believes it already holds the semaphore and
+ * never takes it. A lock that silently does nothing. */
+bool ch32h4_mutex_try_lock_rec(uint8_t id);
+void ch32h4_mutex_lock_rec(uint8_t id);
+void ch32h4_mutex_unlock_rec(uint8_t id);
 
 #ifdef __cplusplus
 }

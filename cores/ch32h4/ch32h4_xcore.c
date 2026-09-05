@@ -11,12 +11,74 @@ uint8_t ch32h4_core_num(void) {
     return (uint8_t)NVIC_GetCurrentCoreID();
 }
 
+/* Recursion depth for ch32h4_mutex_*_rec(), per semaphore per core.
+ *
+ * In .xcore because .bss is one region shared by both cores and this must not
+ * be: each core needs its own depth for the same semaphore. */
+static volatile uint8_t s_mutex_depth[CH32H4_HSEM_COUNT][2] CH32H4_XCORE;
+
 void ch32h4_xcore_init(void) {
     /* Called by the V3F before the wake, when it is the only core running.
      * XCORE_RAM is NOLOAD, so without this both rings start with whatever the
      * region happened to contain and the first pop returns garbage. */
     s_to_v3f.head = s_to_v3f.tail = 0;
     s_to_v5f.head = s_to_v5f.tail = 0;
+
+    /* And the mutex depths, for exactly the same reason and with a worse
+     * consequence: a stale non-zero depth makes lock() return without taking
+     * the semaphore, so the lock compiles, runs, costs nothing and protects
+     * nothing. It was caught by a test that has two cores write one
+     * sixteen-word object and check it did not tear -- which is why that test
+     * has a deliberately unlocked half, and why the whole .xcore region is NOT
+     * cleared here: the fault log and the interrupt counters in it are meant
+     * to survive the reset so the V3F can replay them. */
+    for (unsigned i = 0; i < CH32H4_HSEM_COUNT; i++) {
+        s_mutex_depth[i][0] = 0;
+        s_mutex_depth[i][1] = 0;
+    }
+}
+
+bool ch32h4_mutex_try_lock_rec(uint8_t id) {
+    if (id >= CH32H4_HSEM_COUNT) {
+        return false;
+    }
+    const uint8_t core = ch32h4_core_num() & 1u;
+    if (s_mutex_depth[id][core] != 0u) {
+        s_mutex_depth[id][core]++;      /* already ours */
+        return true;
+    }
+    if (!ch32h4_mutex_try_lock(id)) {
+        return false;
+    }
+    s_mutex_depth[id][core] = 1u;
+    return true;
+}
+
+void ch32h4_mutex_lock_rec(uint8_t id) {
+    if (id >= CH32H4_HSEM_COUNT) {
+        return;
+    }
+    const uint8_t core = ch32h4_core_num() & 1u;
+    if (s_mutex_depth[id][core]++ != 0u) {
+        return;
+    }
+    ch32h4_mutex_lock(id);
+}
+
+void ch32h4_mutex_unlock_rec(uint8_t id) {
+    if (id >= CH32H4_HSEM_COUNT) {
+        return;
+    }
+    const uint8_t core = ch32h4_core_num() & 1u;
+    if (s_mutex_depth[id][core] == 0u) {
+        /* Unlocking something this core does not hold. Doing nothing is the
+         * only safe answer: releasing the semaphore would hand the other core
+         * a lock it does not know it has. */
+        return;
+    }
+    if (--s_mutex_depth[id][core] == 0u) {
+        ch32h4_mutex_unlock(id);
+    }
 }
 
 static ch32h4_fifo_t *rx_ring(void) {
