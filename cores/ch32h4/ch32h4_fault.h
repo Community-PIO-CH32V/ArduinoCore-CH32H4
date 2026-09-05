@@ -84,14 +84,11 @@ extern volatile uint32_t ch32h4_irq_systick_count;
 /* Last Ethernet frame handed to lwIP: [31:16] EtherType, [15:8] IP proto,
  * [7:0] frame length. Survives the reset so the V3F can say which frame was
  * being processed when the core locked up. */
-extern volatile uint32_t ch32h4_eth_last_frame;
 /* Length of the last frame handed to the MAC for transmit, so a lockup in the
  * TX path can be told apart from one in the RX path. */
-extern volatile uint32_t ch32h4_eth_last_tx;
 /* Coarse progress marker through the ETH RX/TX path, so a lockup can be
  * localized: 1 RX frame, 2 TX entry, 3 TX queued, 4 RX descriptor handed
  * back, 5 ETH interrupt. */
-extern volatile uint32_t ch32h4_eth_phase;
 extern volatile uint32_t ch32h4_irq_usbfs_count;
 extern volatile uint32_t ch32h4_irq_usart1_count;
 extern volatile uint32_t ch32h4_irq_max_nesting;

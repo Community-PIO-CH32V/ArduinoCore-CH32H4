@@ -31,9 +31,6 @@ volatile ch32h4_fault_log_t ch32h4_fault_log_v3f CH32H4_XCORE;
  * them itself. The V3F prints and resets them on the next boot. */
 volatile uint32_t ch32h4_irq_eth_count      CH32H4_XCORE;
 volatile uint32_t ch32h4_irq_systick_count  CH32H4_XCORE;
-volatile uint32_t ch32h4_eth_last_frame     CH32H4_XCORE;
-volatile uint32_t ch32h4_eth_last_tx        CH32H4_XCORE;
-volatile uint32_t ch32h4_eth_phase          CH32H4_XCORE;
 volatile uint32_t ch32h4_irq_usbfs_count    CH32H4_XCORE;
 volatile uint32_t ch32h4_irq_usart1_count   CH32H4_XCORE;
 volatile uint32_t ch32h4_irq_max_nesting    CH32H4_XCORE;

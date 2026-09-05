@@ -494,10 +494,6 @@ static void eth_rx_frame(eth_t *self, const uint8_t *buf, size_t len) {
     } else if (ethertype == 0x0800 && len >= 24) {
         detail = buf[23];
     }
-    ch32h4_eth_phase = 1;
-    ch32h4_eth_last_frame = ((uint32_t)ethertype << 16)
-                          | ((uint32_t)detail << 8)
-                          | (len & 0xFFu);
 
     struct pbuf *p = pbuf_alloc(PBUF_RAW, len, PBUF_POOL);
     if (p == NULL) {
@@ -561,7 +557,6 @@ static void eth_rx_drain(eth_t *self) {
         eth_rx_cur->Status = ETH_DMARxDesc_OWN;
         __asm volatile("fence" ::: "memory");
         eth_rx_cur = (ETH_DMADESCTypeDef *)eth_rx_cur->Buffer2NextDescAddr;
-        ch32h4_eth_phase = 4;
     }
 
     /* Demand-poll unconditionally. If the DMA suspended for want of a
@@ -603,7 +598,6 @@ void eth_rx_process(void) {
 
 static err_t eth_netif_output(struct netif *netif, struct pbuf *p) {
     eth_t *self = netif->state;
-    ch32h4_eth_phase = 2;
 
     if (!self->link_up) {
         return ERR_IF;
@@ -642,7 +636,6 @@ static err_t eth_netif_output(struct netif *netif, struct pbuf *p) {
         return ERR_BUF;
     }
 
-    ch32h4_eth_last_tx = p->tot_len;
     eth_tx_cur->ControlBufferSize = len & ETH_DMATxDesc_TBS1;
     eth_tx_cur->Status |= ETH_DMATxDesc_FS | ETH_DMATxDesc_LS | ETH_DMATxDesc_OWN;
 
@@ -656,7 +649,6 @@ static err_t eth_netif_output(struct netif *netif, struct pbuf *p) {
      * the bit is still set. */
     ETH->DMASR = ETH_DMASR_TBUS;
     ETH->DMATPDR = 0;
-    ch32h4_eth_phase = 3;
 
     self->stats.tx_frames++;
     eth_tx_cur = (ETH_DMADESCTypeDef *)eth_tx_cur->Buffer2NextDescAddr;
@@ -676,14 +668,11 @@ void CH32H4_IRQ_HANDLER(ETH_IRQHandler);
 void ETH_IRQHandler(void) {
     ch32h4_irq_enter(&ch32h4_irq_eth_count);
     eth_irq_handler();
-    ch32h4_eth_phase = 6;
     ch32h4_irq_exit();
-    ch32h4_eth_phase = 7;
 }
 
 void eth_irq_handler(void) {
     eth_t *self = &eth_instance;
-    ch32h4_eth_phase = 5;
     uint32_t status = ETH->DMASR;
 
     /* This handler does no work beyond acknowledging the hardware and setting

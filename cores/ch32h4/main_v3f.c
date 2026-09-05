@@ -90,9 +90,6 @@ void ch32h4_v3f_main(void) {
         ch32h4_irq_usart1_count  = 0;
         ch32h4_irq_max_nesting   = 0;
         ch32h4_irq_nesting       = 0;
-        ch32h4_eth_last_frame    = 0;
-        ch32h4_eth_last_tx       = 0;
-        ch32h4_eth_phase         = 0;
     }
 
     /* A magic word cannot police this region on its own. .xcore is NOLOAD and
@@ -195,13 +192,6 @@ void ch32h4_v3f_main(void) {
         ch32h4_console_puts(" max_nesting=");
         ch32h4_console_putu(ch32h4_irq_max_nesting);
         ch32h4_console_puts("\n");
-        ch32h4_console_puts("last_frame=");
-        ch32h4_console_puthex(ch32h4_eth_last_frame);
-        ch32h4_console_puts(" last_tx=");
-        ch32h4_console_putu(ch32h4_eth_last_tx);
-        ch32h4_console_puts(" phase=");
-        ch32h4_console_putu(ch32h4_eth_phase);
-        ch32h4_console_puts("\n");
     }
 
     ch32h4_irq_eth_count     = 0;
@@ -210,9 +200,6 @@ void ch32h4_v3f_main(void) {
     ch32h4_irq_usart1_count  = 0;
     ch32h4_irq_max_nesting   = 0;
     ch32h4_irq_nesting       = 0;
-    ch32h4_eth_last_frame    = 0;
-    ch32h4_eth_last_tx       = 0;
-    ch32h4_eth_phase         = 0;
 
     /* Say which reference we got, loudly. On the internal RC the board runs
      * and looks healthy, but the Ethernet PLL never locks and USB is out of

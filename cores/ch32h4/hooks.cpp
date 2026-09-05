@@ -31,7 +31,6 @@ extern "C" void ch32h4_net_update(void) __attribute__((weak));
 extern "C" {
 
 void yield(void) {
-    ch32h4_eth_phase = 14;
 #ifdef CH32H4_USB
     /* The USB stack belongs to the V5F. loop1() on the V3F calls delay(),
      * which calls yield(), and letting that reach tud_task() would put two
@@ -77,13 +76,9 @@ void yield(void) {
      * nothing: it is doing this work, and the next yield() comes round in
      * microseconds. */
     if (TinyUSB_Device_Task && ch32h4_usb_lock()) {
-        ch32h4_eth_phase = 15;
         TinyUSB_Device_Task();
-        ch32h4_eth_phase = 16;
         if (TinyUSB_Device_FlushCDC) {
-            ch32h4_eth_phase = 17;
             TinyUSB_Device_FlushCDC();
-            ch32h4_eth_phase = 18;
         }
         ch32h4_usb_unlock();
     }
@@ -91,18 +86,15 @@ void yield(void) {
     in_yield = false;
 #endif
 
-    ch32h4_eth_phase = 19;
     /* Software timers, if the sketch linked the Ticker library. Weak, so a
      * sketch that does not use it pays nothing and the symbol resolves to
      * null. */
     if (ch32h4_ticker_update) {
         ch32h4_ticker_update();
     }
-    ch32h4_eth_phase = 20;
     if (ch32h4_net_update) {
         ch32h4_net_update();
     }
-    ch32h4_eth_phase = 21;
 }
 
 /* Called from ch32h4_v5f_main(), which is C.

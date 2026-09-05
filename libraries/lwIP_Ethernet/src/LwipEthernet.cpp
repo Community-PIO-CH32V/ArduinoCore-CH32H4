@@ -194,11 +194,9 @@ void LwipEthernetClass::update() {
      * 1.5 ms of a saturated 100 Mbit link, so a hook that arrives late has
      * little margin; the drain costs one flag read when there is nothing to
      * do. */
-    ch32h4_eth_phase = 9;
     eth_lwip_lock();
     eth_rx_process();
     eth_lwip_unlock();
-    ch32h4_eth_phase = 10;
 
     /* The timer sweep -- DHCP renewal, TCP retransmission, ARP ageing -- and
      * the link re-check only need doing once a millisecond. lwIP's timers have
@@ -208,13 +206,10 @@ void LwipEthernetClass::update() {
     uint32_t now = millis();
     if (now != last_ms) {
         last_ms = now;
-        ch32h4_eth_phase = 11;
         eth_lwip_lock();
         sys_check_timeouts();
-        ch32h4_eth_phase = 12;
         eth_poll();
         eth_lwip_unlock();
-        ch32h4_eth_phase = 13;
     }
 
     in_update = false;
