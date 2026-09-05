@@ -100,40 +100,40 @@ image that was truncated or corrupted in transit.
 
 ---
 
-## The unknown that has to be measured first
+## The unknown, now measured
 
-**What happens to the V3F while the V5F is programming flash?**
+**What happens to the V3F while the V5F is programming flash?** It hangs the
+part — and the answer arrived with a bench rescue, so it is worth stating
+plainly.
 
-Both cores execute XIP from the same flash. The V5F's committer runs from ITCM
-with its own interrupts masked, which is what makes it safe *for the V5F*. The
-V3F is not covered by any of that: it is running `ch32h4_v3f_main` out of
-`FLASH_V3F`, and it takes interrupts.
+Of the three possibilities this section used to list, none was right. There is
+no stall-and-resume, no bank separation and no garbage execution. The page
+program simply never returns, and the watchdog is the only way back.
 
-Three things could be true and they lead to different designs:
+| operation | V3F parked in ITCM | V3F running from flash |
+|---|---|---|
+| erase one 8 KB page | ok | ok |
+| erase + program one 256 B page | ok | **hangs** |
+| erase + program 128 KB | ok, verified | hangs |
 
-1. The flash controller stalls reads across the whole array during an erase or
-   program. The V3F stalls too, resumes afterwards, and nothing is wrong — but
-   a V3F interrupt that arrives mid-stall is delayed by the length of a page
-   operation, which is microseconds and almost certainly fine.
-2. It stalls only the bank being written, and the V3F is in the other one. Then
-   nothing happens at all.
-3. A read during a program returns garbage rather than stalling. Then the V3F
-   executes garbage, and the failure is a hard fault on the other core in the
-   middle of an update — the worst possible moment.
+The asymmetry is the cache. The V5F has an instruction cache and its
+programming loop is in ITCM besides; the V3F is in-order with no cache, so it
+fetches every instruction from the array being written. `docs/hazards.md` has
+the full write-up and the evidence.
 
-**LittleFS already writes flash from the V5F while the V3F is running**, and
-the hardware suite passes, which is evidence against (3) but not proof: those
-writes are single 256-byte pages, not four hundred kilobytes of continuous
-erase and program, and nothing in the suite is watching the V3F closely during
-them.
+**This is a live hazard, not only an OTA constraint.** A dualcore sketch
+writing LittleFS or EEPROM while `loop1()` runs hangs today. Every test that
+made flash writes look safe was run with the second core asleep in stop mode,
+where it fetches nothing.
 
-The measurement: park the V3F in an ITCM-resident loop with a counter, run a
-large erase/program from the V5F, and check the counter advanced and no fault
-was recorded. An hour's work, and it decides whether the committer needs to
-halt the V3F first — which it can, through the existing cross-core mechanism —
-or whether it can ignore it.
-
----
+**So the committer must park the V3F**, and so must the filesystem. The
+demonstration in `tests/sketches/dualcore` is a request flag and an
+acknowledgement in `.xcore` plus an `__itcm_func` spin loop; with it, 128 KB
+erases and programs cleanly while the V3F spins two million times. A
+cooperative flag is not enough on its own, because `loop1()` need not ever
+reach the check -- the general mechanism is an ITCM-resident IPC interrupt
+handler, called from `ch32h4_flash_erase()` and `ch32h4_flash_write()` so that
+nothing has to remember to do it.
 
 ## What is missing beyond the library
 
@@ -161,8 +161,9 @@ else of that size in this core.
 
 Feasible, and worth doing, in this order:
 
-1. **Measure the V3F behaviour during a large flash write.** Nothing should be
-   designed until this is known, and it is an hour.
+1. ~~**Measure the V3F behaviour during a large flash write.**~~ Done: it
+   hangs the part, and the fix is to park the V3F in ITCM. See above. The same
+   fix is owed to LittleFS and EEPROM, which have the same problem today.
 2. **Port arduino-pico's `ArduinoOTA` onto `arduino::Client`/`UDP`**, as
    `WebServer` and `HTTPClient` were. Stage in heap, verify MD5 before
    committing, commit from ITCM with the V3F parked if step 1 says so.

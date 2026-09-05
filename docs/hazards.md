@@ -961,3 +961,67 @@ Test it per master; do not carry it across by analogy.
 `cores/ch32h4/tusb_config.h`,
 `libraries/Adafruit_TinyUSB_Arduino/src/arduino/ports/ch32h4/tusb_config_ch32h4.h`,
 `libraries/Adafruit_TinyUSB_Arduino/src/portable/wch/dcd_ch32_usbfs.c`.
+
+---
+
+## Programming a flash page hangs the part if the other core is running
+
+**Symptom.** `ch32h4_flash_write()` does not return. Not a fault, not corrupted
+data — the board simply stops, and only the watchdog gets it back. Erasing is
+fine; it is the page *program* that never completes.
+
+It needs a sketch that uses the second core. A sketch with no `loop1()` leaves
+the V3F asleep in stop mode, where it fetches nothing, and everything works —
+which is why LittleFS and EEPROM have always passed their tests.
+
+**Cause.** Both cores execute XIP from the same flash array, and only one of
+them is protected. The V5F has an instruction cache, so its programming loop
+runs from cache while the array is busy; `flash_program_page()` is in ITCM as
+well. **The V3F is in-order and has no instruction cache**, so it fetches every
+instruction it executes from the flash the other core is writing.
+
+`ch32h4_flash_erase()` is not even in ITCM — it calls the SDK's
+`FLASH_ErasePage()` from flash — and gets away with it for the same reason.
+
+**Measured**, on the `dualcore` sketch, with the V3F running an ordinary
+flash-resident `loop1()`:
+
+| operation | V3F parked in ITCM | V3F running from flash |
+|---|---|---|
+| erase one 8 KB page | ok, 49 042 spins through it | ok, 197 loops through it |
+| erase + program one 256 B page | ok, 69 120 spins | **hangs**, IWDG resets it |
+| erase + program 128 KB | ok, 2 111 157 spins, verified | hangs |
+
+The step markers are printed and flushed before each operation, so the last
+line on the wire names the one that did it:
+
+```
+fs_parked=0
+fs_step=erase-one-page
+fs_step=program-one-page      <- last line
+rst=0x20000000 iwdg
+```
+
+No fault is recorded on either core. It is a hang, not a trap.
+
+**Consequences beyond OTA.** A dualcore sketch that writes LittleFS or EEPROM
+from `setup()`/`loop()` while `loop1()` is running will hang. That is a live
+hazard in shipped code, not only a constraint on a future updater.
+
+**Fix.** Park the other core in ITCM for the duration. `tests/sketches/dualcore`
+has a working demonstration: a request flag and an acknowledgement in `.xcore`,
+and an `__itcm_func` spin loop the V3F sits in so that it touches no flash at
+all. With that in place a 128 KB erase-and-program completes and verifies while
+the V3F spins two million times.
+
+Doing it cooperatively — a flag the other core notices — only works if that
+core reaches the check, which `loop1()` need not. The general fix is an
+ITCM-resident IPC interrupt handler that parks whichever core it lands on,
+called automatically from `ch32h4_flash_erase()` and `ch32h4_flash_write()`.
+
+**The lesson worth keeping.** "Both cores run from one flash array" is not a
+symmetric statement when one of them has a cache and the other does not. Every
+test that made flash writes look safe was run with the second core asleep.
+
+**Where.** `cores/ch32h4/ch32h4_flash.c`, `tests/sketches/dualcore/src/main.cpp`,
+`tests/hw/test_dualcore.py`.
