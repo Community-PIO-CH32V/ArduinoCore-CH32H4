@@ -70,21 +70,60 @@ const String HTTPClient::defaultUserAgent = defaultUserAgentPstr;
 //}
 
 // Wrappers for ESP8266-specific Arduino API changes
-static size_t StreamSendSize(Stream *s, Print *c, int size) {
+//
+// PORTED: `conn` is new, and so is everything it guards.
+//
+// Stream::read() returning -1 does not mean the stream ended. It means no byte
+// has arrived YET, which for a socket is the normal state between segments --
+// and the loop below used to treat it as the end. The effect was not a slow
+// transfer but a silently truncated one, and the way it truncated is worth
+// knowing because it is what made it look like it worked: a body large enough
+// that the next byte was almost always already buffered came through intact,
+// while a small body sent in its own segment just after the headers arrived to
+// find the reader already gone. Responses under a kilobyte came back empty
+// with a 200 status.
+//
+// It did not show up on the core this was taken from because there the socket
+// read waits internally. Here Stream::read() is non-blocking by contract, so
+// the waiting has to happen at this level.
+//
+// When `conn` is given, -1 means "not yet" and the loop yields -- which is also
+// what lets the next segment arrive, since the network stack runs from yield()
+// -- until the peer has both closed and been drained, or the transfer goes
+// idle for STREAM_IDLE_TIMEOUT_MS. Without `conn` the old meaning stands: the
+// callers that pass nothing are reading a Stream the sketch supplied, where -1
+// really is the end.
+//
+// The timeout is now measured from the last byte rather than from the start.
+// Five seconds for a whole transfer is not a timeout, it is a size limit -- a
+// 1 MB download over a slow link would fail with no error and a short body,
+// which is the same failure this comment is about.
+static const uint32_t STREAM_IDLE_TIMEOUT_MS = 5000;
+
+static size_t StreamSendSize(Stream *s, Print *c, int size,
+                             Client *conn = nullptr) {
     int sent = 0;
     if (size < 0) {
         size = 999999; // Transfer until read fails
     }
-    uint32_t start = millis();
-    while ((sent < size) && (millis() - start < 5000)) {
+    uint32_t last = millis();
+    while ((sent < size) && (millis() - last < STREAM_IDLE_TIMEOUT_MS)) {
         int x = s->read();
         if (x < 0) {
-            break;
-        } else if (c->write(x)) {
-            sent++;
-        } else {
+            if (!conn) {
+                break;
+            }
+            if (!conn->connected() && conn->available() <= 0) {
+                break;  // closed and drained: this really is the end
+            }
+            yield();
+            continue;
+        }
+        if (!c->write(x)) {
             break;
         }
+        sent++;
+        last = millis();
     }
     return sent;
 }
@@ -856,7 +895,10 @@ int HTTPClient::writeToPrint(Print * print) {
     if (_transferEncoding == HTTPC_TE_IDENTITY) {
         // len < 0: transfer all of it, with timeout
         // len >= 0: max:len, with timeout
-        ret = StreamSendSize(_client(), print, len);
+        // The response body, straight off the socket: `_client()` is passed
+        // twice on purpose -- once as the stream to read and once as the
+        // connection whose state says whether a -1 is a pause or the end.
+        ret = StreamSendSize(_client(), print, len, _client());
 
         if (len > 0 && ret != len) {
             return HTTPC_ERROR_NO_STREAM;
@@ -866,6 +908,9 @@ int HTTPClient::writeToPrint(Print * print) {
         //            return returnError(StreamReportToHttpClientReport(_client->getLastSendReport()));
         //        }
     } else if (_transferEncoding == HTTPC_TE_CHUNKED) {
+        // No `conn` here, deliberately: HTTPStream::read() does its own
+        // waiting on the socket underneath, so a -1 from it is a real end of
+        // the chunk stream rather than a pause.
         ret = StreamSendSize(&_stream, print, -1);
 
         if (ret == 0) {

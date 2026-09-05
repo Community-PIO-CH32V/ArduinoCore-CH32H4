@@ -62,6 +62,8 @@ amplifier and a WCH-Link attached.
 | **M5** | SD block layer, FatFs R0.16, the FS/File API, the classic `SD` shim | verified |
 | **M6** | lwIP 2.2.1, on-chip Ethernet, TCP/UDP client and server, SNTP | verified |
 | **M7** | mbedTLS 3.6.7, AES on the ECDC block, entropy from the TRNG | verified |
+| | `WebServer` and `HTTPClient`, over any Arduino `Client` | verified |
+| | HTTPS: `EthernetServerSecure`, `WebServerSecure`, mutual TLS | verified |
 | | RTC on LSI, LSE and HSE, wired into `gettimeofday()` | verified |
 | | LittleFS in the flash tail, and the EEPROM above it | verified |
 | | Arduino IDE / arduino-cli build | verified |
@@ -159,6 +161,28 @@ board_build.exceptions = enabled
 
 Both settings build, link and run; a `throw` is caught on hardware. Enabling
 costs roughly 30 KB of unwind tables, which stay in flash.
+
+Networking and TLS are options too, because both are large and most sketches
+want neither:
+
+```ini
+board_build.network = ethernet
+board_build.tls = mbedtls          ; a TLS client
+board_build.tls = mbedtls-server   ; a client and a server
+```
+
+`mbedtls` is about 250 KB of flash. `mbedtls-server` adds another 45 KB for the
+server-side handshake, which is why it is separate: a sketch that only fetches
+an HTTPS endpoint should not carry a state machine it never enters.
+`EthernetServerSecure` and `WebServerSecure` exist only in that build, and say
+so with a `#error` rather than an undefined reference.
+
+One thing that catches people, and is not a bug in the library: **a board
+cannot connect to its own address.** lwIP here is built without
+`LWIP_NETIF_LOOPBACK`, so a packet addressed to the board leaves by the
+Ethernet port and nothing sends it back; the connection is refused. A sketch
+that is both client and server would deadlock in any case, since `handleClient()`
+only runs from `loop()`.
 
 ### The Arduino IDE
 

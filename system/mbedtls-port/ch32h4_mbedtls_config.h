@@ -4509,12 +4509,23 @@
 
 /* ---- size ---------------------------------------------------------------
  *
- * A TLS *client* talking to public servers. Everything below is off because
- * this board is not a server, does not speak DTLS, and does not need the
- * legacy key exchanges -- and each one is flash and RAM that a sketch fetching
- * an HTTPS endpoint would otherwise pay for. */
+ * A TLS client talking to public servers, and -- when asked for -- a server
+ * as well. Everything below is off because this board does not speak DTLS and
+ * does not need the legacy key exchanges, and each one is flash and RAM that a
+ * sketch fetching an HTTPS endpoint would otherwise pay for. */
 
+/* The server half is a build option, because it is not small: the handshake
+ * state machine, the session cache and the certificate-request paths are only
+ * reachable from it. A sketch that only fetches HTTPS should not carry them.
+ *
+ * Turned on by board_build.tls = mbedtls-server, or the IDE's TLS menu, both
+ * of which define CH32H4_TLS_SERVER. EthernetServerSecure and WebServerSecure
+ * exist only in that build; the #error in EthernetServerSecure.h says so
+ * rather than letting it fail as an undefined reference at link time. */
+#ifndef CH32H4_TLS_SERVER
 #undef MBEDTLS_SSL_SRV_C
+#endif
+
 #undef MBEDTLS_SSL_PROTO_DTLS
 #undef MBEDTLS_SSL_DTLS_ANTI_REPLAY
 #undef MBEDTLS_SSL_DTLS_HELLO_VERIFY

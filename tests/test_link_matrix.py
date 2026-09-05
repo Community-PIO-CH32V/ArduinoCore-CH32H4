@@ -66,6 +66,44 @@ def test_usb_buffers_are_in_reachable_memory():
     raise AssertionError(".usbram section missing entirely")
 
 
+NM = (pathlib.Path.home()
+      / ".platformio/packages/toolchain-riscv/bin/riscv-wch-elf-nm.exe")
+
+
+def _defines(elf: pathlib.Path, symbol: str) -> bool:
+    if not NM.is_file() or not elf.is_file():
+        pytest.skip("toolchain or firmware.elf missing")
+    out = subprocess.run([str(NM), str(elf)],
+                         capture_output=True, text=True, check=True).stdout
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) >= 3 and fields[2] == symbol and fields[1] in "TtWw":
+            return True
+    return False
+
+
+def test_the_tls_server_option_is_what_decides():
+    """board_build.tls = mbedtls-server has to actually change the image.
+
+    The server half of mbedtls is about 45 KB, which is the whole reason it is
+    a build option rather than always on. An option that quietly did nothing
+    would look identical from every other angle: the client build would still
+    work, the server build would still work, and every sketch would pay.
+
+    mbedtls_ssl_handshake_server_step is the entry point to the server-side
+    state machine and exists in no other configuration, so its presence is the
+    option, observed rather than assumed.
+    """
+    client_only = SKETCHES / "tlstest/.pio/build/ch32h417/firmware.elf"
+    with_server = SKETCHES / "tlsserver/.pio/build/ch32h417/firmware.elf"
+    symbol = "mbedtls_ssl_handshake_server_step"
+    assert not _defines(client_only, symbol), \
+        "tlstest is built with board_build.tls = mbedtls and should have no " \
+        "server handshake in it at all"
+    assert _defines(with_server, symbol), \
+        "tlsserver is built with board_build.tls = mbedtls-server and must have it"
+
+
 OBJDUMP = (pathlib.Path.home()
            / ".platformio/packages/toolchain-riscv/bin/riscv-wch-elf-objdump.exe")
 

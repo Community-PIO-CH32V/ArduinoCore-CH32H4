@@ -316,7 +316,9 @@ def _sync(sketch: str) -> str:
 
 
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
-                  "tls_board", "dualcore_board", "adc_board", "i2s_board",
+                  "tls_board", "tls_server_board", "web_board",
+                  "dualcore_board",
+                  "adc_board", "i2s_board",
                   "lfs_board", "uart_board", "spi_board",
                   "wire_board", "dog_board", "spi_slave_board",
                   "wire_slave_board")
@@ -433,6 +435,35 @@ def tls_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("tlstest")
+
+
+@pytest.fixture(scope="session")
+def tls_server_board():
+    """The sketch that SERVES HTTPS, rather than fetching it.
+
+    A separate image from tlstest for a reason beyond flash: it is built with
+    board_build.tls = mbedtls-server, which is what compiles MBEDTLS_SSL_SRV_C
+    in. The two builds are the thing being distinguished -- a server that
+    accidentally worked in the client-only build would mean the option does
+    nothing.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("tlsserver")
+
+
+@pytest.fixture(scope="session")
+def web_board():
+    """WebServer and HTTPClient, over plain HTTP.
+
+    Separate from tlsserver so the two are actually distinguishable: both
+    libraries are the same ported code, and if only the HTTPS image were
+    tested a break that mbedtls happened to paper over would go unseen. It is
+    also the only image where HTTPClient runs at all.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("webserver")
 
 
 @pytest.fixture(scope="session")

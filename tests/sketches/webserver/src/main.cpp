@@ -69,13 +69,29 @@ void loop() {
           Serial1.println((int)s_hits);
 
         } else if (line.startsWith("webget ")) {
-          /* HTTPClient against our own WebServer. One sketch, both libraries,
-             a real socket between them -- which is the only way to find out
-             whether the two ports agree about what an HTTP response is. */
-          const String path = line.substring(7);
+          /* HTTPClient against a FULL URL the test supplies, which points at a
+             server on the test machine.
+
+             NOT at our own WebServer, which is what this used to do and which
+             cannot work for two independent reasons -- both worth writing down,
+             because each one looks like a bug in the library:
+
+             1. lwIP is built without LWIP_NETIF_LOOPBACK, so a packet addressed
+                to this board's own address is routed OUT of the Ethernet port.
+                Nothing sends it back. connect() fails, and HTTPClient reports
+                it as -1, which reads like the server being down.
+
+             2. Even with loopback, this sketch is single-threaded: the request
+                would sit in the listen queue until handleClient() ran, and
+                handleClient() only runs from loop(), which is blocked here.
+                That is a deadlock, not a slow response.
+
+             Pointing at a real server elsewhere is also the better test: an
+             HTTP implementation that shares no code with ours is the only thing
+             that can say our requests are well formed. */
+          const String url = line.substring(7);
           EthernetClient client;
           HTTPClient http;
-          String url = "http://" + Ethernet.localIP().toString() + path;
           if (!http.begin(client, url)) {
             Serial1.println("web_get_rc=-1000");
           } else {

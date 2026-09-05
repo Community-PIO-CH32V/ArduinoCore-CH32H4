@@ -41,11 +41,8 @@
    part has. WebServerTemplate takes any server exposing a ClientType, so a
    future transport needs one line here and nothing else.
 
-   THERE IS NO WebServerSecure. arduino-pico pairs one with a WiFiServerSecure
-   and we have no equivalent: the TLS here is mbedTLS driving an outgoing
-   connection, which is what EthernetClientSecure and HTTPClient use, and an
-   incoming TLS server needs a server-side handshake and a certificate and
-   private key on the device. Shipping the header without the server behind it
-   would give a compile error naming a type nobody can supply, which is worse
-   than not shipping it. */
+   HTTPS is WebServerSecure.h, deliberately a separate header: including it is
+   what drags in mbedTLS, and a sketch serving plain HTTP should not pay a
+   quarter of a megabyte of flash for a stack it never calls. It needs
+   board_build.tls = mbedtls-server. */
 using WebServer = WebServerTemplate<EthernetServer>;

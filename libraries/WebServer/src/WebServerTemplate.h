@@ -64,6 +64,21 @@ public:
     }
 
 private:
+    /* PORTED: arduino::Client, Stream and Print have no virtual destructor, so
+       `delete _currentClient` through the Client* would run no destructor for
+       the concrete type at all. With EthernetClient that leaks the socket's
+       refcount; with EthernetClientSecure it leaks an entire mbedTLS session,
+       tens of kilobytes, on every request. The object really is a ClientType
+       -- handleClient() is what allocated it -- so casting back before the
+       delete is both correct and the only place the type is known. */
+    void _deleteCurrentClient() {
+        delete (ClientType *)_currentClient;
+        _currentClient = nullptr;
+    }
+
+public:
+
+private:
     ServerType _server;
 };
 
@@ -98,8 +113,7 @@ template <typename ServerType, int DefaultPort>
 void WebServerTemplate<ServerType, DefaultPort>::handleClient() {
     if (_currentStatus == HC_NONE) {
         if (_currentClient) {
-            delete _currentClient;
-            _currentClient = nullptr;
+            _deleteCurrentClient();
         }
 
         _currentClient = new ClientType(_server.accept());
@@ -123,7 +137,12 @@ void WebServerTemplate<ServerType, DefaultPort>::handleClient() {
         case HC_WAIT_READ:
             // Wait for data from client to become available
             if (_currentClient->available()) {
-                _currentClient->setTimeout(HTTP_MAX_SEND_WAIT);
+                /* PORTED: Stream::setTimeout is not virtual, so through a
+                   Client* this would set Stream's field and never reach the
+                   transport's own timeout -- the socket's on Ethernet, the
+                   TLS write loop's on EthernetClientSecure. Cast, as with the
+                   delete above. */
+                ((ClientType *)_currentClient)->setTimeout(HTTP_MAX_SEND_WAIT);
                 switch (_parseRequest(_currentClient)) {
                 case CLIENT_REQUEST_CAN_CONTINUE:
                     _contentLength = CONTENT_LENGTH_NOT_SET;
@@ -177,8 +196,7 @@ void WebServerTemplate<ServerType, DefaultPort>::handleClient() {
 
     if (!keepCurrentClient) {
         if (_currentClient) {
-            delete _currentClient;
-            _currentClient = nullptr;
+            _deleteCurrentClient();
         }
         _currentStatus = HC_NONE;
         _currentUpload.reset();

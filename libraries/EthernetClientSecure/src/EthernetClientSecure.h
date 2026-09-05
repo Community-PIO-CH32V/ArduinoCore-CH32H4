@@ -1,23 +1,18 @@
-/* EthernetClientSecure -- TLS over EthernetClient, on mbedTLS.
+/* TLS over Ethernet, in the shape of WiFiClientSecure.
  *
- * The shape is WiFiClientSecure's, from the ESP cores, because that is what
- * sketches are written against:
+ * A Client that speaks TLS 1.2 and 1.3 through mbedTLS, with AES on the ECDC
+ * accelerator, entropy from the hardware TRNG, and certificate validity
+ * checked against the RTC -- which means a board whose clock has never been
+ * set rejects every certificate as "not yet valid". That is correct, and it
+ * is the commonest first failure; verifyErrorString() says so when it is what
+ * happened.
  *
- *     EthernetClientSecure client;
- *     client.setCACert(root_ca_pem);
- *     if (client.connect("example.com", 443)) { client.print("GET / ..."); }
- *
- * setInsecure() exists and is honestly named. It skips certificate
- * verification entirely, which means the connection is encrypted against a
- * passive listener and offers nothing at all against anyone who can answer for
- * the server -- which, on a network you do not control, is the threat. It is
- * there for bringing a board up, not for shipping.
- *
- * Certificate dates are checked against the RTC. A board whose clock has not
- * been set is somewhere in the year 2000, so every certificate reads as "not
- * yet valid" and every connection fails -- correctly, and confusingly. Sync
- * the clock first: see NTP.h. verifyError() says so in as many words when that
- * is what happened.
+ * COPYING ONE IS SAFE and shares the connection, the way EthernetClient and
+ * every other Arduino client behave. The mbedTLS state lives in one heap
+ * allocation that nothing moves -- see EthernetTlsSession.h for why it cannot
+ * live in this object -- and copies refer to it. That is what lets
+ * `EthernetClientSecure c = secureServer.accept();` work, and WebServer
+ * requires it.
  */
 #pragma once
 
@@ -25,16 +20,29 @@
 #include <Client.h>
 
 #include "EthernetClient.h"
-
-#include "mbedtls/ctr_drbg.h"
-#include "mbedtls/entropy.h"
-#include "mbedtls/ssl.h"
-#include "mbedtls/x509_crt.h"
+#include "EthernetTlsSession.h"
 
 class EthernetClientSecure : public arduino::Client {
 public:
     EthernetClientSecure() { }
-    ~EthernetClientSecure() { stop(); }
+    ~EthernetClientSecure() { release(); }
+
+    EthernetClientSecure(const EthernetClientSecure &other) { copyFrom(other); }
+    EthernetClientSecure &operator=(const EthernetClientSecure &other) {
+        if (this != &other) {
+            release();
+            copyFrom(other);
+        }
+        return *this;
+    }
+
+    /* Adopt an already-connected session. EthernetServerSecure builds a
+     * client this way after it has run the server-side handshake. */
+    explicit EthernetClientSecure(EthernetTlsSession *session) : _s(session) {
+        if (_s) {
+            _s->ref();
+        }
+    }
 
     /* Trust this PEM chain, and nothing else. The pointer is kept, not
      * copied -- a string literal or a global is fine, a stack buffer is not. */
@@ -77,47 +85,58 @@ public:
 
     /* 0 when the certificate was accepted, otherwise mbedtls's verification
      * flags. verifyErrorString() renders them, including the clock case. */
-    uint32_t verifyError() const { return _verify_flags; }
+    uint32_t verifyError() const { return _s ? _s->verify_flags : 0; }
     String verifyErrorString() const;
 
     /* The last mbedtls return code, negative. Distinct from verifyError():
      * a handshake can fail for reasons that have nothing to do with the
      * certificate, and reporting those as a verification failure sends people
      * looking in the wrong place. */
-    int lastError() const { return _last_error; }
+    int lastError() const { return _s ? _s->last_error : _last_error; }
     String lastErrorString() const;
 
-    IPAddress remoteIP() const { return _tcp.remoteIP(); }
-    uint16_t remotePort() const { return _tcp.remotePort(); }
+    IPAddress remoteIP() const {
+        return _s ? _s->tcp.remoteIP() : IPAddress((uint32_t)0);
+    }
+    uint16_t remotePort() const { return _s ? _s->tcp.remotePort() : 0; }
 
 private:
-    bool handshake(const char *hostname);
-    void freeContexts();
+    void release() {
+        if (_s) {
+            _s->unref();
+            _s = nullptr;
+        }
+    }
 
-    static int bioSend(void *ctx, const unsigned char *buf, size_t len);
-    static int bioRecv(void *ctx, unsigned char *buf, size_t len);
+    void copyFrom(const EthernetClientSecure &other) {
+        _s = other._s;
+        if (_s) {
+            _s->ref();
+        }
+        _ca_pem = other._ca_pem;
+        _cert_pem = other._cert_pem;
+        _key_pem = other._key_pem;
+        _hostname = other._hostname;
+        _insecure = other._insecure;
+        _timeout_ms = other._timeout_ms;
+        _handshake_ms = other._handshake_ms;
+        _last_error = other._last_error;
+    }
 
-    EthernetClient _tcp;
+    /* Fresh session for a new outgoing connection. */
+    bool newSession();
 
-    mbedtls_ssl_context _ssl = {};
-    mbedtls_ssl_config _conf = {};
-    mbedtls_ctr_drbg_context _drbg = {};
-    mbedtls_entropy_context _entropy = {};
-    mbedtls_x509_crt _ca = {};
-    mbedtls_x509_crt _cert = {};
-    mbedtls_pk_context _key = {};
+    EthernetTlsSession *_s = nullptr;
 
     const char *_ca_pem = nullptr;
     const char *_cert_pem = nullptr;
     const char *_key_pem = nullptr;
     const char *_hostname = nullptr;
-
     bool _insecure = false;
-    bool _connected = false;
-    bool _contexts_up = false;
-    uint32_t _verify_flags = 0;
-    int _last_error = 0;
     uint32_t _timeout_ms = 5000;
-    uint32_t _handshake_ms = 20000;
-    uint32_t _deadline = 0;
+    uint32_t _handshake_ms = 10000;
+
+    /* Only for failures that happen before a session exists -- a TCP connect
+     * that never completed. Once there is a session, its own code wins. */
+    int _last_error = 0;
 };
