@@ -1,6 +1,6 @@
 {
   "name": "framework-arduinoch32h4",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Arduino core for the WCH CH32H41x dual-core RISC-V MCU",
   "keywords": ["framework", "arduino", "ch32h4", "risc-v", "wch"],
   "license": "LGPL-2.1-or-later",
