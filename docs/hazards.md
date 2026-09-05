@@ -1178,7 +1178,15 @@ advertised escape hatch needed the probe it had locked out.
 with it, the probe attaches to a fault-guarded board and can dump all 182 KB of
 flash, which was impossible before.
 
-**Do not use `wlink status` to decide whether this board is alive.** wlink has
-no CH32H417 support — its `--chip` list stops at CH32V317 — so it fails
-unconditionally here, on a perfectly healthy part. Flashing goes through
-openocd; use openocd to test liveness.
+**`wlink status` is not a liveness test.** It reported "Probe is not attached
+to an MCU, or debug is not enabled" on a board `openocd` attached to in the
+same minute, finding both harts and examining the target successfully. Believing
+it cost several unnecessary NRST-and-erase rescues of a perfectly healthy part.
+Check with `openocd -c init` before concluding anything is wrong.
+
+**But wlink is still the right tool to PROGRAM with.** It has explicit
+CH32H417 support and writes the whole flash; openocd fails to program the
+higher flash addresses, which is why the hardware test harness uses wlink and
+should keep doing so. That was established the hard way in the MicroPython and
+libhal work before this core existed. `wlink --chip` not listing CH32H417 says
+nothing about this — do not infer from it, as was done here.
