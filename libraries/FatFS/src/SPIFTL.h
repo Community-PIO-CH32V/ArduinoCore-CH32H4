@@ -52,12 +52,21 @@ public:
         assert(flashBytes <= 16 * 1024 * 1024); // We assume 16MB or less flash space with certain bitfields
         eraseBlocks = flashBytes / ebBytes;
         int theoreticalLBAs = eraseBlocks * ebBytes / lbaBytes;
-        metaEBBytes = /* peCount */ eraseBlocks + /* ebState */ (eraseBlocks + 1) / 2 + /* l2p */ (theoreticalLBAs * 2) + /* peCountOffset */ 4;
+        metaEBBytes = /* peCount */ eraseBlocks + /* ebState */ eraseBlocks + /* l2p */ (theoreticalLBAs * 2) + /* peCountOffset */ 4;
         metaEBs = 2 * (1 + metaEBBytes / (ebBytes - 64 /* header/footer/checksums */));
         flashLBAs = (eraseBlocks - 3 /* required for GC */ - metaEBs) * (ebBytes / lbaBytes);
         flashWriteBufferSize = fi->writeBufferSize();
+
+        /* How many bits the index within an erase block needs, and what is
+         * left for the block number. See the note on l2p_eb(). */
+        idxBits = 0;
+        while ((1 << idxBits) < (ebBytes / lbaBytes)) {
+            idxBits++;
+        }
+        ebFieldBits = 15 - idxBits;
+        assert(eraseBlocks <= (1 << ebFieldBits));
         peCount = new uint8_t[eraseBlocks];
-        ebState = new uint8_t[(eraseBlocks + 1) / 2];
+        ebState = new uint8_t[eraseBlocks];
         metaEBList = new int16_t[metaEBs];
         l2p = new L2P[flashLBAs];
         metadataEBList.reserve(metaEBs); // Guarantee it can fit the list and avoid any memory allocations during FTL persistence
@@ -92,7 +101,7 @@ public:
 #endif
         bzero(l2p, sizeof(L2P) * flashLBAs);
         bzero(peCount, sizeof(uint8_t) * eraseBlocks);
-        bzero(ebState, sizeof(uint8_t) * ((eraseBlocks + 1) / 2));
+        bzero(ebState, sizeof(uint8_t) * eraseBlocks);
         peCountOffset = 0;
         highestPECount = 0;
         emptyEBs = eraseBlocks;
@@ -149,7 +158,10 @@ public:
             printf("ERROR: maxPEDiff mismatch %d - %d    %d != %d\n", max, min, max - min, maxPEDiff);
             ret = false;
         }
-        uint8_t val[eraseBlocks];
+        /* One bit per slot, so it must be as wide as a block has slots:
+         * 16 here, 8 on a 4096-byte-block part. uint8_t carried the same
+         * 8-slot assumption as the nibble packing above. */
+        uint32_t val[eraseBlocks];
         bzero(val, sizeof(val));
         for (int i = 0; i < flashLBAs; i++) {
             if (l2p_val(i)) {
@@ -283,6 +295,9 @@ public:
        because the RP2040's flash erase is always 4096. */
     const int ebBytes;
     const int lbaBytes = 512;
+    /* Derived from the two above; see l2p_eb(). */
+    int idxBits = 3;
+    int ebFieldBits = 12;
     const int maxPEDiff = 64;
 
 private:
@@ -304,8 +319,16 @@ private:
     } FTLInfo;
 
     uint8_t *peCount; // We'll just track up to 250, and when we hit 251 we will subtract maxPEDiff from them all
-    // ebState: 0 = free, 1...8 = # of LBAs valid, 9..0xe = undefined, 0xf = meta
-    const unsigned int ebMeta = 0x0f;
+    /* ebState: 0 = free, 1..N = number of LBAs still valid in that block,
+     * 0xff = this block holds metadata.
+     *
+     * ONE BYTE PER BLOCK, where upstream packs two blocks into one byte as
+     * nibbles. A nibble holds 0..15, which is enough when a block has
+     * 4096/512 = 8 slots and not when it has 8192/512 = 16: the count of a
+     * full block reached 16, truncated to 0, and the allocator then erased a
+     * block that still held live data. The sentinel moved off 0x0f for the
+     * same reason -- 15 is a legitimate count here. */
+    const unsigned int ebMeta = 0xff;
     uint8_t *ebState;
     int16_t *metaEBList;
 
@@ -330,16 +353,11 @@ private:
     // ---- L2P AND ERASE BLOCK MANAGEMENT
 
     inline void setEBState(int eb, unsigned int state) {
-        int idx = eb / 2;
-        if (eb & 1) {
-            ebState[idx] = (ebState[idx] & 0x0f) | (state << 4);
-        } else {
-            ebState[idx] = (ebState[idx] & 0xf0) | state;
-        }
+        ebState[eb] = (uint8_t)state;
     }
 
     inline unsigned int getEBState(int eb) {
-        return 0x0f & (ebState[eb / 2] >> ((eb & 1) ? 4 : 0));
+        return ebState[eb];
     }
 
     inline bool ebIsMeta(int eb) {
@@ -350,12 +368,28 @@ private:
         setEBState(eb, ebMeta);
     }
 
+    /* The logical-to-physical entry packs into 16 bits: the erase block, the
+     * LBA's index within that block, and a valid flag in the top bit.
+     *
+     * THE SPLIT DEPENDS ON THE ERASE-BLOCK SIZE and cannot be a constant.
+     * Upstream hardcodes a 3-bit index, which is exactly right for the RP2040:
+     * 4096 / 512 = 8 slots per block. This part erases 8192 bytes, so a block
+     * holds 16 slots and needs 4 bits -- and with the constant left at 3, the
+     * top bit of every index above 7 was masked away. LBA n and LBA n+8 then
+     * resolved to the same physical slot, so a file's directory entry landed
+     * on the FAT and a boot sector appeared twice, eight LBAs apart. It read
+     * back correctly until something happened to occupy the aliasing partner,
+     * which is what made it look like a persistence bug.
+     *
+     * idxBits is derived, so 4096-byte blocks still get upstream's exact
+     * layout and larger ones get a correspondingly smaller block field. The
+     * constructor checks the block count still fits. */
     inline uint16_t l2p_eb(int lba) {
-        return l2p[lba] & ((1 << 12) - 1);
+        return l2p[lba] & (uint16_t)((1u << ebFieldBits) - 1u);
     }
 
     inline uint8_t l2p_idx(int lba) {
-        return (l2p[lba] >> 12) & ((1 << 3) - 1);
+        return (uint8_t)((l2p[lba] >> ebFieldBits) & ((1u << idxBits) - 1u));
     }
 
     inline bool l2p_val(int lba) {
@@ -364,7 +398,7 @@ private:
 
     inline L2P make_l2p(int idx, int eb) {
         L2P t = 1 << 15;
-        t |= idx << 12;
+        t |= (L2P)(idx << ebFieldBits);
         t |= eb;
         return t;
     }
@@ -571,8 +605,8 @@ private:
             writeMetadata8b(peCount[i], wb);
         }
 
-        // Dump ebState
-        for (int i = 0; i < (eraseBlocks + 1) / 2; i++) {
+        // Dump ebState, one byte per erase block
+        for (int i = 0; i < eraseBlocks; i++) {
             writeMetadata8b(ebState[i], wb);
         }
 
@@ -727,19 +761,13 @@ private:
             metaEBList[i] = -1;
         }
         emptyEBs = 0;
-        for (int i = 0, j = 0; i < (eraseBlocks + 1) / 2; i++) {
+        for (int i = 0, j = 0; i < eraseBlocks; i++) {
             ebState[i] = readMetadata8b();
             // Restore metaEBList as we read in
-            if (ebIsMeta(i * 2)) {
-                metaEBList[j++] = i * 2;
+            if (ebIsMeta(i)) {
+                metaEBList[j++] = i;
             }
-            if (ebIsMeta(i * 2 + 1)) {
-                metaEBList[j++] = i * 2 + 1;
-            }
-            if (getEBState(i * 2) == 0) {
-                emptyEBs++;
-            }
-            if (getEBState(i * 2 + 1) == 0) {
+            if (getEBState(i) == 0) {
                 emptyEBs++;
             }
         }
@@ -813,7 +841,10 @@ private:
 #endif
             pass = false;
         }
-        uint8_t val[eraseBlocks];
+        /* One bit per slot, so it must be as wide as a block has slots:
+         * 16 here, 8 on a 4096-byte-block part. uint8_t carried the same
+         * 8-slot assumption as the nibble packing above. */
+        uint32_t val[eraseBlocks];
         bzero(val, sizeof(val));
         for (int i = 0; i < flashLBAs; i++) {
             if (l2p_val(i)) {

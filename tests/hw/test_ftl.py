@@ -54,6 +54,31 @@ def test_written_lbas_read_back(ftl):
         assert r["ftl_read"] == 1 and r["ftl_match"] == 1, r.raw
 
 
+def test_lbas_within_one_erase_block_do_not_alias(ftl):
+    """Every slot in an erase block must be independently addressable.
+
+    THE REGRESSION TEST FOR A REAL BUG. The map packs erase block, slot index
+    and a valid flag into 16 bits, and upstream hardcodes three bits for the
+    index -- exactly right for 4096-byte blocks, which hold 4096/512 = 8
+    slots. This part erases 8192 bytes, so a block holds 16 and needs four
+    bits; with three, the top bit of every index above 7 was masked away and
+    LBA n aliased onto LBA n+8.
+
+    The tests above all passed with that bug present, because none of 0, 1,
+    17, 100 is eight apart from another. This writes a contiguous run longer
+    than one erase block, which cannot avoid it.
+    """
+    n = 40  # more than 16 slots, so it spans blocks and exercises every index
+    for lba in range(n):
+        r = kv(ftl.command(f"ftlwrite {lba}", timeout=20))
+        assert r["ftl_write"] == 1, r.raw
+    for lba in range(n):
+        r = kv(ftl.command(f"ftlverify {lba}", timeout=20))
+        assert r["ftl_match"] == 1, (
+            f"LBA {lba} read back as something else -- it is sharing a "
+            f"physical slot with another LBA")
+
+
 def test_an_unwritten_lba_reads_as_zeroes(ftl):
     """Not an error, and not stale flash.
 
