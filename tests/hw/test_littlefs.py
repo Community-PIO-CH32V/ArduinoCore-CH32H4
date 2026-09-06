@@ -21,7 +21,7 @@ import re
 
 import pytest
 
-from conftest import Reply, _sync
+from conftest import Reply, _sync, kv
 
 # The layout the linker script asserts. Restated here because the point of the
 # test is that the image on the board agrees with it, and a test that read the
@@ -31,23 +31,6 @@ FLASH_TOP = 0x08000000 + 960 * 1024
 ERASE_PAGE = 8 * 1024
 PROG_PAGE = 256
 ERASED_WORD = 0xE339E339
-
-
-def kv(text):
-    """Parse key=value replies. Values may be decimal, 0x-hex or a word."""
-    out = {}
-    for line in text.splitlines():
-        m = re.match(r"^([a-z0-9_]+)=(.+)$", line.strip())
-        if not m:
-            continue
-        key, raw = m.group(1), m.group(2).strip()
-        if re.fullmatch(r"-?\d+", raw):
-            out[key] = int(raw)
-        elif re.fullmatch(r"0[xX][0-9a-fA-F]+", raw):
-            out[key] = int(raw, 16)
-        else:
-            out[key] = raw
-    return Reply(text, out)
 
 
 @pytest.fixture(scope="module")

@@ -17,6 +17,7 @@ Three things here are deliberate and were expensive to learn elsewhere.
 """
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -319,7 +320,7 @@ BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "tls_server_board", "web_board",
                   "dualcore_board",
                   "adc_board", "i2s_board",
-                  "lfs_board", "uart_board", "spi_board",
+                  "lfs_board", "fatfs_board", "uart_board", "spi_board",
                   "wire_board", "dog_board", "spi_slave_board",
                   "wire_slave_board")
 
@@ -605,6 +606,40 @@ class Reply(dict):
     def __missing__(self, key):
         raise AssertionError(
             f"the board's reply has no {key!r}. Reply was:\n{self.raw}")
+
+
+# Shared by every test module that talks to a sketch: they all answer in
+# key=value lines, because a reply a test can misparse is a test that fails for
+# the wrong reason.
+def kv(text):
+    """Parse key=value replies. Values may be decimal, 0x-hex or a word."""
+    out = {}
+    for line in text.splitlines():
+        m = re.match(r"^([a-z0-9_]+)=(.+)$", line.strip())
+        if not m:
+            continue
+        key, raw = m.group(1), m.group(2).strip()
+        if re.fullmatch(r"-?\d+", raw):
+            out[key] = int(raw)
+        elif re.fullmatch(r"0[xX][0-9a-fA-F]+", raw):
+            out[key] = int(raw, 16)
+        else:
+            out[key] = raw
+    return Reply(text, out)
+
+
+@pytest.fixture(scope="session")
+def fatfs_board():
+    """The flash translation layer and the FAT filesystem above it.
+
+    Its own image for the same reason lfs_board is: this is the only other
+    thing that writes the flash the code is running from, and a sketch that
+    also mounted an SD card would hide which layer failed. Built with a 256 KB
+    partition, which is FatFS's minimum.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("fatfstest")
 
 
 @pytest.fixture(scope="session")
