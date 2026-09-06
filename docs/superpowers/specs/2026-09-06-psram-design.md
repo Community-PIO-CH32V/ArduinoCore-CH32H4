@@ -41,13 +41,34 @@ single-line phases keep working — a failure that looks exactly like a
 signal-integrity wall and is not one. This cost a full frequency sweep of
 false negatives before it was found.
 
-**25 MHz is a controller limit, not a board limit.** Quad reads fail above it
-regardless of dummy-cycle count, and adding dummy cycles rescues nothing —
-which rules out simple late-data. STM32's QUADSPI absorbs round-trip delay
-with a sample-shift bit (`CR` bit 4); on this part that bit position is
-undefined in WCH's header and setting it changes nothing measurable. There is
-no knob to turn. Separately, single-line reads fail above 33 MHz because
-`0x02`/`0x03` are the APS6404L's own slow commands — also not the board.
+**The clock ceiling is HCLK, not the core clock.** QSPI2 divides HCLK at
+100 MHz; the V5F's 400 MHz never reaches this peripheral, so prescaler 0 is
+100 MHz and that is the hardware maximum before anything else is considered.
+
+**25 MHz is a round-trip limit, not a board limit.** Reads must survive
+controller pad delay, flight to the chip, the chip's data-valid delay, flight
+back, and controller setup — and without a sample shift the controller samples
+about half a clock after launching the edge. That budget is 20 ns at 25 MHz
+and 15 ns at 33 MHz, and the path fits the first and not the second.
+
+Three measurements say timing rather than signal quality:
+
+- **Quad writes pass at every clock.** A write has no round trip: the
+  controller drives clock and data together and the chip samples with its own
+  setup and hold. Only reads have to come back.
+- **Extra dummy cycles rescue nothing.** Dummy cycles move when the burst
+  starts; they do not change each bit's phase against the clock, and the
+  failure is per-bit sampling. Simple late-data would have been fixed by them.
+- **Slew rate changed nothing**, where a marginal edge would have moved.
+
+STM32's QUADSPI absorbs exactly this with `SSHIFT` (`CR` bit 4). On this part
+that bit position is undefined in WCH's header and setting it changes nothing
+measurable. `CKMode` (Mode 0 against Mode 3) is the one remaining knob and was
+NOT tested during the probe; task 1 tests it before the 25 MHz default is
+treated as final.
+
+Separately, single-line reads fail above 33 MHz because `0x02`/`0x03` are the
+APS6404L's own slow commands — also not the board.
 
 **GPIO slew made no measurable difference** across Low/Medium/High/Very_High
 at every clock tested. Worth recording anyway: this part has an
@@ -173,10 +194,23 @@ Both return 0 before `begin()`.
 
 ## Out of scope
 
-- QPI mode (`0x35`). The `0xEB`/`0x38` commands take their instruction on one
-  line and address/data on four, so quad speed is already available without
-  ever entering QPI — and staying out of it removes a whole class of
-  mode-state bugs where the chip and the driver disagree about the protocol.
+- QPI mode (`0x35`) **for the first release, but not dismissed** — the earlier
+  claim that it "buys nothing" was true only for streaming. QPI shortens the
+  instruction phase from 8 clocks on one line to 2 on four, and nothing else:
+  `0xEB` already carries address and data 4 bits wide. A transaction costs
+  `20 + 2N` clocks in SPI mode against `14 + 2N` in QPI, so for a long
+  streaming read the saving rounds to zero — which the 12.50 MB/s measurement,
+  already 100% of line rate, confirms directly. For a 4-byte random read it is
+  28 clocks against 22, about 21% — and random access is half of what this is
+  for, so the saving is real.
+
+  It stays out of release one because entering QPI adds a mode-state the chip
+  and driver can disagree about, and because `SIOOMode` may capture the same
+  saving without that risk: it suppresses the instruction phase on repeated
+  transactions. Whether the APS6404L tolerates instruction-less continuation —
+  NOR flash does it with mode bits this part may lack — is a measurement, and
+  task 2 makes it. If SIOO works, QPI is unnecessary; if it does not, QPI
+  becomes a justified follow-up rather than a guess.
 - Using PSRAM as heap for `malloc()`. A newlib `sbrk` over a region that is
   read-only through its fast path is its own design.
 - QSPI1, and any second QSPI device.
