@@ -425,6 +425,9 @@ bool FatFSImpl::startFTL() {
      *
      * ONCE PER BOOT. See s_ftlStarted: a second call reloads the map and
      * discards anything mapped since the last persist. */
+    /* Cleared for the duration: start() rebuilds the map in place, and the
+       block API above must refuse while it is half-built. */
+    s_ftlStarted = false;
     s_ftlStarted = ch32h4_fatfs_ftl()->start();
     return s_ftlStarted;
 }
@@ -505,9 +508,9 @@ bool FatFSImpl::format() {
     /* The translation layer first: its metadata is what f_mkfs's sectors land
      * on, and writing a FAT onto a stale mapping produces a filesystem that
      * mounts exactly once. */
+    s_ftlStarted = false;   /* the map is about to be rebuilt; see above */
     if (!s_ftl->format() || !s_ftl->start()) {
         s_err = CH32H4_FATFS_ERR_FTL;
-        s_ftlStarted = false;
         return false;
     }
     s_ftlStarted = true;
@@ -715,20 +718,33 @@ uint32_t ch32h4_fatfs_sync_failures(void) {
     return s_syncFails;
 }
 
+/* EVERY ONE OF THESE REFUSES UNTIL THE LAYER HAS STARTED, and that is not
+ * belt and braces.
+ *
+ * lbaCount() is set in the SPIFTL constructor, so it is non-zero from the
+ * moment the object exists -- before start() has rebuilt the map from flash.
+ * USB mass storage asks "is there media?" during enumeration and reads the
+ * moment the answer is yes, which put a host's READ(10) into a half-built map
+ * while FatFS.begin() was still filling it, and hung the board on every boot.
+ *
+ * The guard belongs here rather than in the caller: anything reaching the
+ * block layer wants the same answer, and a caller that has to remember is a
+ * caller that will not. */
 uint32_t ch32h4_fatfs_lba_count(void) {
-    return s_ftl ? (uint32_t)s_ftl->lbaCount() : 0;
+    return (s_ftl && s_ftlStarted) ? (uint32_t)s_ftl->lbaCount() : 0;
 }
 
 bool ch32h4_fatfs_lba_read(uint32_t lba, void *dst) {
-    return s_ftl && s_ftl->read((int)lba, (uint8_t *)dst);
+    return s_ftl && s_ftlStarted && s_ftl->read((int)lba, (uint8_t *)dst);
 }
 
 bool ch32h4_fatfs_lba_write(uint32_t lba, const void *src) {
-    return s_ftl && s_ftl->write((int)lba, (const uint8_t *)src);
+    return s_ftl && s_ftlStarted
+           && s_ftl->write((int)lba, (const uint8_t *)src);
 }
 
 bool ch32h4_fatfs_lba_sync(void) {
-    return s_ftl && s_ftl->persist();
+    return s_ftl && s_ftlStarted && s_ftl->persist();
 }
 
 }  // extern "C"

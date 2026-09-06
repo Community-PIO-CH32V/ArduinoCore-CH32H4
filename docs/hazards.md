@@ -1196,3 +1196,46 @@ to program the higher flash addresses, which is why the hardware harness uses
 wlink. That was established the hard way in the MicroPython and libhal work
 before this core existed. openocd is fine for *attaching* — which is what makes
 it a good second opinion when wlink says nothing is there.
+
+## USB mass storage: the stall is fine, the handover signal is not
+
+**Measured**, exposing the internal flash FAT volume over USB MSC and copying
+files from a Windows host:
+
+| | |
+|---|---|
+| worst-case stall inside a single MSC write | **1.3 ms** (peak 2.6 ms under load) |
+| enumeration | `CH32H4 Flash Filesystem`, 216 KB, MBR, Online |
+| mounted volume | FAT, 198 KB, read and written both ways |
+
+The stall was the thing worth worrying about in advance: an MSC write lands in
+the TinyUSB task and calls into flash, which parks the other core and masks
+interrupts for the duration of an 8 KB erase. At a millisecond or two, bulk
+transfers absorb it. No RAM staging is needed.
+
+**The handover signal is the real problem, and it is a host behaviour rather
+than a bug here.** `FatFSUSB`'s `onPlug`/`onUnplug` come from SCSI START STOP
+UNIT and PREVENT/ALLOW MEDIUM REMOVAL. Windows was measured mounting the
+volume, writing a file and ejecting it **without sending either** -- the plug
+and unplug counts stayed at zero throughout. Two implementations were tried
+before concluding this: overriding `tud_msc_scsi_cb` the way arduino-pico does
+(never called -- TinyUSB answers those commands itself and only forwards
+what it does not handle), and TinyUSB's dedicated
+`tud_msc_prevent_allow_medium_removal_cb` (correct hook, but Windows does not
+send the command).
+
+That matters because a sketch and a host must never both have a FAT volume
+mounted: FatFs caches directory and allocation sectors, and a host writing
+underneath that cache corrupts one or both views silently.
+
+**So `FatFSUSB::hostWrites()` exists**, counting sectors the host has written.
+A write is a write whatever the host announces, so a sketch can see that its
+cached view is stale and remount. The callbacks stay as a fast path where a
+host does send them; `hostWrites()` is the backstop, and the USBDrive example
+uses both.
+
+**A demonstration of what happens without it**, seen during development: a test
+sketch kept the volume mounted while the host wrote to it, and on the next boot
+the volume was inconsistent enough that `begin()` auto-formatted it -- the
+host's file simply gone. That is the failure the contract exists to prevent,
+and it is silent.

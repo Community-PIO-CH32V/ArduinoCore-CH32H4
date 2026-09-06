@@ -765,6 +765,17 @@ private:
             ebState[i] = readMetadata8b();
             // Restore metaEBList as we read in
             if (ebIsMeta(i)) {
+                /* BOUNDED. metaEBList holds metaEBs entries, and nothing has
+                 * yet checked that the metadata being read back agrees. It is
+                 * read from flash, so it can be corrupt, truncated, or written
+                 * by a build whose layout differed -- and an unbounded j walks
+                 * off a 2-entry heap array, which is a wedged board rather
+                 * than a failed mount. Refusing here makes start() fall
+                 * through to format(), which is the right answer for metadata
+                 * that cannot be trusted. */
+                if (j >= metaEBs) {
+                    return false;
+                }
                 metaEBList[j++] = i;
             }
             if (getEBState(i) == 0) {
