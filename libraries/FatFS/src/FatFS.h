@@ -144,9 +144,6 @@ const char *ch32h4_fatfs_last_error_string(void);
  * "The file vanished after a reboot" has two very different causes -- FatFs
  * never asking, or the layer failing to write -- and they look identical from
  * outside. */
-void ch32h4_fatfs_write_log_reset(void);
-uint32_t ch32h4_fatfs_write_count(void);
-uint32_t ch32h4_fatfs_write_log(uint32_t i);
 uint32_t ch32h4_fatfs_sync_count(void);
 uint32_t ch32h4_fatfs_sync_failures(void);
 

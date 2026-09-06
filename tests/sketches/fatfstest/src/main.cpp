@@ -214,17 +214,6 @@ void loop() {
           Serial1.println();
           Serial1.print("ftl_bootsig=");
           Serial1.println((buf[510] == 0x55 && buf[511] == 0xAA) ? 1 : 0);
-        } else if (cmd == "fswlogreset") {
-          ch32h4_fatfs_write_log_reset();
-          Serial1.println("fs_wlog_reset=1");
-        } else if (cmd == "fswlog") {
-          Serial1.print("fs_writes=");
-          Serial1.println(ch32h4_fatfs_write_count());
-          Serial1.print("fs_wlog=");
-          for (uint32_t i = 0; i < 24; i++) {
-            Serial1.print((int)ch32h4_fatfs_write_log(i)); Serial1.print(',');
-          }
-          Serial1.println();
         } else if (cmd == "ftlheads") {
           ftlCreate();
           /* The first four bytes of each of the low LBAs. Comparing this

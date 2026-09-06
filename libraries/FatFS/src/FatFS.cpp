@@ -58,12 +58,6 @@ static uint32_t s_syncFails = 0;
  * had just written. Once per boot is both sufficient and necessary. */
 static bool s_ftlStarted = false;
 
-/* The last few sectors written, for diagnosis. "The file is gone after a
- * remount" cannot distinguish FatFs never writing the directory from the
- * layer below losing it, and those need opposite fixes. */
-#define WLOG_N 24
-static uint32_t s_wlog[WLOG_N];
-static uint32_t s_wlogCount = 0;
 
 static DSTATUS flash_status(void) {
     return s_ftl ? 0 : STA_NOINIT;
@@ -92,12 +86,6 @@ static DRESULT flash_write(const BYTE *buff, LBA_t sector, UINT count) {
         return RES_NOTRDY;
     }
     for (UINT i = 0; i < count; i++) {
-        /* The FIRST N, not the last: what a format writes matters more than
-           what trails it, and sector 0 is the one in question. */
-        if (s_wlogCount < WLOG_N) {
-            s_wlog[s_wlogCount] = (uint32_t)(sector + i);
-        }
-        s_wlogCount++;
         if (!s_ftl->write((int)(sector + i), buff + i * 512)) {
             return RES_ERROR;
         }
@@ -696,18 +684,6 @@ const char *ch32h4_fatfs_last_error_string(void) {
         case CH32H4_FATFS_ERR_FTL:       return "flash translation layer failed";
     }
     return "unknown";
-}
-
-void ch32h4_fatfs_write_log_reset(void) {
-    s_wlogCount = 0;
-}
-
-uint32_t ch32h4_fatfs_write_count(void) {
-    return s_wlogCount;
-}
-
-uint32_t ch32h4_fatfs_write_log(uint32_t i) {
-    return i < WLOG_N ? s_wlog[i] : 0xFFFFFFFFu;
 }
 
 uint32_t ch32h4_fatfs_sync_count(void) {
