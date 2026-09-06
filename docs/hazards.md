@@ -1262,3 +1262,94 @@ commands that Windows does not, which would make `onPlug`/`onUnplug` fire there
 board into either. `hostChanged()` does not depend on the answer, which is why
 it is what the example watches; if you have a Mac to hand, the thing to check
 is whether the plug and unplug counts move.
+
+## A free-running DMA ring cannot be accounted for with two pointers
+
+**Symptom.** `DACAudio::availableFrames()` reported 192 free frames out of
+4096 on a stream nothing had written to yet, and never recovered. A producer
+that asks how much room there is before writing -- which is the documented way
+to use the sink -- would have been stuck at 192 forever.
+
+**Cause.** The classic ring-buffer accounting assumes the reader stops when it
+catches the writer. This reader does not: the DMA circles the buffer whether
+or not anything was queued, because a DAC must be fed a sample every period no
+matter what the sketch is doing. So the read pointer walks *past* the write
+pointer, and `(wr - rd) mod N` goes straight from a small number to nearly N.
+An empty ring and a full one are the same reading a few microseconds apart.
+
+**The fix is the clock, not the pointers.** The DMA consumes exactly
+`sampleRate` frames per second regardless, so comparing elapsed time since the
+last write against how many frames were queued at that write answers both
+"did it drain" and "by how much" without ambiguity, however long the gap was.
+The same comparison drives the underrun counter, and the writer is moved back
+level with the reader once the ring has drained -- writing where the reader has
+just passed would put the next frame a whole ring-length from being heard.
+
+This is the second time the pointer version has been tried and failed. The
+MicroPython port tested for "everything free" and caught no underrun at all,
+because that condition is true only for the instant the two pointers are equal.
+
+## Keeping the free region silent must cost what the reader consumed, not the size of the ring
+
+**Symptom.** With the ring accounting above already fixed, a sketch writing one
+frame at a time got two frames of audio into a 4096-frame buffer. Everything
+else was silence, and the underrun counter climbed steadily on a stream that
+was being fed as fast as the CPU could feed it.
+
+**Cause.** The region ahead of the write pointer is kept filled with silence,
+so that a producer falling behind is heard as a gap rather than as the last
+fraction of a second repeating. The first version refilled the *whole* free
+region on every write. That is a pass over the ring per frame -- but the real
+damage was not the wasted time, it was that the wasted time is *elapsed time*,
+and the drain detector above reads elapsed time to decide whether the ring ran
+dry. Writing frame by frame therefore made the driver declare an underrun
+against itself and reset the write pointer, discarding the frame it had just
+written, on every single call.
+
+**The invariant does the work.** Everything from the write pointer forward to
+the read pointer is already silence, and that survives the *writer* advancing
+-- writing frames only shrinks the span from the front. It breaks only when the
+*reader* advances, because the words it just played held real audio a moment
+ago and are now sitting in the free region. So the words to blank are exactly
+the ones the DMA consumed since last time, and there are only ever as many of
+them as real time allows. The one remaining O(ring) pass runs once per stall,
+when everything ahead really has gone stale.
+
+**A test that only checks self-consistency will not catch this.** The original
+mono test asserted that both halves of the dual DAC register held the same
+code. Silence holds the same code in both halves, so it passed throughout --
+on a ring containing no audio at all. Asserting the *exact* expected code, with
+a stereo counterpart asserting the two halves differ, is what found it.
+
+## Only one of the two DAC channels may have its DMA enabled
+
+**Symptom.** None yet, because the driver was written the right way round the
+first time -- but the failure mode is worth knowing, because it does not look
+like a DMA bug. The stream plays at twice the sample rate that was asked for.
+
+**Cause.** `DAC->RD12BDHR` is the dual holding register: one 32-bit write loads
+channel 1 from bits 11:0 and channel 2 from bits 27:16. That is the reason to
+use it -- a stereo frame becomes a single DMA transfer and the two channels
+cannot drift apart. In dual mode the *channel 1* DMA request already carries
+both channels, so enabling channel 2's request as well fetches a second word
+per conversion and drains the ring twice as fast. Channel 2's own DMAMUX
+request (104) goes unused.
+
+**Measured**, on the DMA's own counter over a known interval, which is the true
+sample clock because the DMA consumes exactly one word per conversion:
+
+| requested | measured | error |
+|---|---|---|
+| 8000 Hz | 8000 Hz | under 1% |
+| 44100 Hz | 44100 Hz | under 1% |
+| 96000 Hz | 96000 Hz | under 1% |
+
+The same measurement is what confirms DMAMUX request 103, which came from the
+MicroPython port citing reference-manual table 10-2 and is the one number in
+this driver that nothing in this repository can check statically. A wrong
+request number leaves the counter stationary.
+
+**And the timer divides HCLK.** `TIM6` is clocked from HCLK, not from
+`SystemCoreClock`, which is four times HCLK on the V5F. Using the latter makes
+every rate come out exactly 4x too slow. `ch32h4_timer_input_clock()` exists
+precisely so nobody has to remember this.

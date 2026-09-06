@@ -54,6 +54,23 @@ static void handle(const char *cmd) {
   } else if (!strcmp(cmd, "timerowner")) {
     Serial1.print("owner=");
     Serial1.println(ch32h4_timer_owner_name(ch32h4_timer_owner(6)));
+    /* CEN. Releasing the claim is bookkeeping; leaving the counter running
+       would keep raising TRGO at whoever configures the DAC next. */
+    Serial1.print("tim6_enabled="); Serial1.println(TIM6->CTLR1 & 0x1u);
+
+  } else if (!strncmp(cmd, "drain ", 6)) {
+    /* Queue some frames, then stop writing and let the DMA eat them. Free
+       space must GROW, which is the half of the accounting that a writer-only
+       test never exercises. */
+    uint32_t n = (uint32_t)atol(cmd + 6);
+    for (uint32_t i = 0; i < n; i++) {
+      dac.writeFrame(0, 0);
+    }
+    uint32_t a = (uint32_t)dac.availableFrames();
+    delay(20);
+    uint32_t b = (uint32_t)dac.availableFrames();
+    Serial1.print("free_before="); Serial1.println(a);
+    Serial1.print("free_after="); Serial1.println(b);
 
   } else if (!strcmp(cmd, "avail")) {
     Serial1.print("avail="); Serial1.println((uint32_t)dac.availableFrames());
@@ -121,6 +138,11 @@ static void handle(const char *cmd) {
        actually converted. If these disagree the ring is fine and the transfer
        is not -- unreachable memory, or a stale view of it. */
     const uint32_t *buf = dac.buffer();
+    if (!buf) {
+      Serial1.println("ring_addr=0");   /* not running; nothing to inspect */
+      Serial1.print("> ");
+      return;
+    }
     size_t rd = dac.dmaPosition();
     Serial1.print("ring_addr=0x"); Serial1.println((uint32_t)buf, HEX);
     Serial1.print("ring_at_rd=0x"); Serial1.println(buf[rd], HEX);

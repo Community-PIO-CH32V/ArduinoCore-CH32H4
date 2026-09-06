@@ -67,6 +67,36 @@ def test_end_releases_the_timer_so_begin_works_again(dac):
     assert r["owner"] == "audio", r.raw
 
 
+def test_end_stops_the_timer_and_not_just_the_claim(dac):
+    """Releasing the claim is bookkeeping. A TIM6 left counting keeps raising
+    TRGO into whatever configures the DAC next, which is a fault in someone
+    else's driver and very hard to trace back to here."""
+    assert kv(dac.command("rate 44100", timeout=20))["begun"] == 1
+    assert kv(dac.command("timerowner", timeout=10))["tim6_enabled"] == 1
+    dac.command("stop", timeout=20)
+    r = kv(dac.command("timerowner", timeout=10))
+    assert r["tim6_enabled"] == 0, r.raw
+
+
+def test_the_ring_starts_empty(dac):
+    """Nearly all of it free right after begin(). One frame is held back so a
+    full ring stays distinguishable from an empty one, hence the -1."""
+    r = kv(dac.command("rate 8000", timeout=20))
+    frames = r["frames"]
+    avail = kv(dac.command("avail", timeout=10))["avail"]
+    assert avail == frames - 1, (
+        "expected %d free of a %d-frame ring, got %d" % (frames - 1, frames, avail))
+
+
+def test_free_space_recovers_as_the_dma_drains(dac):
+    """The other half of the accounting. A writer-only test passes on an
+    implementation whose free count only ever falls."""
+    dac.command("rate 8000", timeout=20)
+    r = kv(dac.command("drain 400", timeout=20))
+    assert r["free_after"] > r["free_before"], (
+        "the DMA played for 20 ms and freed nothing: %s" % r.raw)
+
+
 def test_available_frames_falls_as_frames_are_queued(dac):
     dac.command("rate 8000", timeout=20)
     before = kv(dac.command("avail", timeout=10))["avail"]
