@@ -19,7 +19,14 @@
 
 extern "C" {
 #include "ch32h4_sdmmc.h"
-#include "fatfs/ff.h"
+/* FatFs lives in the FatFS library now, not here: one copy serves this volume
+ * and the internal flash one. Angle brackets rather than a relative path
+ * because it is another library's public header. */
+#include <ff.h>
+
+/* Hands this file's disk driver to FatFs as volume 1. Called from
+ * SDFSImpl::begin(); see ch32h4_fatfs_disk.h for why not a constructor. */
+void ch32h4_sd_disk_register(void);
 }
 
 using namespace fs;

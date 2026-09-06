@@ -2,14 +2,37 @@
 
 #include <string.h>
 
+#include <ch32h4_fatfs_disk.h>
+
+/* FatFs volume 1. Volume 0 is the internal flash, which libraries/FatFS
+ * mounts; see ch32h4_fatfs_disk.h for the numbering. */
+#define SD_VOL "1:"
+
 /* FatFs speaks absolute paths without a leading slash just as happily as with
  * one, but "" is not a path at all and "/" is. Normalising here means the rest
- * of this file never has to think about it, and a sketch can use either. */
-static const char *fixPath(const char *path) {
+ * of this file never has to think about it, and a sketch can use either.
+ *
+ * It also carries the volume prefix, which makes this the single point where a
+ * sketch-visible path becomes a FatFs one. Sketches never see "1:", and a
+ * sketch written before there was a second volume needs no change.
+ *
+ * Returns a String rather than a const char * because the prefix has to be
+ * stored somewhere. Callers pass .c_str(); the temporary outlives the call. */
+static String fixPath(const char *path) {
     if (!path || !path[0]) {
-        return "/";
+        return String(SD_VOL "/");
     }
-    return path;
+    /* IDEMPOTENT, and it has to be. A Dir hands its entries back through the
+     * public open(), and the path it hands over has already been through here
+     * -- so without this a listing would open "1:/1:/log/x" and fail. Any
+     * choke point that can be re-entered has to tolerate its own output. */
+    if (!strncmp(path, SD_VOL, sizeof(SD_VOL) - 1)) {
+        return String(path);
+    }
+    if (path[0] == '/') {
+        return String(SD_VOL) + path;
+    }
+    return String(SD_VOL "/") + path;
 }
 
 static bool fatOk(FRESULT r) {
@@ -252,13 +275,18 @@ bool SDFSImpl::begin() {
     if (ch32h4_sd_begin(_width, _freq) != 0) {
         return false;
     }
+    /* Hand this volume's disk driver to FatFs. Here rather than in a static
+     * constructor so that a sketch which never mounts an SD card does not
+     * link the SDMMC driver at all -- see ch32h4_fatfs_disk.h. Idempotent, so
+     * a second begin() is harmless. */
+    ch32h4_sd_disk_register();
     /* Mount immediately (the 1), rather than deferring to the first access.
      * A begin() that returns true and then fails on the first open, because
      * the card holds no filesystem, is the least useful possible answer. */
-    FRESULT r = f_mount(&_fs, "", 1);
+    FRESULT r = f_mount(&_fs, SD_VOL, 1);
     if (r != FR_OK && _autoFormat) {
         if (format()) {
-            r = f_mount(&_fs, "", 1);
+            r = f_mount(&_fs, SD_VOL, 1);
         }
     }
     if (r != FR_OK) {
@@ -273,7 +301,11 @@ void SDFSImpl::end() {
     if (!_mounted) {
         return;
     }
-    f_mount(nullptr, "", 0);
+    f_mount(nullptr, SD_VOL, 0);
+    /* Unregistered as well as unmounted: the card is powered down below, and
+     * a driver left in the table would answer FatFs with a card that is no
+     * longer there. */
+    ch32h4_fatfs_register_disk(CH32H4_FATFS_PDRV_SD, nullptr);
     _mounted = false;
     ch32h4_sd_end();
 }
@@ -303,7 +335,7 @@ bool SDFSImpl::format() {
 
     MKFS_PARM opt = {};
     opt.fmt = FM_FAT32 | FM_FAT;   /* let FatFs pick by capacity */
-    FRESULT r = f_mkfs("", &opt, work, FF_MAX_SS);
+    FRESULT r = f_mkfs(SD_VOL, &opt, work, FF_MAX_SS);
     free(work);
 
     if (broughtUp) {
@@ -336,13 +368,13 @@ FileImplPtr SDFSImpl::open(const char *path, OpenMode openMode,
     }
 
     FIL fil = {};
-    if (f_open(&fil, fixPath(path), mode) != FR_OK) {
+    if (f_open(&fil, fixPath(path).c_str(), mode) != FR_OK) {
         return FileImplPtr();
     }
     if (openMode & OM_APPEND) {
         f_lseek(&fil, f_size(&fil));
     }
-    return std::make_shared<SDFSFileImpl>(this, fixPath(path), fil,
+    return std::make_shared<SDFSFileImpl>(this, fixPath(path).c_str(), fil,
                                           (mode & FA_WRITE) != 0);
 }
 
@@ -351,7 +383,7 @@ bool SDFSImpl::exists(const char *path) {
         return false;
     }
     FILINFO fno;
-    return f_stat(fixPath(path), &fno) == FR_OK;
+    return f_stat(fixPath(path).c_str(), &fno) == FR_OK;
 }
 
 DirImplPtr SDFSImpl::openDir(const char *path) {
@@ -366,11 +398,16 @@ DirImplPtr SDFSImpl::openDir(const char *path) {
     if (f_stat(p.c_str(), &fno) == FR_OK && (fno.fattrib & AM_DIR)) {
         return std::make_shared<SDFSDirImpl>(this, "", p);
     }
-    if (p == "/") {
+    if (p == SD_VOL "/") {
         return std::make_shared<SDFSDirImpl>(this, "", p);
     }
     int slash = p.lastIndexOf('/');
-    String dir = slash <= 0 ? String("/") : p.substring(0, slash);
+    /* The volume's own slash, at index 2 in "1:/name", is not a directory
+     * separator to split on -- and "1:" alone means the volume's current
+     * directory to FatFs, not its root. Anything at or before it is the
+     * root. */
+    const int volSlash = (int)sizeof(SD_VOL) - 1;
+    String dir = slash <= volSlash ? String(SD_VOL "/") : p.substring(0, slash);
     String pattern = p.substring(slash + 1);
     return std::make_shared<SDFSDirImpl>(this, pattern, dir);
 }
@@ -379,28 +416,28 @@ bool SDFSImpl::rename(const char *from, const char *to) {
     if (!_mounted) {
         return false;
     }
-    return fatOk(f_rename(fixPath(from), fixPath(to)));
+    return fatOk(f_rename(fixPath(from).c_str(), fixPath(to).c_str()));
 }
 
 bool SDFSImpl::remove(const char *path) {
     if (!_mounted) {
         return false;
     }
-    return fatOk(f_unlink(fixPath(path)));
+    return fatOk(f_unlink(fixPath(path).c_str()));
 }
 
 bool SDFSImpl::mkdir(const char *path) {
     if (!_mounted) {
         return false;
     }
-    return fatOk(f_mkdir(fixPath(path)));
+    return fatOk(f_mkdir(fixPath(path).c_str()));
 }
 
 bool SDFSImpl::rmdir(const char *path) {
     if (!_mounted) {
         return false;
     }
-    return fatOk(f_unlink(fixPath(path)));
+    return fatOk(f_unlink(fixPath(path).c_str()));
 }
 
 bool SDFSImpl::stat(const char *path, FSStat *st) {
@@ -408,7 +445,7 @@ bool SDFSImpl::stat(const char *path, FSStat *st) {
         return false;
     }
     FILINFO fno;
-    if (f_stat(fixPath(path), &fno) != FR_OK) {
+    if (f_stat(fixPath(path).c_str(), &fno) != FR_OK) {
         return false;
     }
     *st = {};
@@ -426,7 +463,7 @@ bool SDFSImpl::info(FSInfo &info) {
     }
     FATFS *fs = nullptr;
     DWORD freeClusters = 0;
-    if (f_getfree("", &freeClusters, &fs) != FR_OK) {
+    if (f_getfree(SD_VOL, &freeClusters, &fs) != FR_OK) {
         return false;
     }
     const uint64_t clusterBytes =

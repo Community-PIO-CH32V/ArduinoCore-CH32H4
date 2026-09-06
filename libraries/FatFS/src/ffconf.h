@@ -60,8 +60,14 @@
 / Drive/Volume Configurations
 /---------------------------------------------------------------------------*/
 
-/* One card, one volume. */
-#define FF_VOLUMES      1
+/* Two: volume 0 is the internal flash (libraries/FatFS), volume 1 is the SD
+ * card (libraries/SDFS). Both are 512-byte-sector devices -- the flash gets
+ * there through a translation layer -- so FF_MIN_SS and FF_MAX_SS stay equal
+ * and FatFs keeps its fixed-sector fast paths.
+ *
+ * Mounting one costs nothing for the other: the volume table is two pointers,
+ * and each filesystem registers its disk driver only when it starts. */
+#define FF_VOLUMES      2
 #define FF_STR_VOLUME_ID 0
 #define FF_MULTI_PARTITION 0
 
