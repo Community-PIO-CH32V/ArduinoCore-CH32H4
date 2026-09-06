@@ -319,7 +319,7 @@ def _sync(sketch: str) -> str:
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "tls_server_board", "web_board",
                   "dualcore_board",
-                  "adc_board", "i2s_board",
+                  "adc_board", "i2s_board", "dac_board",
                   "lfs_board", "fatfs_board", "two_volume_board",
                   "uart_board", "spi_board",
                   "wire_board", "dog_board", "spi_slave_board",
@@ -671,3 +671,16 @@ def i2s_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("i2stest")
+
+
+@pytest.fixture(scope="session")
+def dac_board():
+    """The DAC streaming sketch.
+
+    Everything it is asked to do here is silent: the tests write mid-scale or
+    read the DMA counter, and PA4/PA5 do not reach the amplifier on this bench
+    anyway.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("dacaudio")
