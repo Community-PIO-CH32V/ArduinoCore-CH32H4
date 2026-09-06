@@ -163,19 +163,23 @@ On our geometry, with 8192-byte erase blocks:
 
 | partition | erase blocks | usable FAT volume | overhead | FTL RAM |
 |---|---|---|---|---|
-| 128 KB (default) | 16 | 88 KB | 31% | ~0.5 KB |
-| 256 KB | 32 | 216 KB | 16% | ~1 KB |
+| 128 KB (the board default) | 16 | 88 KB | 31% | ~0.4 KB |
+| **256 KB (FatFS minimum)** | 32 | 216 KB | 16% | ~0.9 KB |
 | 512 KB | 64 | 472 KB | 8% | ~2 KB |
 
 RAM is the logical-to-physical map (`uint16_t` per 512-byte LBA) plus per-erase-block
-wear counters. The fixed 5-block reserve is what makes the default partition
+wear counters. The fixed 5-block reserve is what makes a small partition
 expensive and a large one cheap.
 
-**The documentation must say to use 256 KB or more for FatFS**, and the 88 KB
-case has to be tested against a real host before the default is called
-supported — a FAT12 volume that small is legal but unusual, and Windows is the
-risk. If it does not mount, the answer is a documented minimum, not a silent
-workaround.
+**256 KB is a hard minimum for FatFS, enforced in `begin()`.** Below it,
+`FatFS.begin()` fails with a message naming the board menu setting to change,
+rather than producing an 88 KB FAT12 volume that is legal, unusual, and a
+coin-toss on Windows. Refusing is better than shipping a size whose host
+compatibility we would have to qualify and then defend.
+
+This does not change the board's 128 KB default, which stays right for
+LittleFS. A sketch wanting FatFS selects 256 KB or more from the filesystem
+menu, and is told exactly that if it forgets.
 
 ## FatFSUSB
 
@@ -227,14 +231,23 @@ not in scope unless measurement forces it.
 Both filesystems map `_FS_start.._FS_end` and are mutually exclusive: whichever
 formatted the partition owns it. No linker script or `boards.txt` change.
 
-`FatFS.begin()` defaults to **not** auto-formatting, which differs from
-upstream's `FatFSConfig(autoFormat = true)`. Here the partition may hold a
-LittleFS the user cares about, and an autoformat on first `begin()` would
-destroy it with no way back. `FatFSConfig().setAutoFormat(true)` opts in;
-`FatFS.format()` is always explicit.
+`FatFS.begin()` **auto-formats an unusable partition by default**, matching
+upstream's `FatFSConfig(autoFormat = true)` and LittleFS's existing behaviour.
+The partition belongs to whichever sketch is flashed: a sketch that calls
+`FatFS.begin()` has declared which filesystem it wants, and it should get a
+working one rather than a mount failure on a board that has never held a FAT
+volume. `FatFSConfig().setAutoFormat(false)` opts out for a sketch that would
+rather fail than reformat.
 
-Each filesystem refuses to mount if it finds the other's signature, and says
-so, rather than reporting generic corruption.
+The consequence, which belongs in the documentation and in the examples:
+**flashing a FatFS sketch over a LittleFS one discards the LittleFS
+partition**, and the reverse is equally true. That is the cost of one partition
+serving both, and it is the behaviour a sketch author expects; it should not be
+discovered from a support thread.
+
+Each filesystem still recognises the other's signature and reports *that*
+specifically before reformatting, so the log says "reformatting a LittleFS
+partition as FAT" rather than a generic mount failure followed by silence.
 
 ## Concurrency
 
@@ -256,17 +269,18 @@ top of `src/`, so `FatFS.h`, `SDFS.h` and `FatFSUSB.h` must sit there; the
 
 1. `test_fatfs.py` — format, mount, write, read back, unmount, remount, and
    confirm the file survives a reboot.
-2. `test_fatfs_littlefs.py` — a LittleFS partition is refused by
-   `FatFS.begin()` and vice versa, with the specific error rather than a
-   generic mount failure.
+2. `test_fatfs_littlefs.py` — `FatFS.begin()` on a LittleFS partition
+   recognises it, says so, reformats, and comes up usable; the reverse too.
+   With `setAutoFormat(false)` it refuses instead, with the same specific
+   message. Also that `begin()` below 256 KB fails and names the menu setting.
 3. `test_two_volumes.py` — **the test this restructure exists for**: flash and
    SD mounted simultaneously, interleaved writes to both, each read back
    independently.
 4. FTL wear behaviour: write enough to force garbage collection, then confirm
    the volume is still consistent.
 
-**By hand**, and recorded: USB MSC enumeration on Windows, macOS and Linux;
-file copy in both directions; the 88 KB default partition specifically.
+**By hand**, and recorded: USB MSC enumeration on Windows, macOS and Linux, and
+file copy in both directions, at the 256 KB minimum and at 512 KB.
 
 ## Out of scope
 
