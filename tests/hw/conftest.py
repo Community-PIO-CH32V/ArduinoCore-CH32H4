@@ -320,7 +320,8 @@ BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "tls_server_board", "web_board",
                   "dualcore_board",
                   "adc_board", "i2s_board",
-                  "lfs_board", "fatfs_board", "uart_board", "spi_board",
+                  "lfs_board", "fatfs_board", "two_volume_board",
+                  "uart_board", "spi_board",
                   "wire_board", "dog_board", "spi_slave_board",
                   "wire_slave_board")
 
@@ -626,6 +627,22 @@ def kv(text):
         else:
             out[key] = raw
     return Reply(text, out)
+
+
+@pytest.fixture(scope="session")
+def two_volume_board():
+    """Flash and SD mounted at once -- what the FatFs restructure is for.
+
+    Neither fatfs_board nor fs_board can show this: each mounts one volume, and
+    a single-volume FatFs quietly serving whichever mounted first would pass
+    both of their suites while failing the moment a second volume existed.
+
+    Needs a card on the SDMMC default mapping (CK PC12, CMD PD2, D0 PC8). Its
+    tests skip rather than fail without one.
+    """
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("twovoltest")
 
 
 @pytest.fixture(scope="session")
