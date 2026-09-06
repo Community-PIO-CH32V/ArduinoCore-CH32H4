@@ -1255,3 +1255,10 @@ sketch kept the volume mounted while the host wrote to it, and on the next boot
 the volume was inconsistent enough that `begin()` auto-formatted it -- the
 host's file simply gone. That is the failure the contract exists to prevent,
 and it is silent.
+
+**Only Windows has been tested.** macOS and Linux are believed to send the SCSI
+commands that Windows does not, which would make `onPlug`/`onUnplug` fire there
+-- but that is an expectation, not a measurement, and nobody has plugged this
+board into either. `hostChanged()` does not depend on the answer, which is why
+it is what the example watches; if you have a Mac to hand, the thing to check
+is whether the plug and unplug counts move.
