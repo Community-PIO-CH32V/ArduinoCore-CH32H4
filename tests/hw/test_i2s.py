@@ -192,3 +192,54 @@ def test_the_measured_rate_subtracts_what_is_still_queued(i2s_board):
     assert abs(short - actual) < actual * 0.02
     assert abs(long_ - actual) < actual * 0.01
     assert abs(short - long_) < actual * 0.02
+
+
+def test_a_frame_is_two_samples_of_the_configured_width(i2s_board):
+    """availableForWrite() is in BYTES and a sample is 16 or 32 bits, so a
+    stereo frame is 4 or 8 bytes.
+
+    Getting this wrong makes availableFrames() report double in 32-bit mode,
+    and a producer trusting it overruns the ring."""
+    instance(i2s_board, 0)
+    r = kv(i2s_board.command("sinkinfo 16", timeout=10))
+    assert int(r["frame_bytes"]) == 4, r.raw
+    r = kv(i2s_board.command("sinkinfo 32", timeout=10))
+    assert int(r["frame_bytes"]) == 8, r.raw
+
+
+def test_available_frames_matches_the_byte_ring(i2s_board):
+    instance(i2s_board, 0)
+    kv(i2s_board.command("sinkinfo 16", timeout=10))
+    r = kv(i2s_board.command("sinkavail", timeout=10))
+    expect = int(r["avail_bytes"]) // int(r["frame_bytes"])
+    assert int(r["avail_frames"]) == expect, r.raw
+
+
+def test_the_sink_reports_the_achieved_rate_not_the_requested_one(i2s_board):
+    """The divider is an integer with one half-step, so 44100 is approximated.
+    sampleRate() must report what the hardware landed on -- a tone generator
+    driven from the requested rate drifts audibly against the real one."""
+    instance(i2s_board, 0)
+    r = begin(i2s_board, 44100)
+    actual = int(r["i2s_rate_actual"])
+    s = kv(i2s_board.command("sinkrate", timeout=10))
+    assert int(s["sink_rate"]) == actual, s.raw
+
+
+def test_write_frame_does_not_block_on_a_full_ring(i2s_board):
+    """I2S::write() waits up to the stream timeout for room; writeFrame() must
+    not.
+
+    The sketch fills the ring and then attempts 200 more frames. Nearly all
+    must be refused outright, and the whole batch must finish in well under
+    the stream timeout -- a single blocking call would cost that timeout on
+    its own, a thousand times the budget here.
+    """
+    instance(i2s_board, 0)
+    kv(i2s_board.command("sinkinfo 16", timeout=10))
+    r = kv(i2s_board.command("sinkfull", timeout=30))
+    assert int(r["refused"]) > 0, (
+        "nothing was refused against a full ring: %s" % r.raw)
+    assert int(r["elapsed_ms"]) < 50, (
+        "200 writeFrame() calls took %s ms -- at least one blocked"
+        % r["elapsed_ms"])

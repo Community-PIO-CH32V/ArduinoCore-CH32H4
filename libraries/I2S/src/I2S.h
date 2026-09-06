@@ -39,12 +39,13 @@
 #pragma once
 
 #include <Arduino.h>
+#include <AudioSink.h>
 
 extern "C" {
 #include "ch32h417.h"
 }
 
-class I2S : public Stream {
+class I2S : public Stream, public AudioSink {
 public:
     /* OUTPUT for transmit, INPUT for receive. One direction per object: the
      * peripheral is either master-transmit or master-receive, never both. */
@@ -79,9 +80,14 @@ public:
      * arrives is whatever the master sends. */
     bool setSlave(bool slave = true);
 
-    bool begin(long sampleRate);
+    /* uint32_t rather than long, which AudioSink requires and which the two
+     * cannot both be: begin(44100) passes an int, and an int converts to long
+     * and to uint32_t at the same rank, so declaring both overloads makes
+     * every existing call ambiguous. Narrowing is source-compatible -- a
+     * negative rate was already refused. */
+    bool begin(uint32_t sampleRate) override;
     bool begin();
-    bool end();
+    bool end() override;
 
     /* What the divider could actually produce. I2SDIV is an integer with one
      * half-step, so most rates are approximated; a sketch generating tones
@@ -129,6 +135,38 @@ public:
     size_t write(int32_t left, int32_t right);
     bool read(int16_t *left, int16_t *right);
     bool read(int32_t *left, int32_t *right);
+
+    /* ---- AudioSink --------------------------------------------------------
+     *
+     * Nearly all of this the class already had: begin(), end() and the ring
+     * satisfy the interface as they stand. Nothing below changes what an
+     * existing method does, because sketches use this as a Stream. */
+    bool running() const override { return _running; }
+
+    uint32_t sampleRate() const override {
+        /* The achieved rate, not the requested one. The divider is an integer
+         * with one half-step, so most rates are approximated, and a sketch
+         * generating a tone from the requested number drifts against the real
+         * one. Before begin() there is no achieved rate and the request is the
+         * best answer there is. */
+        return _actual_rate ? _actual_rate : _rate;
+    }
+
+    size_t writeFrame(int16_t left, int16_t right) override;
+    size_t writeFrames(const int16_t *interleaved, size_t frames) override;
+    size_t availableFrames() override;
+
+    /* The same counter getUnderflows() reports, read WITHOUT clearing it.
+     * getUnderflows() is destructive and so cannot be called from a const
+     * method; more to the point, something polling underruns() must not
+     * silently consume the count a sketch's own getUnderflows() is there to
+     * read. */
+    uint32_t underruns() const override { return _underflows; }
+
+    /* Bytes in one stereo frame: two samples of the configured width, so 4 at
+     * 16 bits and 8 at 32. availableForWrite() is in bytes, so anything
+     * converting between the two units needs this. */
+    size_t frameBytes() const { return 2u * (_bits / 8u); }
 
     /* Called from the DMA interrupt. Public because the ISR is extern "C". */
     void _dmaHalfComplete(bool second_half);

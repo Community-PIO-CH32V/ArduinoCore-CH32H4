@@ -64,6 +64,7 @@ const char *ch32h4_timer_owner_name(uint8_t owner) {
         case CH32H4_TIMER_ADC:   return "ADC";
         case CH32H4_TIMER_USER:  return "user";
         case CH32H4_TIMER_TICKER: return "Ticker";
+        case CH32H4_TIMER_AUDIO: return "audio";
         default:                 return "free";
     }
 }

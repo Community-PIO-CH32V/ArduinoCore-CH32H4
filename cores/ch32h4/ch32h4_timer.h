@@ -38,6 +38,7 @@ enum {
      * compiled libraries, so renumbering the existing ones would make an
      * old object file's "Servo" read as something else. */
     CH32H4_TIMER_TICKER,    /* Ticker's 1 kHz tick */
+    CH32H4_TIMER_AUDIO,     /* DACAudio's sample clock */
 };
 
 #define CH32H4_TIMER_COUNT  12
@@ -53,8 +54,9 @@ void ch32h4_timer_release(uint8_t id, uint8_t owner);
 /* CH32H4_TIMER_FREE, or one of the owners above. */
 uint8_t ch32h4_timer_owner(uint8_t id);
 
-/* "free", "PWM", "tone", "Servo", "I2S", "ADC", "user" -- for a message that
- * says which subsystem is holding the timer a caller wanted. */
+/* "free", "PWM", "tone", "Servo", "I2S", "ADC", "user", "Ticker", "audio" --
+ * for a message that says which subsystem is holding the timer a caller
+ * wanted. */
 const char *ch32h4_timer_owner_name(uint8_t owner);
 
 /* The peripheral for a timer id, or NULL. */

@@ -224,6 +224,55 @@ static void handle(char *cmd) {
     Serial1.print("i2s2_ws="); Serial1.println(PIN_I2S2_WS);
     Serial1.print("i2s_instance="); Serial1.println(inst);
     Serial1.print("vio18_sel="); Serial1.println((PWR->CTLR >> 10) & 0x7);
+
+  } else if (!strncmp(cmd, "sinkinfo ", 9)) {
+    /* sinkinfo <16|32> -- reconfigure and report the frame size. 44.1 kHz
+       because 16-bit mode cannot reach below about 24.5 kHz here. */
+    doBegin(44100, atoi(cmd + 9) == 32 ? 32 : 16);
+    Serial1.print("frame_bytes="); Serial1.println((uint32_t)i2s.frameBytes());
+    Serial1.print("sink_rate="); Serial1.println(i2s.sampleRate());
+
+  } else if (!strcmp(cmd, "sinkavail")) {
+    Serial1.print("avail_bytes="); Serial1.println((uint32_t)i2s.availableForWrite());
+    Serial1.print("avail_frames="); Serial1.println((uint32_t)i2s.availableFrames());
+    Serial1.print("frame_bytes="); Serial1.println((uint32_t)i2s.frameBytes());
+
+  } else if (!strcmp(cmd, "sinkrate")) {
+    Serial1.print("sink_rate="); Serial1.println(i2s.sampleRate());
+    Serial1.print("i2s_rate_actual="); Serial1.println(i2s.actualFrequency());
+
+  } else if (!strcmp(cmd, "sinkfull")) {
+    /* Fill the ring, then hammer it. Silence throughout: both samples zero,
+       which is mid-scale for a signed format.
+
+       NOT "fill, then time one write". The DMA frees a frame every 22 us at
+       44.1 kHz, so between the fill loop's last iteration and a single timed
+       write there is a real chance room has already appeared and the write
+       legitimately succeeds -- a flaky test that would look like a bug in
+       writeFrame(). Across many attempts the counts are decisive instead:
+       against a ring the DMA drains at 44.1 kHz nearly all of them must be
+       refused, and if even one had blocked it would have cost the whole
+       stream timeout, which is a thousand times the budget below. */
+    uint32_t guard = 0;
+    while (i2s.availableFrames() > 0 && guard < 100000) {
+      i2s.writeFrame(0, 0);
+      guard++;
+    }
+    uint32_t accepted = 0, refused = 0;
+    uint32_t t0 = micros();
+    for (int i = 0; i < 200; i++) {
+      if (i2s.writeFrame(0, 0)) {
+        accepted++;
+      } else {
+        refused++;
+      }
+    }
+    uint32_t us = micros() - t0;
+    Serial1.print("filled="); Serial1.println(guard);
+    Serial1.print("accepted="); Serial1.println(accepted);
+    Serial1.print("refused="); Serial1.println(refused);
+    Serial1.print("elapsed_us="); Serial1.println(us);
+    Serial1.print("elapsed_ms="); Serial1.println(us / 1000);
   }
   Serial1.print("> ");
 }

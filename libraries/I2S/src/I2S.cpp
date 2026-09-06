@@ -380,7 +380,7 @@ extern "C" void DMA1_Channel5_IRQHandler(void) { i2s_dma_irq(1); }
 
 /* ---- lifecycle ---------------------------------------------------------- */
 
-bool I2S::begin(long sampleRate) {
+bool I2S::begin(uint32_t sampleRate) {
     return setFrequency((int)sampleRate) && begin();
 }
 
@@ -519,6 +519,50 @@ size_t I2S::write(int32_t left, int32_t right) {
     }
     const int32_t frame[2] = { left, right };
     return write((const uint8_t *)frame, sizeof(frame)) / sizeof(int32_t);
+}
+
+/* ---- AudioSink ---------------------------------------------------------- */
+
+size_t I2S::availableFrames() {
+    const size_t fb = frameBytes();
+    return fb ? (size_t)availableForWrite() / fb : 0;
+}
+
+size_t I2S::writeFrame(int16_t left, int16_t right) {
+    if (!_running || _rx) {
+        return 0;
+    }
+    /* Checked first, and deliberately: the write() overloads below wait up to
+     * the stream timeout for room, and AudioSink promises nothing blocks.
+     * Confirming a whole frame's worth of room is free is what keeps either of
+     * them from reaching that wait. A sink that stalls inside a producer's
+     * callback is how a stream stutters. */
+    if ((size_t)availableForWrite() < frameBytes()) {
+        return 0;
+    }
+    /* Mono duplication is left to the overloads, which already do it. Doing it
+     * here as well would be a second copy of the rule to keep in step. */
+    if (_bits == 32) {
+        /* AudioSink frames are 16-bit and this port wants 32. Shift up rather
+         * than sign-extend: the sample belongs in the high half, and the low
+         * half is the fractional bits it does not have. */
+        return write((int32_t)left << 16, (int32_t)right << 16) == 2 ? 1 : 0;
+    }
+    return write(left, right) == 2 ? 1 : 0;
+}
+
+size_t I2S::writeFrames(const int16_t *interleaved, size_t frames) {
+    if (!interleaved) {
+        return 0;
+    }
+    size_t done = 0;
+    while (done < frames) {
+        if (!writeFrame(interleaved[2 * done], interleaved[2 * done + 1])) {
+            break;
+        }
+        done++;
+    }
+    return done;
 }
 
 bool I2S::read(int16_t *left, int16_t *right) {
