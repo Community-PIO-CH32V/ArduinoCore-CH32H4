@@ -194,6 +194,7 @@ int32_t FatFSUSBClass::write10(uint32_t lba, uint8_t *buffer, uint32_t bufsize) 
     }
     const uint32_t t0 = micros();
     _hostWrites += bufsize / 512;
+    _hostChanged = true;
     for (uint32_t i = 0; i < bufsize / 512; i++) {
         if (!ch32h4_fatfs_lba_write(lba + i, buffer + i * 512)) {
             return -1;
@@ -233,6 +234,7 @@ void FatFSUSBClass::plug() {
         return;
     }
     _plugged = true;
+    _hostChanged = true;
     if (_cbPlug) {
         _cbPlug(_cbPlugData);
     }

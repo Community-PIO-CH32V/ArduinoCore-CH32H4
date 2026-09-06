@@ -11,8 +11,12 @@
    that no longer exists on the medium. There is no way to share a FAT volume
    between two writers without a locking protocol neither side has.
 
-   So: onPlug gives it up, onUnplug takes it back. Every sketch that uses
-   FatFSUSB needs those two callbacks or something equivalent.
+   So the sketch gives the volume up when the host takes it, and takes it back
+   afterwards. WATCH hostChanged() TO DO THAT, not the onPlug/onUnplug
+   callbacks alone: those come from SCSI commands a host is not obliged to
+   send, and Windows was measured mounting this volume, writing a file and
+   ejecting it without sending either. hostChanged() also goes true on the
+   first host write, which no host can perform silently.
 
    256 KB MINIMUM filesystem partition. Under PlatformIO,
    board_build.filesystem_size = 256k; in the Arduino IDE, the Filesystem Size
@@ -28,22 +32,22 @@
 #include <FatFS.h>
 #include <FatFSUSB.h>
 
-/* Set by the USB callbacks, acted on in loop().
+/* Set from the USB callbacks, which fire only on hosts that send the SCSI
+ * commands behind them -- Windows, measured, does not. They are a refinement;
+ * hostChanged() in loop() is what actually carries the contract.
  *
  * volatile because they are written from the USB task and read from loop().
- * The filesystem work is deliberately NOT done in the callback: mounting can
- * take milliseconds, and a USB callback is not the place to spend them. */
+ * The filesystem work is deliberately NOT done in the callback: mounting takes
+ * milliseconds, and a USB callback is not the place to spend them. */
 static volatile bool hostHasIt = false;
-static volatile bool handled = true;
+static bool weGaveItUp = false;
 
 void onPlug(uint32_t) {
     hostHasIt = true;
-    handled = false;
 }
 
 void onUnplug(uint32_t) {
     hostHasIt = false;
-    handled = false;
 }
 
 /* Refuse the host while the sketch is busy. Returning false reports "not
@@ -99,37 +103,40 @@ void setup() {
 }
 
 void loop() {
-    /* THE SIGNAL THAT ACTUALLY ARRIVES.
+    /* ONE THING TO WATCH.
      *
-     * onPlug and onUnplug come from SCSI commands a host is not obliged to
-     * send, and Windows was measured mounting this volume, writing a file and
-     * ejecting it without sending either. A write, though, is a write: if the
-     * host has written sectors, this sketch's view of the filesystem is stale
-     * whatever it was or was not told.
-     *
-     * So the callbacks are a fast path, and this is the backstop. */
-    static uint32_t seenWrites = 0;
-    const uint32_t writes = FatFSUSB.hostWrites();
-    if (writes != seenWrites) {
-        seenWrites = writes;
-        if (!hostHasIt) {
-            Serial.println("\nThe host wrote to the drive -- unmounting.");
-            hostHasIt = true;
-            handled = true;
-            FatFS.end();
-        }
+     * hostChanged() goes true when the host mounts the volume (where the host
+     * announces it) or writes to it (which it cannot do silently). Windows
+     * does neither announcement -- it was measured mounting, writing and
+     * ejecting without sending either SCSI command -- so a sketch that waited
+     * only for onPlug would go on serving files from a directory the host had
+     * already rewritten, and would not find out until something looked wrong.
+     */
+    if (FatFSUSB.hostChanged() && !weGaveItUp) {
+        FatFSUSB.clearHostChanged();
+        weGaveItUp = true;
+        Serial.println("\nThe host has the drive -- unmounting.");
+        /* end() closes everything. A File kept open across this point would be
+           writing into a volume the host is rearranging underneath it. */
+        FatFS.end();
     }
 
-    if (!handled) {
-        handled = true;
-        if (hostHasIt) {
-            /* Hand the volume over. Anything still open is closed by end();
-               a File kept across this point would be writing to a volume the
-               host is simultaneously rearranging. */
-            Serial.println("\nHost took the drive -- unmounting.");
-            FatFS.end();
-        } else {
-            Serial.println("\nHost ejected -- remounting.");
+    /* Taking it back is the sketch's decision, because nothing reliably says
+       the host has finished. onUnplug fires where a host sends it; otherwise a
+       sketch picks its own moment -- a button, an idle timeout, or as here a
+       quiet spell with no further host writes. */
+    if (weGaveItUp && !hostHasIt) {
+        static uint32_t quietSince = 0;
+        const uint32_t writes = FatFSUSB.hostWrites();
+        static uint32_t lastWrites = 0;
+        if (writes != lastWrites) {
+            lastWrites = writes;
+            quietSince = millis();
+        } else if (quietSince && millis() - quietSince > 3000) {
+            quietSince = 0;
+            weGaveItUp = false;
+            FatFSUSB.clearHostChanged();
+            Serial.println("\nHost has been quiet -- remounting.");
             if (FatFS.begin()) {
                 listFiles();
             } else {
@@ -138,5 +145,6 @@ void loop() {
             }
         }
     }
+
     delay(10);
 }

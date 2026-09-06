@@ -216,6 +216,12 @@ public:
         if (openEB < 0) {
             openEB = selectBestEB();
         }
+        if (openEB < 0) {
+            /* No block could be found or freed. The volume is out of space or
+               its accounting is inconsistent; either way a failed write is an
+               answer the layers above can report, which a spin is not. */
+            return false;
+        }
 #if FTL_DEBUG
         printf("wrote %d to eb %d idx %d\n", lba, openEB, openEBNextIndex);
 #endif
@@ -982,6 +988,13 @@ private:
         return curIdx;
     }
 
+    /* How many LBAs fit in an erase block: 16 here, 8 on a 4096-byte-block
+       part. Upstream writes this as a literal 8 throughout the collector,
+       which is where several of the assumptions below came from. */
+    inline int slotsPerEB() const {
+        return ebBytes / lbaBytes;
+    }
+
     inline int gcScore(int eb) {
         unsigned int state = getEBState(eb);
         if ((state == ebMeta) || !state) {
@@ -994,7 +1007,11 @@ private:
         if (delta > ((maxPEDiff * 7) / 8)) {
             return 9; // Getting old, try to move before timeout
         }
-        return 8 - state;
+        /* Emptier blocks score higher. Scaled to the block's actual slot
+           count: at 8 with 16 slots this went NEGATIVE for a block holding
+           more than eight LBAs, which both mis-ranked candidates and collided
+           with the -1 that garbageCollect() now returns for failure. */
+        return slotsPerEB() - (int)state;
     }
 
     int garbageCollect() {
@@ -1003,14 +1020,39 @@ private:
         assert(destEB >= 0);
         eraseEB(destEB);
         emptyEBs--;
-        for (int cnt = 0; (getEBState(destEB) < 8) && (cnt < 8); cnt++) {   // Loop until full or at most 8 times since we should have at least 1 move per cycle
+        // Loop until the destination is full, or at most once per slot since
+        // we should manage at least one move per cycle.
+        //
+        // "Full" is the block's slot count, not 8. With 16 slots and a literal
+        // 8, collection stopped at half capacity and freed half as much as it
+        // should have -- which is how selectBestEB() ends up going round again
+        // and again looking for space that collection keeps declining to make.
+        for (int cnt = 0;
+             (getEBState(destEB) < (unsigned int)slotsPerEB())
+                 && (cnt < slotsPerEB());
+             cnt++) {
             static int eb = 0; // The current EB to GC, we'll start at the last eb checked and loop around
-            // Find first non-meta EB
-            while (ebIsMeta(eb) || (eb == destEB)) {
-                eb = (eb + 1) % eraseBlocks;
+            // Find first non-meta EB.
+            //
+            // BOUNDED. If every block claims to be metadata -- which takes
+            // only a corrupt ebState, since the sentinel is one byte value --
+            // this scan never ends, and a tight spin at full clock does not
+            // merely hang the sketch: it wedges the debug probe, so the board
+            // needs NRST held through an erase to come back. Giving up and
+            // failing the write is recoverable; spinning is not.
+            {
+                int scanned = 0;
+                while (ebIsMeta(eb) || (eb == destEB)) {
+                    eb = (eb + 1) % eraseBlocks;
+                    if (++scanned > eraseBlocks) {
+                        return -1;
+                    }
+                }
             }
             ebScore = gcScore(eb);
-            for (int i = 1; (i < eraseBlocks) && (ebScore < 8); i++) {
+            // Stop early once a candidate is good enough; "good enough" is
+            // most of a block's slots, which is 8 only when a block has 8.
+            for (int i = 1; (i < eraseBlocks) && (ebScore < slotsPerEB()); i++) {
                 int ebMod = (eb + i) % eraseBlocks;
                 if ((ebScore < gcScore(ebMod)) && (ebMod != destEB)) {
                     eb = ebMod;
@@ -1055,9 +1097,24 @@ private:
     int selectBestEB() {
         int ebScore = 0;
         // We need 3 EBs minimum to be free, and any score > 10 means we need to move for PE count wear leveling
+        //
+        // BOUNDED, for the same reason as the scan above. This asks garbage
+        // collection to free space and trusts it to succeed eventually; if the
+        // empty-block accounting disagrees with reality -- and that accounting
+        // is maintained incrementally across every write, so one wrong
+        // increment is enough -- there is nothing to make it stop. Each pass
+        // should free a block, so more passes than there are blocks means it
+        // is not making progress.
+        int passes = 0;
         while ((emptyEBs < 3) || (ebScore > 10)) {
             ebScore = garbageCollect();
+            if (ebScore < 0) {
+                return -1;
+            }
             metaAgeRewrite();
+            if (++passes > eraseBlocks) {
+                return -1;
+            }
         }
         emptyEBs--;
         int eb = lowestEmptyEB();

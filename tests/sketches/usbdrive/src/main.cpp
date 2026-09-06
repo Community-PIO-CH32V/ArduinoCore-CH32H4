@@ -101,6 +101,12 @@ void loop() {
           extern volatile uint32_t ch32h4_fatfsusb_prevent_calls;
           Serial1.print("usb_prevent_calls=");
           Serial1.println((uint32_t)ch32h4_fatfsusb_prevent_calls);
+          Serial1.print("usb_host_changed=");
+          Serial1.println(FatFSUSB.hostChanged() ? 1 : 0);
+        } else if (line == "usbclear") {
+          FatFSUSB.clearHostChanged();
+          Serial1.print("usb_host_changed=");
+          Serial1.println(FatFSUSB.hostChanged() ? 1 : 0);
         } else if (line == "usbend") {
           FatFSUSB.end();
           Serial1.print("usb_started=");

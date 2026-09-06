@@ -48,9 +48,11 @@
     A sketch that assumes the callbacks will arrive is a sketch that corrupts
     its filesystem on Windows.
 
-    hostWrites() is the signal that does not depend on the host being polite:
-    it counts sectors the host has written, so a sketch can see that its
-    cached view is stale even when nothing announced it.
+    hostChanged() is what a sketch should actually watch. It goes true when the
+    host mounts (where the host announces it) or writes (which it cannot do
+    silently), so it works whether or not the callbacks fire -- and on Windows
+    they do not. The callbacks remain useful where a host does send them,
+    because they fire on the mount rather than on the first write.
 
     driveReady() lets the sketch refuse the host while it is mid-operation.
     Returning false reports "not ready", which every host handles.
@@ -102,13 +104,30 @@ public:
     uint32_t worstWriteMicros() const { return _worstWriteUs; }
     void resetWorstWriteMicros() { _worstWriteUs = 0; }
 
+    /* HAS THE HOST TOUCHED THE VOLUME? The one call a sketch needs.
+     *
+     * True once the host has mounted it (where the host says so) or written to
+     * it (which it cannot do silently), whichever happened first. Both routes
+     * mean the same thing -- this sketch's FatFs cache no longer matches the
+     * medium -- so they are one flag rather than two things to watch.
+     *
+     * Sticky until clearHostChanged(), so a sketch polling from loop() cannot
+     * miss it between calls:
+     *
+     *     if (FatFSUSB.hostChanged()) {
+     *         FatFSUSB.clearHostChanged();
+     *         FatFS.end();            // or end-then-begin to re-read it
+     *     }
+     */
+    bool hostChanged() const { return _hostChanged; }
+    void clearHostChanged() { _hostChanged = false; }
+
     /* How many sectors the host has written since boot.
      *
-     * The reliable half of the ownership contract. onPlug and onUnplug depend
-     * on the host sending SCSI commands it is not obliged to send, and Windows
-     * does not; a write, on the other hand, is a write. A sketch that sees
-     * this number move knows its FatFs cache no longer matches the medium,
-     * whatever the host did or did not announce. */
+     * The raw counter behind hostChanged(), for a sketch that wants to know
+     * how much rather than whether -- a log that only rewrites itself when the
+     * host actually put something there, say. A write is a write, whatever the
+     * host did or did not announce. */
     uint32_t hostWrites() const { return _hostWrites; }
 
     /* Called from the MSC callbacks; not for sketches. */
@@ -124,6 +143,7 @@ private:
     bool _plugged = false;
     uint32_t _worstWriteUs = 0;
     uint32_t _hostWrites = 0;
+    bool _hostChanged = false;
 
     void (*_cbPlug)(uint32_t) = nullptr;
     uint32_t _cbPlugData = 0;

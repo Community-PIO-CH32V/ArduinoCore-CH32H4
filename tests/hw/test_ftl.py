@@ -144,6 +144,33 @@ def test_wear_is_spread_rather_than_concentrated(ftl):
     assert s["ftl_total_pe"] >= ebs // 2, s.raw
 
 
+def test_collection_fills_the_blocks_it_reclaims(ftl):
+    """Erases per write must stay near one per slot, not one per half block.
+
+    Garbage collection copies live data into a freshly erased block and stops
+    when that block is full. Upstream writes "full" as the literal 8, which is
+    right for a 4096-byte block holding 4096/512 = 8 LBAs and wrong for this
+    part's 8192, which holds 16: collection stopped half way and freed half as
+    much space per erase as it should have.
+
+    That is invisible to a correctness test -- the data is all there either way
+    -- and shows up only as wear. With 16 slots a healthy ratio is close to 16
+    writes per erase; the broken version gives about 8.
+    """
+    before = kv(ftl.command("ftlstats", timeout=20))["ftl_total_pe"]
+    n = 2000
+    assert kv(ftl.command(f"ftlchurn {n}", timeout=120))["ftl_churn"] == 1
+    after = kv(ftl.command("ftlstats", timeout=20))["ftl_total_pe"]
+
+    erases = after - before
+    assert erases > 0, "the churn did not force any reclaim"
+    per_erase = n / erases
+    assert per_erase > 11, (
+        f"only {per_erase:.1f} writes per erase -- collection is not filling "
+        f"the blocks it reclaims, which wears the flash about twice as fast "
+        f"as it should")
+
+
 def test_is_internally_consistent_after_churn(ftl):
     """SPIFTL's own check(): crosslinked LBAs, empty-block accounting, wear
     spread. It knows things about its invariants that a black-box test does
