@@ -98,6 +98,9 @@ void loop() {
           Serial1.println(FatFSUSB.worstWriteMicros());
           Serial1.print("usb_host_writes=");
           Serial1.println(FatFSUSB.hostWrites());
+          extern volatile uint32_t ch32h4_fatfsusb_prevent_calls;
+          Serial1.print("usb_prevent_calls=");
+          Serial1.println((uint32_t)ch32h4_fatfsusb_prevent_calls);
         } else if (line == "usbend") {
           FatFSUSB.end();
           Serial1.print("usb_started=");

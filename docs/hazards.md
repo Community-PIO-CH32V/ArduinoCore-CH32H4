@@ -1224,6 +1224,22 @@ what it does not handle), and TinyUSB's dedicated
 `tud_msc_prevent_allow_medium_removal_cb` (correct hook, but Windows does not
 send the command).
 
+**The override was checked to actually link before that conclusion was drawn**,
+and it is worth saying why the check is not optional. A weak symbol is already
+*defined*, so the linker has no undefined reference to satisfy and will not
+pull a replacement object out of an archive merely to override it. A library
+built with `dot_a_linkage` (Arduino) or PlatformIO's default `lib_archive`
+therefore loses the override silently -- and "the host never sent the command"
+then looks identical to "the override never linked". `nm` on the archive member
+showed `T tud_msc_prevent_allow_medium_removal_cb` against TinyUSB's `W`, and
+disassembly of the final image showed the function inlined into
+`mscd_xfer_cb`, incrementing its call counter. It links; the host does not send
+it. Without that check the conclusion above would have been a guess.
+
+The corollary for anyone editing FatFSUSB: do not move that callback into a
+translation unit nothing else references, or it becomes needed only for the
+override and stops being linked.
+
 That matters because a sketch and a host must never both have a FAT volume
 mounted: FatFs caches directory and allocation sectors, and a host writing
 underneath that cache corrupts one or both views silently.

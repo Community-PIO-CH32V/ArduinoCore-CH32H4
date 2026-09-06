@@ -66,18 +66,38 @@ static bool mscStartStop(uint8_t power_condition, bool start, bool load_eject) {
  * never told the host has taken the filesystem. Measured -- plug and unplug
  * counts stayed at zero through a real mount, write and eject.
  *
- * PREVENT/ALLOW MEDIUM REMOVAL is the command Windows does send: it locks the
- * medium before touching it and unlocks it on eject. TinyUSB answers that one
- * itself and offers this weak callback for it, so overriding tud_msc_scsi_cb
- * -- which is what arduino-pico does, and what was tried here first -- never
- * sees it at all: the generic hook only runs for commands the stack does not
- * already handle.
+ * PREVENT/ALLOW MEDIUM REMOVAL is the one that ought to say so: a host locks
+ * the medium before touching it and unlocks it on eject. TinyUSB answers that
+ * command itself and offers this weak callback for it, so overriding
+ * tud_msc_scsi_cb -- which is what arduino-pico does, and what was tried here
+ * first -- never sees it: the generic hook only runs for commands the stack
+ * does not already handle. Windows turns out not to send this one either.
+ *
+ * THIS OVERRIDE IS VERIFIED TO LINK, which is not a given and is why the
+ * counter below exists. A weak symbol is already defined, so a linker has no
+ * undefined reference to satisfy and will not pull a replacement out of a .a
+ * merely to override it -- a library archived with dot_a_linkage or
+ * PlatformIO's default lib_archive can lose silently, and "the host never sent
+ * it" then looks exactly like "the override never linked".
+ *
+ * Here the object is pulled in anyway, because a sketch referencing the
+ * FatFSUSB global needs it, and the disassembly confirms this function inlined
+ * into TinyUSB's mscd_xfer_cb. DO NOT move this callback into a translation
+ * unit that nothing else in the library references: it would then be needed
+ * only for the override, and would stop being linked.
  */
+/* Counts calls, so "the host never sent it" can be told apart from "the
+   override never linked" -- a weak symbol is already defined, so a linker has
+   no reason to pull a replacement out of an archive, and the two failures look
+   identical from the outside. */
+volatile uint32_t ch32h4_fatfsusb_prevent_calls = 0;
+
 extern "C" bool tud_msc_prevent_allow_medium_removal_cb(uint8_t lun,
                                                         uint8_t prohibit_removal,
                                                         uint8_t control) {
     (void)lun;
     (void)control;
+    ch32h4_fatfsusb_prevent_calls++;
     if (prohibit_removal) {
         FatFSUSB.plug();
     } else {
