@@ -163,6 +163,42 @@ static void handle(const char *cmd) {
     PSRAM.begin();
     Serial1.println("sweep_done=1");
 
+  } else if (!strncmp(cmd, "writeperf ", 10)) {
+    /* DMA against polling, over the same bytes with one mode flip each.
+     *
+     * The polled half is forced by handing write() a MISALIGNED source, not by
+     * chopping the buffer into sub-threshold pieces. Chopping would charge the
+     * polled side thousands of extra mode flips and let this pass even if DMA
+     * were the slower path -- which is the whole thing the test exists to
+     * detect.
+     */
+    uint32_t n = (uint32_t)strtoul(cmd + 10, nullptr, 0);
+    if (n > 65500) { n = 65500; }
+    n &= ~3u;                        /* the DMA path needs a whole word count */
+    static uint8_t buf[65536 + 4] __attribute__((aligned(4)));
+    static uint8_t back[65536 + 4];
+    for (uint32_t i = 0; i < n + 1; i++) { buf[i] = pat(i * 3 + 1); }
+
+    uint32_t t0 = micros();
+    PSRAM.write(0x100000, buf, n);
+    uint32_t dma = micros() - t0;
+    memset(back, 0, n);
+    PSRAM.read(0x100000, back, n);
+    const int m1 = memcmp(buf, back, n) == 0 ? 1 : 0;
+
+    t0 = micros();
+    PSRAM.write(0x200000, buf + 1, n);
+    uint32_t poll = micros() - t0;
+    memset(back, 0, n);
+    PSRAM.read(0x200000, back, n);
+    const int m2 = memcmp(buf + 1, back, n) == 0 ? 1 : 0;
+
+    Serial1.print("bytes="); Serial1.println(n);
+    Serial1.print("dma_us="); Serial1.println(dma);
+    Serial1.print("poll_us="); Serial1.println(poll);
+    Serial1.print("match="); Serial1.println(m1);
+    Serial1.print("poll_match="); Serial1.println(m2);
+
   } else if (!strncmp(cmd, "speed ", 6)) {
     /* speed <clockHz> -- time a 64 KB memory-mapped read at one clock.
      *

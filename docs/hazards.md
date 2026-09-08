@@ -1469,3 +1469,51 @@ signal arriving late, and the mechanism is unexplained. Anything that changes
 this clock needs the whole matrix: both directions, several transfer lengths,
 and a long streamed burst. `tests/hw/test_psram_clock_matrix.py` is that
 matrix; `docs/qspi-read-timing.md` has the numbers.
+
+## QSPI DMA: a stale TC flag makes a transfer that never happened look complete
+
+A DMA write on this controller needs three things the obvious code leaves out,
+and all three fail the same way -- silently, as a transfer that reports success
+having moved nothing.
+
+**Clear `TC` before waiting on it.** `QSPI_FLAG_TC` is sticky and the previous
+operation leaves one set; `mapExit()` does. Code that configures the DMA and
+then waits for `TC` returns *immediately* on the old flag, disables the channel
+before it has moved a word, and reports success. The PSRAM keeps whatever it
+had.
+
+**Call `QSPI_Start()`.** STM32's QUADSPI begins a transaction when `CCR` (or
+`AR`) is written and has no start bit. This part has `QSPI_CR_START`, and the
+transfer simply never begins without it. Ported STM32 sequences omit it.
+
+**Order matters**, and the vendor's `QSPI_FLASH_DMA` example is the reference:
+`ComConfig` → `SetAddress` → `SetDataLength` → `EnableQuad` → `QSPI_DMACmd` →
+DMA init and `DMA_MuxChannelConfig` → `DMA_Cmd` → `QSPI_Start` → wait for the
+DMA channel's TC → `QSPI_DMACmd(DISABLE)` → wait for QSPI TC.
+
+How this bites: the stale-`TC` bug is **indistinguishable from a wrong DMAMUX
+request number**. Both give "the peripheral says complete, the data is
+untouched". A sweep of every plausible request number under the stale flag
+returned seventeen identical failures and no signal at all. Watching
+`DMA_GetCurrDataCounter()` is what separates them -- it starts at the word
+count and only falls when the channel actually moves data.
+
+**QSPI2's DMAMUX request number is 72.** Measured, not assumed: the vendor
+example documents 71 for QSPI1, the SDK header defines no request constants at
+all, and 72 is merely the adjacent number. Sweeping 66..82 with the sequence
+above gives exactly one hit -- request 72 drains the DMA counter to zero and
+lands correct data; every other value moves nothing and times out. Being right
+about a guess and having measured it are different states of knowledge, and
+only one of them survives the next chip.
+
+**DMA1 *can* read DTCM**, which is worth stating because the opposite is true
+of other masters on this part -- the USB, Ethernet and SDMMC controllers cannot
+see it, and `hazards.md` says so elsewhere. Generalising that to DMA1 would
+have put a needless alignment-and-placement burden on every caller of
+`PSRAM.write()`. Verified directly: a DMA write sourced from `0x200C1B48`, an
+ordinary static in DTCM, transferred correctly. The earlier apparent failure
+was the stale-`TC` bug, not the memory region.
+
+Result: `PSRAM.write()` moves 64 KB at **12.29 MB/s** by DMA against
+**2.27 MB/s** byte-at-a-time polled -- 5.4x, and within 2% of the 12.5 MB/s
+line rate, so writes now saturate the bus the way reads do.

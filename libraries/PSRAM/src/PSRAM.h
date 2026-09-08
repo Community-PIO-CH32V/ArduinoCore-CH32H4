@@ -98,13 +98,20 @@ public:
 
     bool mapped() const { return _mapped; }
 
+    /* How long the last write() took, end to end -- including the two mode
+       flips, which a large write amortises and a small one does not. */
+    uint32_t lastWriteMicros() const { return _lastWriteUs; }
+
 private:
     bool identify();
     bool xfer(uint8_t ins, uint32_t addr, bool hasAddr, uint8_t *rx,
               const uint8_t *tx, uint32_t len, int lines, int dummy);
+    bool writeDMA(uint32_t addr, const uint8_t *src, uint32_t len,
+                  uint32_t req);
     void mapEnter();
     void mapExit();
 
+    uint32_t _lastWriteUs = 0;
     bool _mapped = false;
     bool _begun = false;
     bool _detected = false;

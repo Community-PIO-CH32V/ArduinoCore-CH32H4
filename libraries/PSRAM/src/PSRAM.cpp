@@ -172,6 +172,104 @@ void PSRAMClass::mapExit(void) {
     _mapped = false;
 }
 
+/* DMA1 channels 1-5 and 7 are taken: DACAudio has 1, SPI 2 and 3, I2S 4 and
+ * 5, ADCInput 7. Channel 6 is free. */
+#define PSRAM_DMA_CHANNEL     DMA1_Channel6
+#define PSRAM_DMA_MUX_CHANNEL DMA_MuxChannel6
+#define PSRAM_DMA_FLAG_TC     DMA1_FLAG_TC6
+
+/* MEASURED, not assumed. The vendor's QSPI_FLASH_DMA example gives 71 for
+ * QSPI1 and nothing available documents QSPI2; the SDK header defines no
+ * request constants at all. A wrong number here fails silently as a transfer
+ * that never completes, so it was found by sweeping candidates against real
+ * data. See docs/hazards.md. */
+#define PSRAM_DMA_REQ         72
+
+/* Below this, setting up a DMA costs more than it saves. */
+#define PSRAM_DMA_THRESHOLD   64
+
+bool PSRAMClass::writeDMA(uint32_t addr, const uint8_t *src, uint32_t len,
+                          uint32_t req) {
+    uint32_t t0 = micros();
+    while (QSPI_GetFlagStatus(PSRAM_QSPI, QSPI_FLAG_IDLE) == RESET) {
+        if (micros() - t0 > 3000) { return false; }
+    }
+    /* Clear the previous transfer's flags before waiting on this one's. TC is
+       sticky, and mapExit() leaves one behind: without this the wait below
+       returns instantly on a stale flag, the DMA is disabled before it has
+       moved a word, and the whole thing reports success having written
+       nothing. That failure is indistinguishable from a wrong DMAMUX request
+       number, which is exactly how it wasted a sweep. */
+    QSPI_ClearFlag(PSRAM_QSPI, QSPI_FLAG_TC);
+    QSPI_ClearFlag(PSRAM_QSPI, QSPI_FLAG_FT);
+    DMA_ClearFlag(DMA1, PSRAM_DMA_FLAG_TC);
+
+    QSPI_ComConfig_InitTypeDef c = {};
+    c.QSPI_ComConfig_IMode = QSPI_ComConfig_IMode_1Line;
+    c.QSPI_ComConfig_ADMode = QSPI_ComConfig_ADMode_4Line;
+    c.QSPI_ComConfig_DMode = QSPI_ComConfig_DMode_4Line;
+    c.QSPI_ComConfig_ABMode = QSPI_ComConfig_ABMode_NoAlternateByte;
+    c.QSPI_ComConfig_FMode = QSPI_ComConfig_FMode_Indirect_Write;
+    c.QSPI_ComConfig_SIOOMode = QSPI_ComConfig_SIOOMode_Disable;
+    c.QSPI_ComConfig_ABSize = QSPI_ComConfig_ABSize_8bit;
+    c.QSPI_ComConfig_ADSize = QSPI_ComConfig_ADSize_24bit;
+    c.QSPI_ComConfig_Ins = CMD_QUAD_WRITE;
+    c.QSPI_ComConfig_DummyCycles = 0;
+    QSPI_ComConfig_Init(PSRAM_QSPI, &c);
+    /* Address then length then quad, in the vendor example's order. */
+    QSPI_SetAddress(PSRAM_QSPI, addr);
+    QSPI_SetDataLength(PSRAM_QSPI, len);
+    QSPI_EnableQuad(PSRAM_QSPI, ENABLE);
+
+    QSPI_DMACmd(PSRAM_QSPI, ENABLE);
+
+    ch32h4_clock_enable(CH32_BUS_HB, RCC_HBPeriph_DMA1);
+    DMA_DeInit(PSRAM_DMA_CHANNEL);
+    DMA_InitTypeDef d = {};
+    d.DMA_PeripheralBaseAddr = (uint32_t)&PSRAM_QSPI->DR;
+    d.DMA_Memory0BaseAddr = (uint32_t)src;
+    d.DMA_DIR = DMA_DIR_PeripheralDST;
+    d.DMA_BufferSize = len / 4;
+    d.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    d.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    d.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Word;
+    d.DMA_MemoryDataSize = DMA_MemoryDataSize_Word;
+    d.DMA_Mode = DMA_Mode_Normal;
+    d.DMA_Priority = DMA_Priority_VeryHigh;
+    d.DMA_M2M = DMA_M2M_Disable;
+    DMA_Init(PSRAM_DMA_CHANNEL, &d);
+    DMA_MuxChannelConfig(PSRAM_DMA_MUX_CHANNEL, req);
+    DMA_Cmd(PSRAM_DMA_CHANNEL, ENABLE);
+
+    /* This part has an explicit START bit; STM32's QUADSPI does not, and the
+       transfer simply never begins without it. */
+    QSPI_Start(PSRAM_QSPI);
+
+    t0 = micros();
+    while (DMA_GetFlagStatus(DMA1, PSRAM_DMA_FLAG_TC) == RESET) {
+        if (micros() - t0 > 200000) {
+            QSPI_DMACmd(PSRAM_QSPI, DISABLE);
+            DMA_Cmd(PSRAM_DMA_CHANNEL, DISABLE);
+            QSPI_AbortRequest(PSRAM_QSPI);
+            return false;
+        }
+    }
+    QSPI_DMACmd(PSRAM_QSPI, DISABLE);
+
+    t0 = micros();
+    while (QSPI_GetFlagStatus(PSRAM_QSPI, QSPI_FLAG_TC) == RESET) {
+        if (micros() - t0 > 200000) {
+            DMA_Cmd(PSRAM_DMA_CHANNEL, DISABLE);
+            QSPI_AbortRequest(PSRAM_QSPI);
+            return false;
+        }
+    }
+    QSPI_ClearFlag(PSRAM_QSPI, QSPI_FLAG_FT);
+    QSPI_ClearFlag(PSRAM_QSPI, QSPI_FLAG_TC);
+    DMA_Cmd(PSRAM_DMA_CHANNEL, DISABLE);
+    return true;
+}
+
 bool PSRAMClass::identify(void) {
     uint8_t id[8] = {0};
     /* Single-line, because this is the one command that must work before
@@ -263,9 +361,23 @@ size_t PSRAMClass::read(uint32_t addr, void *dst, size_t len) {
 size_t PSRAMClass::write(uint32_t addr, const void *src, size_t len) {
     if (!_begun || addr >= CAPACITY) { return 0; }
     if (len > CAPACITY - addr) { len = CAPACITY - addr; }
+
+    const uint32_t t0 = micros();
     mapExit();
-    const bool ok = xfer(CMD_QUAD_WRITE, addr, true, nullptr,
-                         (const uint8_t *)src, (uint32_t)len, 4, 0);
+    bool ok;
+    /* DMA moves whole words, so a length that is not a multiple of four, or a
+       source that is not word-aligned, finishes on the polled path rather than
+       silently dropping the tail. DTCM sources are fine -- DMA1 reads them
+       without trouble, unlike the USB and Ethernet masters. */
+    if (len >= PSRAM_DMA_THRESHOLD && (len % 4) == 0
+        && ((uintptr_t)src % 4) == 0) {
+        ok = writeDMA(addr, (const uint8_t *)src, (uint32_t)len,
+                      PSRAM_DMA_REQ);
+    } else {
+        ok = xfer(CMD_QUAD_WRITE, addr, true, nullptr,
+                  (const uint8_t *)src, (uint32_t)len, 4, 0);
+    }
     mapEnter();
+    _lastWriteUs = micros() - t0;
     return ok ? len : 0;
 }

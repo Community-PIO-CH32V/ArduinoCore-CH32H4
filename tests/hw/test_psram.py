@@ -124,3 +124,28 @@ def test_read_throughput_is_reported(psram):
     kbps = 65536 * 1000 // max(r["burst_us"], 1)
     print(f"\n  memory-mapped read: {kbps / 1000.0:.2f} MB/s")
     assert kbps > 0
+
+
+def test_a_large_write_is_faster_than_byte_at_a_time_polling(psram):
+    """DMA is the point of this task, so the test has to be able to tell that
+    it happened.
+
+    Both halves write the same 64 KB in ONE call, with one mode flip each --
+    the only difference is that the polled half is handed a misaligned source,
+    which is what makes write() decline the DMA path. An earlier version of
+    this test forced polling by writing 32 bytes at a time, which charged the
+    polled side 2048 mode flips and would have passed even if DMA were the
+    slower of the two.
+    """
+    kv(psram.command("begin", timeout=20))
+    r = kv(psram.command("writeperf 65536", timeout=60))
+    assert r["match"] == 1, "the DMA write did not land correctly"
+    assert r["poll_match"] == 1, "the polled write did not land correctly"
+    assert r["dma_us"] > 0, r.raw
+    assert r["dma_us"] < r["poll_us"], (
+        "DMA (%s us) was no faster than polling (%s us) -- is it actually "
+        "being used?" % (r["dma_us"], r["poll_us"]))
+    n = r["bytes"]
+    print(f"\n  write {n} B: DMA {n / r['dma_us']:.2f} MB/s, "
+          f"polled {n / r['poll_us']:.2f} MB/s "
+          f"({r['poll_us'] / r['dma_us']:.1f}x)")
