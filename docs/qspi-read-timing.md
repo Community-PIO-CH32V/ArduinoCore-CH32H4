@@ -158,3 +158,104 @@ lengths, and a long streamed burst — not a single sketch that appears to work.
 - `docs/hazards.md` — the SIOO, `QSPI_DeInit`, and memory-mapped-hang findings
 - `docs/superpowers/specs/2026-09-06-psram-design.md` — the design spec
 - `libraries/PSRAM/src/PSRAM.h` — the user-facing version of this warning
+
+---
+
+# Addendum: it is the CPU-driven paths, not the link
+
+Everything above was measured when both `read()` and `write()` drove the bus
+from the CPU. Both now use DMA above 64 bytes, and re-running the matrix on
+the current code changes the answer substantially. **The earlier tables are
+superseded**; they are kept because the reasoning they refute is instructive,
+not because the numbers still stand.
+
+## The current matrix
+
+Reads and writes clocked separately, one direction at the test clock and the
+other at 25 MHz. Below 64 bytes a read comes from the memory-mapped window and
+a write is a byte-at-a-time FIFO poll; at or above it, both are DMA.
+
+| divider | SCLK | window read <64 B | DMA read >=64 B | polled write <64 B | DMA write >=64 B |
+|---|---|---|---|---|---|
+| 5 | 20.0 MHz | clean | clean | clean | clean |
+| 4 | **25.0 MHz** | **clean** | **clean** | **clean** | **clean** |
+| 3 | 33.3 MHz | **FAIL** | clean | clean | clean |
+| 2 | 50.0 MHz | clean | clean | **FAIL** | clean |
+| 1 | 100.0 MHz | clean | **FAIL** | clean | clean |
+
+The pattern that jumps out: **every failure except one is on a path the CPU
+drives**. DMA is clean at every divider but 100 MHz reads. The QSPI link
+itself tolerates far more than the CPU-driven access paths do, which is the
+same conclusion the throughput numbers reach from the other direction --
+DMA sustains the line rate while a memcpy from the window manages a quarter of
+it.
+
+## What this rules out
+
+**Pad drive strength does nothing.** Re-tested properly at both failing points
+across all four settings, since the original "slew changed nothing" result
+predated the `SIOXEN` discovery and so was measured while quad transfers were
+broken for an unrelated reason. It holds up:
+
+| clock | Low | Medium | High | Very High |
+|---|---|---|---|---|
+| 33.3 MHz | fails 1-32 B | fails 1-32 B | fails 1-32 B | fails 1-32 B |
+| 100 MHz | fails 256, 1024 B | fails 256, 1024 B | fails 256, 1024 B | fails 256, 1024 B |
+
+Identical in every column. Not an edge-rate problem.
+
+**There is no sample-shift bit.** The register block is STM32 QUADSPI's map
+exactly -- `CR, DCR, SR, FCR, DLR, CCR, AR, ABR, DR, PSMKR, PSMAR, PIR, LPTR`
+at 0x00-0x30 -- so ST's `SSHIFT` at `CR` bit 4 was the obvious candidate.
+Probing writability with the peripheral disabled settles it:
+
+| register | writable mask | reading |
+|---|---|---|
+| `CR` | `0xFFDF3FEF` | **bit 4 absent**; bit 5 and bit 13 present, both ST-reserved |
+| `DCR` | `0x1F0701` | exactly `CKMODE` + `CSHT` + `FSIZE`, nothing spare |
+| `PIR`, `LPTR` | `0xFFFF` | plain 16-bit, as ST |
+
+Bit 4 accepts a 1 and reads back 0: **`SSHIFT` is not implemented**. The old
+note that "setting it changes nothing measurable" was right by accident.
+
+Bit 13 is `SIOXEN`, WCH's undocumented quad-enable. Bit 5 is the only other
+undocumented writable bit in the block, and it is **not** a delay control: it
+does not persist while the peripheral is enabled -- `CR` reads back without it
+-- which makes it a self-clearing action bit like `ABORT`, and setting it
+changes nothing at either failing divider.
+
+So there is no delay line, no sample shift, and no calibration hardware to
+find. `DCR` has no spare bits at all.
+
+## Can the clock be raised?
+
+**50 MHz is the near miss.** Both DMA paths are clean there, and so are short
+window reads. Two things stop it being the default, and the first is fatal:
+
+- **A long memory-mapped burst fails at 50 MHz.** The 64 KB `data()` read that
+  the tCEM regression performs does not survive. Since `data()` being a live
+  pointer is the library's headline feature, a clock where long pointer reads
+  are unreliable is not a clock this library can default to.
+- Polled writes under 64 bytes fail (lengths 2 to 32).
+
+A caller who gave up `data()` and used only DMA-sized transfers could run at
+50 MHz and double the throughput to 25 MB/s. That is a real option for a
+streaming-only use, and it is not the default because it silently breaks the
+pointer API.
+
+**Above 100 MHz there is nothing to reach for.** QSPI has no kernel clock of
+its own -- the RCC exposes a source selector for LTDC and nothing else -- so
+SCLK is HCLK divided by an integer, and HCLK is `SYSCLK/4` = 100 MHz via
+`RCC_FPRE_DIV4`. `FPRE` does offer DIV2, which would make HCLK 200 MHz and put
+50 MHz on the known-good divider 4, but that same field clocks the V3F core
+(rated 100 MHz), the flash interface at HCLK/2, every timer, SysTick and every
+UART baud rate. It is not a QSPI knob; it is a whole-bus overclock.
+
+## Still unexplained
+
+Why divider 3 breaks the window while DMA is clean, why divider 2 breaks
+polled writes while DMA is clean, and why divider 1 breaks DMA reads alone.
+The failures remain deterministic and structured rather than marginal. The
+scope measurement described earlier is still the way to settle it, and it now
+has a sharper question to answer: what differs on the wire between a CPU-paced
+transaction and a DMA-paced one at the same clock.

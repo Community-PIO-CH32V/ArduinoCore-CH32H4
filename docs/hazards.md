@@ -1554,3 +1554,72 @@ already comfortably inside DMA's favour.
 The practical consequence for a sketch: `memcpy(dst, PSRAM.data() + off, len)`
 is the slow way to do what `PSRAM.read(off, dst, len)` does. Use the pointer
 for indexing structures, and `read()` for moving blocks.
+
+## QSPI has no sample-shift bit, and pad drive strength is not a variable
+
+Two things people reach for when a QSPI link misbehaves, both settled by
+measurement on this part.
+
+**There is no `SSHIFT`.** The register block is STM32 QUADSPI's map exactly
+(`CR, DCR, SR, FCR, DLR, CCR, AR, ABR, DR, PSMKR, PSMAR, PIR, LPTR` at
+0x00-0x30), so ST's sample-shift bit at `CR` bit 4 is the obvious thing to try.
+Probing writability with the peripheral disabled -- write all ones, read back,
+write all zeros, read back -- gives:
+
+| register | writable mask |
+|---|---|
+| `CR` | `0xFFDF3FEF` |
+| `DCR` | `0x1F0701` |
+| `PIR`, `LPTR` | `0xFFFF` |
+
+`CR` bit 4 accepts a 1 and reads back 0, so it is not implemented. `DCR` is
+exactly `CKMODE` + `CSHT` + `FSIZE` with nothing spare. There is no delay line,
+no sample shift and no calibration hardware anywhere in the block.
+
+Two bits ST reserves *are* writable: bit 13 is `SIOXEN`, WCH's undocumented
+quad enable, and bit 5 is the only other one. Bit 5 is not a delay control --
+it does not persist while the peripheral is enabled, which makes it a
+self-clearing action bit like `ABORT`, and setting it changes nothing at any
+clock. Note the general lesson: WCH puts its additions in ST-reserved bit
+positions, so a writability probe finds them when the header does not.
+
+**Pad drive strength changes nothing.** Re-tested across Low, Medium, High and
+Very High at both clocks where the link misbehaves, with identical results in
+every column -- the same transfer lengths fail by the same amounts. This is
+worth recording because the original "slew made no difference" measurement
+predated the `SIOXEN` discovery and so was taken while every quad transfer was
+broken for an unrelated reason; it needed redoing on its own merits, and it
+survives.
+
+## The QSPI link tolerates more than the CPU-driven paths do
+
+Once both `read()` and `write()` moved to DMA, the clock matrix changed shape
+entirely, and the earlier one in this file is superseded:
+
+| divider | SCLK | window read <64 B | DMA read >=64 B | polled write <64 B | DMA write >=64 B |
+|---|---|---|---|---|---|
+| 5 | 20.0 MHz | clean | clean | clean | clean |
+| 4 | **25.0 MHz** | clean | clean | clean | clean |
+| 3 | 33.3 MHz | **FAIL** | clean | clean | clean |
+| 2 | 50.0 MHz | clean | clean | **FAIL** | clean |
+| 1 | 100.0 MHz | clean | **FAIL** | clean | clean |
+
+Every failure except one sits on a path the CPU drives. That is the same
+conclusion the throughput numbers reach independently: DMA sustains the line
+rate where a `memcpy` from the window manages a quarter of it.
+
+**50 MHz nearly works and is still not the default.** Both DMA directions are
+clean there and so are short window reads, but a 64 KB memory-mapped burst
+fails -- and `data()` being a live pointer is the whole point of this library,
+so a clock where long pointer reads are unreliable cannot be the default.
+Small polled writes fail there too. A caller who used only DMA-sized transfers
+and never touched `data()` could run 50 MHz for double the throughput; that is
+a deliberate trade, not a default.
+
+**Raising HCLK is not a QSPI knob.** QSPI has no kernel clock of its own -- the
+RCC exposes a source selector for LTDC and nothing else -- so SCLK is HCLK over
+an integer, and HCLK is `SYSCLK/4` = 100 MHz set by `RCC_FPRE_DIV4`. `FPRE`
+does offer DIV2, which would put 50 MHz on the known-good divider 4, but that
+field also clocks the V3F core (rated 100 MHz), the flash interface at HCLK/2,
+every timer, SysTick, and every UART baud rate. It overclocks the whole bus to
+tune one peripheral.

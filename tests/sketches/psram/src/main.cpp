@@ -18,6 +18,26 @@ static uint8_t pat(uint32_t a) { return (uint8_t)(a * 7u + (a >> 11)); }
 static uint8_t bigA[65536 + 4] __attribute__((aligned(4)));
 static uint8_t bigB[65536 + 4] __attribute__((aligned(4)));
 
+/* Applied after every begin() inside sweep, so undocumented CR bits and pad
+   drive strength can be varied without touching the library. */
+static uint32_t g_extraCR = 0;
+static int g_padSpeed = -1;          /* -1 = leave as the library set it */
+
+static void applyExtra(void) {
+  if (g_extraCR) { QSPI2->CR |= g_extraCR; }
+  if (g_padSpeed >= 0) {
+    static const uint16_t sp[4] = { GPIO_Speed_Low, GPIO_Speed_Medium,
+                                    GPIO_Speed_High, GPIO_Speed_Very_High };
+    for (int i = 0; i < 6; i++) {
+      GPIO_InitTypeDef g = {};
+      g.GPIO_Pin = (uint16_t)(1u << (10 + i));
+      g.GPIO_Speed = (GPIOSpeed_TypeDef)sp[g_padSpeed & 3];
+      g.GPIO_Mode = GPIO_Mode_AF_PP;
+      GPIO_Init(GPIOE, &g);
+    }
+  }
+}
+
 static void handle(const char *cmd) {
   if (!strcmp(cmd, "begin")) {
     PSRAM.end();
@@ -122,6 +142,7 @@ static void handle(const char *cmd) {
       Serial1.println("sweep_begun=0");
       PSRAM.begin(); Serial1.print("> "); return;
     }
+    applyExtra();
     delay(2);
     Serial1.print("sweep_wclk="); Serial1.println(PSRAM.clock());
     for (unsigned li = 0; li < NL; li++) {
@@ -140,8 +161,11 @@ static void handle(const char *cmd) {
       Serial1.println("sweep_begun=0");
       PSRAM.begin(); Serial1.print("> "); return;
     }
+    applyExtra();
     delay(2);
     Serial1.print("sweep_rclk="); Serial1.println(PSRAM.clock());
+    Serial1.print("sweep_cr=0x"); Serial1.println(QSPI2->CR, HEX);
+    Serial1.print("sweep_pad="); Serial1.println(g_padSpeed);
     Serial1.print("sweep_dir="); Serial1.println(readAtClock ? "r" : "w");
     for (unsigned li = 0; li < NL; li++) {
       const uint32_t n = lens[li];
@@ -288,6 +312,55 @@ static void handle(const char *cmd) {
     Serial1.print("speed_bad="); Serial1.println(bad);
     Serial1.print("speed_sink="); Serial1.println(sink != 0 ? 1 : 0);
     PSRAM.end();
+    PSRAM.begin();
+
+  } else if (!strncmp(cmd, "extracr ", 8)) {
+    g_extraCR = (uint32_t)strtoul(cmd + 8, nullptr, 0);
+    Serial1.print("extracr=0x"); Serial1.println(g_extraCR, HEX);
+
+  } else if (!strncmp(cmd, "padspeed ", 9)) {
+    g_padSpeed = (int)strtol(cmd + 9, nullptr, 0);
+    Serial1.print("padspeed="); Serial1.println(g_padSpeed);
+
+  } else if (!strcmp(cmd, "probe")) {
+    /* Which bits of CR and DCR are actually implemented.
+     *
+     * The register map is STM32 QUADSPI's exactly, and WCH demonstrably put
+     * their own bits in ST's reserved positions -- QSPI_EnableQuad() sets
+     * CR bit 13, which ST reserves. So writability says more than the header
+     * does. Writing all-ones then all-zeros and reading back gives the set of
+     * bits that hold a value.
+     *
+     * Only CR and DCR, and only with the peripheral disabled. CCR is left
+     * alone deliberately: writing it configures a transaction, and an FMODE
+     * of 11 would arm memory-mapped mode.
+     */
+    PSRAM.end();
+    ch32h4_clock_enable(CH32_BUS_HB1, RCC_HB1Periph_QSPI2);
+    QSPI_Cmd(QSPI2, DISABLE);
+    struct { const char *name; volatile uint32_t *reg; } rs[] = {
+      { "cr",   &QSPI2->CR   },
+      { "dcr",  &QSPI2->DCR  },
+      { "pir",  &QSPI2->PIR  },
+      { "lptr", &QSPI2->LPTR },
+    };
+    for (unsigned i = 0; i < 4; i++) {
+      const uint32_t saved = *rs[i].reg;
+      *rs[i].reg = 0xFFFFFFFFu;
+      const uint32_t ones = *rs[i].reg;
+      *rs[i].reg = 0x00000000u;
+      const uint32_t zeros = *rs[i].reg;
+      *rs[i].reg = saved;
+      Serial1.print(rs[i].name); Serial1.print("_rst=0x");
+      Serial1.println(saved, HEX);
+      Serial1.print(rs[i].name); Serial1.print("_ones=0x");
+      Serial1.println(ones, HEX);
+      Serial1.print(rs[i].name); Serial1.print("_zeros=0x");
+      Serial1.println(zeros, HEX);
+      /* Bits that took a 1 and also took a 0 are read/write. */
+      Serial1.print(rs[i].name); Serial1.print("_rw=0x");
+      Serial1.println(ones & ~zeros, HEX);
+    }
     PSRAM.begin();
 
   } else if (!strcmp(cmd, "regs")) {
