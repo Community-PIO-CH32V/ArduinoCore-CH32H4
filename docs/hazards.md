@@ -1449,10 +1449,23 @@ than Mode 0, not better:
 | Mode 0 | 33.3 MHz | pass | fail |
 | Mode 3 | 25.0 MHz | pass | fail |
 
-Two traps in measuring this again. **Asking for 33 MHz does not give you
-33 MHz**: the prescaler is an integer divider and `begin()` rounds it up so the
-clock never exceeds the request, so ceil(100/33) = 4 lands back on 25 MHz and
-the test measures the default twice while appearing to prove 33 MHz works.
-Ask for 34 MHz to get divider 3. And **short transfers pass on settings that
-do not work** -- single bytes and 16-byte reads survived both failing
-configurations above. Only the 64-byte round trip separates them.
+Three traps in measuring this again.
+
+**Asking for 33 MHz does not give you 33 MHz.** The prescaler is an integer
+divider and `begin()` rounds it up so the clock never exceeds the request, so
+ceil(100/33) = 4 lands back on 25 MHz and the test measures the default twice
+while appearing to prove 33 MHz works. Ask for 34 MHz to get divider 3.
+
+**Short transfers pass on settings that do not work.** Single bytes survived
+both failing configurations above; only the 64-byte transfer separates them.
+
+**And the clock ceiling is not monotonic**, so "it worked at X, therefore
+anything below X is fine" is false here. A later full prescaler sweep found
+reads failing at divider 3 (33.3 MHz) but passing at divider 2 (50 MHz) and
+divider 1 (100 MHz), and writes failing only at divider 2. The corruption has
+integer structure -- exactly 32 bytes at divider 3 whatever the length,
+exactly half the bytes at divider 2 -- so it is a data-path fault, not a
+signal arriving late, and the mechanism is unexplained. Anything that changes
+this clock needs the whole matrix: both directions, several transfer lengths,
+and a long streamed burst. `tests/hw/test_psram_clock_matrix.py` is that
+matrix; `docs/qspi-read-timing.md` has the numbers.

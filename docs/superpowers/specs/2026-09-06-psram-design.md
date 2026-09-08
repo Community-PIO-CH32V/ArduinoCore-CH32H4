@@ -45,20 +45,23 @@ false negatives before it was found.
 100 MHz; the V5F's 400 MHz never reaches this peripheral, so prescaler 0 is
 100 MHz and that is the hardware maximum before anything else is considered.
 
-**25 MHz is a round-trip limit, not a board limit.** Reads must survive
-controller pad delay, flight to the chip, the chip's data-valid delay, flight
-back, and controller setup — and without a sample shift the controller samples
-about half a clock after launching the edge. That budget is 20 ns at 25 MHz
-and 15 ns at 33 MHz, and the path fits the first and not the second.
+**25 MHz is not a board limit — but it is not a round-trip timing limit
+either, contrary to what this spec originally claimed.** A later full sweep of
+every prescaler refuted that: reads fail at divider 3 (33.3 MHz) and then work
+again at divider 2 (50 MHz) and divider 1 (100 MHz), while writes fail only at
+divider 2. A setup-time budget can only shrink with frequency, so it cannot
+produce that. The corruption also has integer structure — exactly 32 bytes at
+divider 3 whatever the transfer length, exactly half the bytes at divider 2 —
+which is a data-path fault rather than a late signal.
 
-Three measurements say timing rather than signal quality:
+25 MHz (divider 4) remains the default because it is the only setting measured
+clean on every test. The full matrix, and what is and is not explained, is in
+`docs/qspi-read-timing.md`.
 
-- **Quad writes pass at every clock.** A write has no round trip: the
-  controller drives clock and data together and the chip samples with its own
-  setup and hold. Only reads have to come back.
+Two measurements still stand and still argue against signal quality:
+
 - **Extra dummy cycles rescue nothing.** Dummy cycles move when the burst
-  starts; they do not change each bit's phase against the clock, and the
-  failure is per-bit sampling. Simple late-data would have been fixed by them.
+  starts; they do not change each bit's phase against the clock.
 - **Slew rate changed nothing**, where a marginal edge would have moved.
 
 STM32's QUADSPI absorbs exactly this with `SSHIFT` (`CR` bit 4). On this part

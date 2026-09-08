@@ -81,6 +81,137 @@ static void handle(const char *cmd) {
     Serial1.print("boundaries_bad="); Serial1.println(bad);
     Serial1.print("zero_ok="); Serial1.println(v0 == 0x5C ? 1 : 0);
 
+  } else if (!strncmp(cmd, "sweep ", 6)) {
+    /* sweep <clockHz> [w] -- error rate against transfer length at one clock.
+     *
+     * Only one direction runs at the test clock; the other runs at the
+     * default 25 MHz. A write has no round trip and a read does, so clocking
+     * them separately is what says which side owns the ceiling.
+     *
+     * THREE re-inits per run, not one per repetition. An earlier version
+     * re-initialised around every transfer, which hung the board -- see the
+     * memory-mapped hazard in docs/hazards.md. Everything is written first at
+     * one clock, then everything is read at the other.
+     *
+     * Short reads are counted separately from wrong bytes. read() returns 0
+     * when the window is not live, and scoring that as corruption is how a
+     * known-good control can be made to look like a failure.
+     */
+    char *rest = nullptr;
+    uint32_t hz = (uint32_t)strtoul(cmd + 6, &rest, 0);
+    while (rest && *rest == ' ') { rest++; }
+    const bool readAtClock = !(rest && *rest == 'w');
+    static const uint16_t lens[] = { 1, 2, 4, 8, 16, 32, 64, 128, 256, 1024 };
+    const unsigned NL = sizeof(lens) / sizeof(lens[0]);
+    const int REPS = 8;
+    static uint8_t wbuf[1024], rbuf[1024];
+
+    const uint32_t wclk = readAtClock ? PSRAMClass::DEFAULT_CLOCK : hz;
+    const uint32_t rclk = readAtClock ? hz : PSRAMClass::DEFAULT_CLOCK;
+
+    /* Pass 1: write every length at every repetition, at the write clock. */
+    PSRAM.end();
+    if (!PSRAM.begin(wclk)) {
+      Serial1.println("sweep_begun=0");
+      PSRAM.begin(); Serial1.print("> "); return;
+    }
+    delay(2);
+    Serial1.print("sweep_wclk="); Serial1.println(PSRAM.clock());
+    for (unsigned li = 0; li < NL; li++) {
+      for (int rep = 0; rep < REPS; rep++) {
+        const uint32_t a = 0x100000u + li * 0x8000u + rep * 0x800u;
+        for (uint32_t i = 0; i < lens[li]; i++) {
+          wbuf[i] = (uint8_t)(pat(a + i) + rep);
+        }
+        PSRAM.write(a, wbuf, lens[li]);
+      }
+    }
+
+    /* Pass 2: read it all back at the read clock. */
+    PSRAM.end();
+    if (!PSRAM.begin(rclk)) {
+      Serial1.println("sweep_begun=0");
+      PSRAM.begin(); Serial1.print("> "); return;
+    }
+    delay(2);
+    Serial1.print("sweep_rclk="); Serial1.println(PSRAM.clock());
+    Serial1.print("sweep_dir="); Serial1.println(readAtClock ? "r" : "w");
+    for (unsigned li = 0; li < NL; li++) {
+      const uint32_t n = lens[li];
+      int badReps = 0, shortReads = 0;
+      uint32_t badBytes = 0;
+      for (int rep = 0; rep < REPS; rep++) {
+        const uint32_t a = 0x100000u + li * 0x8000u + rep * 0x800u;
+        for (uint32_t i = 0; i < n; i++) {
+          wbuf[i] = (uint8_t)(pat(a + i) + rep);
+        }
+        memset(rbuf, 0, n);
+        if (PSRAM.read(a, rbuf, n) != n) { shortReads++; continue; }
+        uint32_t bb = 0;
+        for (uint32_t i = 0; i < n; i++) {
+          if (rbuf[i] != wbuf[i]) { bb++; }
+        }
+        if (bb) { badReps++; badBytes += bb; }
+      }
+      /* Printed as each length finishes, so a hang says where it happened. */
+      Serial1.print("l"); Serial1.print(n); Serial1.print("=");
+      Serial1.print(badReps); Serial1.print(",");
+      Serial1.print(badBytes); Serial1.print(",");
+      Serial1.println(shortReads);
+    }
+    PSRAM.end();
+    PSRAM.begin();
+    Serial1.println("sweep_done=1");
+
+  } else if (!strncmp(cmd, "speed ", 6)) {
+    /* speed <clockHz> -- time a 64 KB memory-mapped read at one clock.
+     *
+     * This measures the SCLK the controller is ACTUALLY producing, rather
+     * than the one begin() computed. Memory-mapped reads run at the line
+     * rate, so elapsed time is a direct read of the clock: 65536 bytes at
+     * f x 4 bits should take 131072/f seconds. If a requested 100 MHz comes
+     * back taking as long as 25 MHz did, the prescaler did not do what the
+     * arithmetic says and every conclusion drawn from that setting is void.
+     */
+    uint32_t hz = (uint32_t)strtoul(cmd + 6, nullptr, 0);
+    const uint32_t base = 0x400000u;
+    PSRAM.end();
+    if (!PSRAM.begin(PSRAMClass::DEFAULT_CLOCK)) {
+      Serial1.println("speed_begun=0"); Serial1.print("> "); return;
+    }
+    for (uint32_t off = 0; off < 65536u; off += 256) {
+      uint8_t b[256];
+      for (int j = 0; j < 256; j++) { b[j] = pat(base + off + j); }
+      PSRAM.write(base + off, b, 256);
+    }
+    PSRAM.end();
+    if (!PSRAM.begin(hz)) {
+      Serial1.println("speed_begun=0"); PSRAM.begin(); Serial1.print("> "); return;
+    }
+    delay(2);
+    const uint8_t *win = PSRAM.data();
+    if (!win) {
+      Serial1.println("speed_mapped=0");
+      PSRAM.end(); PSRAM.begin(); Serial1.print("> "); return;
+    }
+    const uint32_t *p = (const uint32_t *)(win + base);
+    uint32_t bad = 0, sink = 0;
+    uint32_t t0 = micros();
+    for (uint32_t i = 0; i < 65536u / 4u; i++) { sink += p[i]; }
+    uint32_t us = micros() - t0;
+    for (uint32_t i = 0; i < 65536u / 4u; i++) {
+      uint32_t a = base + i * 4;
+      uint32_t want = (uint32_t)pat(a) | ((uint32_t)pat(a + 1) << 8)
+                    | ((uint32_t)pat(a + 2) << 16) | ((uint32_t)pat(a + 3) << 24);
+      if (p[i] != want) { bad++; }
+    }
+    Serial1.print("speed_clock="); Serial1.println(PSRAM.clock());
+    Serial1.print("speed_us="); Serial1.println(us);
+    Serial1.print("speed_bad="); Serial1.println(bad);
+    Serial1.print("speed_sink="); Serial1.println(sink != 0 ? 1 : 0);
+    PSRAM.end();
+    PSRAM.begin();
+
   } else if (!strcmp(cmd, "regs")) {
     /* Dumped before any access to the window, so it survives a hang: an AHB
        read to a stalled QSPI never returns and never faults. */

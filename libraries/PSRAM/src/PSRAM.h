@@ -25,10 +25,22 @@
  *      than many small ones.
  *
  * THE CLOCK IS 25 MHz AND SHOULD STAY THERE. QSPI divides HCLK at 100 MHz --
- * the V5F's 400 MHz never reaches this peripheral -- and above 25 MHz reads
- * fail because the data coming back misses its sampling window. Writes
- * survive higher clocks, because a write has no round trip, but this driver
- * uses one clock for both. Raising it needs a measurement, not optimism.
+ * the V5F's 400 MHz never reaches this peripheral -- and 25 MHz (divider 4) is
+ * the only setting measured clean on every test.
+ *
+ * It is NOT a simple "faster is worse" ceiling, and that matters if you are
+ * tempted to raise it. Reads fail at divider 3 (33.3 MHz) but pass at divider
+ * 2 (50 MHz) and divider 1 (100 MHz); writes fail only at divider 2. The
+ * corruption has integer structure -- exactly 32 bytes wrong at divider 3
+ * regardless of transfer length, exactly half the bytes wrong at divider 2 --
+ * so it is a data-path fault, not analog marginality, and the mechanism is not
+ * understood. 100 MHz very nearly works: it streams a 64 KB read at 49 MB/s,
+ * but with 2 corrupt words in 16384, which is far too many for a pointer you
+ * dereference without checking.
+ *
+ * So: do not raise this on the strength of one sketch that appears to work.
+ * Several settings pass some tests and fail others. See
+ * docs/qspi-read-timing.md and tests/hw/test_psram_clock_matrix.py.
  */
 #pragma once
 
