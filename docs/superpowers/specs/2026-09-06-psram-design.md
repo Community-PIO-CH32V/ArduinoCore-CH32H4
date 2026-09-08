@@ -66,11 +66,11 @@ that bit position is undefined in WCH's header and setting it changes nothing
 measurable. `CKMode` (Mode 0 against Mode 3) was the one remaining knob, and
 task 1 has now measured it. Mode 3 does not raise the ceiling — it lowers it:
 
-| CKMode | Clock | 1-byte quad | 16-byte quad read | 64-byte quad round-trip |
-|---|---|---|---|---|
-| Mode 0 | 25.0 MHz | pass | pass | pass |
-| Mode 0 | 33.3 MHz | pass | pass | **fail** |
-| Mode 3 | 25.0 MHz | pass | pass | **fail** |
+| CKMode | Clock | 1-byte read (verified) | 64-byte read (verified) |
+|---|---|---|---|
+| Mode 0 | 25.0 MHz | pass | pass |
+| Mode 0 | 33.3 MHz | pass | **fail** |
+| Mode 3 | 25.0 MHz | pass | **fail** |
 
 So 25 MHz is confirmed against both clock modes, and Mode 0 is the correct
 default rather than an arbitrary one. `DEFAULT_CLOCK` stays at 25 MHz.
@@ -120,8 +120,17 @@ rate, and a controller re-issuing the command per access would have paid
 than buried: this is one chip at room temperature, and retention margin
 shrinks as temperature rises. The datasheet limit exists to be guaranteed
 across the full range, and this measurement does not make violating it *safe* —
-it makes it *observed-benign here*. The library enables the `LPTR` timeout
-anyway, which costs nothing and bounds CE# during idle.
+it makes it *observed-benign here*.
+
+**The `LPTR` timeout counter is deliberately not armed**, contrary to the
+original intent recorded here. It looked like free insurance — it drops CE#
+during idle gaps at no cost — but the vendor's memory-mapped example does not
+arm it, and it was present in the version of `mapEnter()` that hung the board.
+It was removed in the same change as a missing idle wait, so which of the two
+caused the hang is not established, and re-arming it means deliberately
+re-testing a suspected board-wedger. Since the hazard it guards against
+measures clean without it, that experiment has not been run. See
+`docs/hazards.md`.
 
 ## The API
 
@@ -244,3 +253,10 @@ Both return 0 before `begin()`.
 2. Memory-mapped mode, `data()`, and the agreement test against `read()`.
 3. DMA for `write()`, plus the mode-flip discipline and its hazards.
 4. Examples, the density sweep, the burst regression, and `hazards.md`.
+
+## Addendum: the timing analysis
+
+The reasoning behind the 25 MHz ceiling — the `T/2` round-trip budget, why the
+circuit board cannot be responsible for it, why Mode 3 is worse rather than
+better, and the one loose end (the length dependence) — is written up
+separately in `docs/qspi-read-timing.md`.

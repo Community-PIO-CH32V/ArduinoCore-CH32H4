@@ -1443,11 +1443,11 @@ the instruction phase was never being paid per word to begin with.
 Mode 3 was the last untested knob on the 25 MHz read ceiling, and it is worse
 than Mode 0, not better:
 
-| CKMode | Clock | 1-byte quad | 16-byte quad read | 64-byte quad round-trip |
-|---|---|---|---|---|
-| Mode 0 | 25.0 MHz | pass | pass | pass |
-| Mode 0 | 33.3 MHz | pass | pass | fail |
-| Mode 3 | 25.0 MHz | pass | pass | fail |
+| CKMode | Clock | 1-byte read (verified) | 64-byte read (verified) |
+|---|---|---|---|
+| Mode 0 | 25.0 MHz | pass | pass |
+| Mode 0 | 33.3 MHz | pass | fail |
+| Mode 3 | 25.0 MHz | pass | fail |
 
 Two traps in measuring this again. **Asking for 33 MHz does not give you
 33 MHz**: the prescaler is an integer divider and `begin()` rounds it up so the
