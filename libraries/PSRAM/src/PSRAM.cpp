@@ -38,6 +38,23 @@ static void psramPins(void) {
     }
 }
 
+/* Reset QSPI2, in place of the SDK's QSPI_DeInit().
+ *
+ * DO NOT call QSPI_DeInit() on this part. It resets the wrong peripheral on
+ * the wrong bus: QSPI is on HB1, but the SDK passes RCC_HB1Periph_QSPIx to
+ * RCC_HB2PeriphResetCmd(). RCC_HB1Periph_QSPI2 is 0x2000, which on HB2 is
+ * TIM8 -- so QSPI_DeInit(QSPI2) resets TIM8 and leaves QSPI2 running.
+ * (QSPI_DeInit(QSPI1) resets SPI1 for the same reason: 0x1000 is SPI1 there.)
+ *
+ * That was harmless while every transfer was indirect, because the controller
+ * returns to idle on its own. Memory-mapped mode leaves it permanently busy,
+ * so without a real reset a second begin() finds a controller that never goes
+ * idle and identify() times out. */
+static void psramReset(void) {
+    RCC_HB1PeriphResetCmd(RCC_HB1Periph_QSPI2, ENABLE);
+    RCC_HB1PeriphResetCmd(RCC_HB1Periph_QSPI2, DISABLE);
+}
+
 bool PSRAMClass::xfer(uint8_t ins, uint32_t addr, bool hasAddr, uint8_t *rx,
                       const uint8_t *tx, uint32_t len, int lines, int dummy) {
     uint32_t t0 = micros();
@@ -101,6 +118,60 @@ bool PSRAMClass::xfer(uint8_t ins, uint32_t addr, bool hasAddr, uint8_t *rx,
     return true;
 }
 
+void PSRAMClass::mapEnter(void) {
+    if (_mapped) { return; }
+    /* Wait for idle before touching CCR. The vendor example does this and it
+       is not optional: mapEnter() runs straight after an indirect transfer,
+       which waits for TC but not for BUSY to fall, and configuring CCR on a
+       busy controller wedges it. A wedged controller is not a normal failure
+       -- the first AHB read of the window then hangs the CPU forever, with no
+       fault and no timeout, and the debug probe cannot halt the core. */
+    uint32_t t0 = micros();
+    while (QSPI_GetFlagStatus(PSRAM_QSPI, QSPI_FLAG_IDLE) == RESET) {
+        if (micros() - t0 > 5000) { return; }    /* stay unmapped, not wedged */
+    }
+    QSPI_ComConfig_InitTypeDef c = {};
+    c.QSPI_ComConfig_IMode = QSPI_ComConfig_IMode_1Line;
+    c.QSPI_ComConfig_ADMode = QSPI_ComConfig_ADMode_4Line;
+    c.QSPI_ComConfig_DMode = QSPI_ComConfig_DMode_4Line;
+    c.QSPI_ComConfig_ABMode = QSPI_ComConfig_ABMode_NoAlternateByte;
+    c.QSPI_ComConfig_FMode = QSPI_ComConfig_FMode_Memory_Mapped;
+    /* SIOO stays disabled. Sending 0xEB once and letting later transactions
+       continue without it is measurably wrong on this chip: every word of a
+       64 KB burst came back corrupt, and the burst took exactly as long as
+       before, so it does not even buy the instruction phase back. Reads are
+       already at line rate; there was nothing to win here. */
+    c.QSPI_ComConfig_SIOOMode = QSPI_ComConfig_SIOOMode_Disable;
+    c.QSPI_ComConfig_ABSize = QSPI_ComConfig_ABSize_8bit;
+    c.QSPI_ComConfig_ADSize = QSPI_ComConfig_ADSize_24bit;
+    c.QSPI_ComConfig_Ins = CMD_QUAD_READ;
+    c.QSPI_ComConfig_DummyCycles = QUAD_READ_DUMMY;
+    QSPI_ComConfig_Init(PSRAM_QSPI, &c);
+    QSPI_EnableQuad(PSRAM_QSPI, ENABLE);
+
+    /* No timeout counter. It looks like free tCEM insurance -- it drops CE#
+       after an idle gap, and this part only refreshes while CE# is high -- but
+       the vendor's memory-mapped example does not arm it, and nothing here has
+       shown it is safe to. The burst test can turn it on to measure whether it
+       is worth having; until that says yes, this matches the one sequence
+       known to work. */
+    QSPI_Start(PSRAM_QSPI);
+    _mapped = true;
+}
+
+/* Memory-mapped mode leaves the controller permanently busy, so an indirect
+ * transfer cannot simply wait for idle -- it has to abort out first. */
+void PSRAMClass::mapExit(void) {
+    if (!_mapped) { return; }
+    QSPI_TimeoutCounterCmd(PSRAM_QSPI, DISABLE);   /* no-op unless a test armed it */
+    QSPI_AbortRequest(PSRAM_QSPI);
+    uint32_t t0 = micros();
+    while (QSPI_GetFlagStatus(PSRAM_QSPI, QSPI_FLAG_IDLE) == RESET) {
+        if (micros() - t0 > 5000) { break; }
+    }
+    _mapped = false;
+}
+
 bool PSRAMClass::identify(void) {
     uint8_t id[8] = {0};
     /* Single-line, because this is the one command that must work before
@@ -141,7 +212,7 @@ bool PSRAMClass::begin(uint32_t clockHz) {
     ch32h4_clock_enable(CH32_BUS_HB1, RCC_HB1Periph_QSPI2);
 
     QSPI_Cmd(PSRAM_QSPI, DISABLE);
-    QSPI_DeInit(PSRAM_QSPI);
+    psramReset();
     QSPI_InitTypeDef s = {};
     s.QSPI_Prescaler = presc;
     s.QSPI_CKMode = QSPI_CKMode_Mode0;
@@ -160,11 +231,13 @@ bool PSRAMClass::begin(uint32_t clockHz) {
         return false;
     }
     _begun = true;
+    mapEnter();                 /* the resting state from here on */
     return true;
 }
 
 bool PSRAMClass::end(void) {
     if (!_begun) { return true; }
+    mapExit();
     QSPI_AbortRequest(PSRAM_QSPI);
     QSPI_Cmd(PSRAM_QSPI, DISABLE);
     _begun = false;
@@ -179,13 +252,20 @@ void PSRAMClass::eid(uint8_t out[6]) const {
 size_t PSRAMClass::read(uint32_t addr, void *dst, size_t len) {
     if (!_begun || addr >= CAPACITY) { return 0; }
     if (len > CAPACITY - addr) { len = CAPACITY - addr; }
-    return xfer(CMD_QUAD_READ, addr, true, (uint8_t *)dst, nullptr,
-                (uint32_t)len, 4, QUAD_READ_DUMMY) ? len : 0;
+    /* The window, not an indirect transfer. Same bytes, one code path, and no
+       mode flip -- reads are the case that must stay cheap. */
+    mapEnter();
+    if (!_mapped) { return 0; }   /* never touch a window that is not live */
+    memcpy(dst, (const void *)(MMAP_BASE + addr), len);
+    return len;
 }
 
 size_t PSRAMClass::write(uint32_t addr, const void *src, size_t len) {
     if (!_begun || addr >= CAPACITY) { return 0; }
     if (len > CAPACITY - addr) { len = CAPACITY - addr; }
-    return xfer(CMD_QUAD_WRITE, addr, true, nullptr, (const uint8_t *)src,
-                (uint32_t)len, 4, 0) ? len : 0;
+    mapExit();
+    const bool ok = xfer(CMD_QUAD_WRITE, addr, true, nullptr,
+                         (const uint8_t *)src, (uint32_t)len, 4, 0);
+    mapEnter();
+    return ok ? len : 0;
 }

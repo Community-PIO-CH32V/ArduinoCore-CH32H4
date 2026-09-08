@@ -80,3 +80,47 @@ def test_every_address_line_decodes(psram):
     r = kv(psram.command("density", timeout=30))
     assert r["boundaries_bad"] == 0, r.raw
     assert r["zero_ok"] == 1, "address 0 was disturbed by a boundary write"
+
+
+def test_the_mapped_pointer_agrees_with_read(psram):
+    """Two paths to the same bytes that could silently diverge: one is a CPU
+    load through the window, the other an indirect transfer."""
+    kv(psram.command("begin", timeout=20))
+    kv(psram.command("rw 0x2000", timeout=20))
+    r = kv(psram.command("mapcmp 0x2000", timeout=20))
+    assert r["base"] == 0x70000000, r.raw
+    assert r["mismatch"] == 0, r.raw
+
+
+def test_a_long_mapped_burst_does_not_disturb_the_rest_of_the_array(psram):
+    """The tCEM regression, run in the configuration the library ships.
+
+    The part refreshes itself only while CE# is high and the datasheet caps
+    CE#-low at 8 us, but a 64 KB memory-mapped read is milliseconds of traffic.
+    This is what lets data() be a plain pointer rather than a guarded accessor,
+    so it is kept as a test rather than a note -- it is one chip at one
+    temperature, and the whole read path rests on it.
+
+    burst_us is the wall time of the read loop, not a CE#-low time. The
+    library does not arm the controller's timeout counter -- the vendor's
+    memory-mapped example does not either -- so nothing here is deliberately
+    dropping CE# between accesses. That is precisely why the witness rows
+    matter.
+    """
+    kv(psram.command("begin", timeout=20))
+    r = kv(psram.command("burst 65536", timeout=40))
+    assert r["burst_errors"] == 0, r.raw
+    assert r["witness_bad"] == 0, (
+        "a long burst corrupted rows elsewhere in the array: %s" % r.raw)
+    assert r["burst_us"] > 1000, (
+        "the burst was too short to have tested anything: %s" % r.raw)
+
+
+def test_read_throughput_is_reported(psram):
+    """Reported, not asserted. A number that moves with clock settings should
+    be visible without failing a build over it."""
+    kv(psram.command("begin", timeout=20))
+    r = kv(psram.command("burst 65536", timeout=40))
+    kbps = 65536 * 1000 // max(r["burst_us"], 1)
+    print(f"\n  memory-mapped read: {kbps / 1000.0:.2f} MB/s")
+    assert kbps > 0

@@ -65,11 +65,35 @@ public:
     size_t read(uint32_t addr, void *dst, size_t len);
     size_t write(uint32_t addr, const void *src, size_t len);
 
+    /* QSPI2's memory-mapped window. QSPI1's is at 0x90000000 and is NOT this
+       one -- reading there returns zeros. */
+    static const uint32_t MMAP_BASE = 0x70000000u;
+
+    /* The device as ordinary memory, or nullptr when the window is not live.
+     *
+     * Safe to hold across calls, but see the header note: it must not be
+     * dereferenced while write() is running, because a write has to leave
+     * memory-mapped mode to do its job.
+     *
+     * The nullptr case is deliberately checked against _mapped and not just
+     * _begun. Reading this window while the controller is not actually in
+     * memory-mapped mode does not return rubbish -- it hangs the CPU on an AHB
+     * access that never completes and never faults, which also locks out the
+     * debug probe. A null pointer is a far better failure than that. */
+    const uint8_t *data() const {
+        return (_begun && _mapped) ? (const uint8_t *)MMAP_BASE : nullptr;
+    }
+
+    bool mapped() const { return _mapped; }
+
 private:
     bool identify();
     bool xfer(uint8_t ins, uint32_t addr, bool hasAddr, uint8_t *rx,
               const uint8_t *tx, uint32_t len, int lines, int dummy);
+    void mapEnter();
+    void mapExit();
 
+    bool _mapped = false;
     bool _begun = false;
     bool _detected = false;
     uint8_t _mfid = 0;

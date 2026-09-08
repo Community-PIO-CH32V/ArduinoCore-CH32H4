@@ -1353,3 +1353,106 @@ request number leaves the counter stationary.
 `SystemCoreClock`, which is four times HCLK on the V5F. Using the latter makes
 every rate come out exactly 4x too slow. `ch32h4_timer_input_clock()` exists
 precisely so nobody has to remember this.
+
+## `QSPI_DeInit()` resets a different peripheral, on a different bus
+
+The SDK's `QSPI_DeInit()` resets neither QSPI. Both branches pass an
+`RCC_HB1Periph_*` bit to `RCC_HB2PeriphResetCmd()`:
+
+```c
+void QSPI_DeInit(QSPI_TypeDef *QSPIx)
+{
+    if (QSPIx == QSPI1) {
+        RCC_HB2PeriphResetCmd(RCC_HB1Periph_QSPI1, ENABLE);   /* 0x1000 */
+        ...
+    } else if (QSPIx == QSPI2) {
+        RCC_HB2PeriphResetCmd(RCC_HB1Periph_QSPI2, ENABLE);   /* 0x2000 */
+```
+
+QSPI is on HB1. On HB2 those bit positions are other peripherals entirely:
+`0x1000` is `RCC_HB2Periph_SPI1` and `0x2000` is `RCC_HB2Periph_TIM8`. So
+`QSPI_DeInit(QSPI2)` resets **TIM8** and leaves QSPI2 exactly as it was, and
+`QSPI_DeInit(QSPI1)` resets **SPI1**. Either can reach across into an
+unrelated, working driver -- TIM8 is a timer the core's allocator hands out.
+
+This hid for a long time because it is harmless as long as every transfer is
+indirect: the controller returns to idle by itself, so a reset that does
+nothing is a reset nobody needed. Memory-mapped mode is what exposes it. That
+mode leaves the controller permanently busy, so with no real reset the *second*
+`begin()` finds a controller that never goes idle, and identification times
+out. The first `begin()` after a power-on still works, which is the worst
+possible symptom: it looks like a teardown bug rather than a reset that was
+never happening.
+
+`libraries/PSRAM` uses `RCC_HB1PeriphResetCmd(RCC_HB1Periph_QSPI2, ...)`
+directly and does not call `QSPI_DeInit()`.
+
+## A misconfigured QSPI memory-mapped window hangs the CPU and locks out the probe
+
+Reading the memory-mapped window while the controller is not correctly in
+memory-mapped mode does not return rubbish and does not fault. The AHB access
+simply never completes. The core stops with no exception, no watchdog, and
+nothing on the serial port -- and the debug probe cannot halt it either. The
+symptom at the bench is `wlink` failing three times with
+
+```
+Error: WCH-Link underlying protocol error: 0x55
+```
+
+which reads like a broken probe or cable. It is not; it is the target refusing
+to halt. Recovery is NRST plus `wlink erase`, and the erase matters, because
+otherwise the hung firmware runs again the moment the board comes back.
+
+Two rules follow, both in `libraries/PSRAM`:
+
+- **Wait for `QSPI_FLAG_IDLE` before writing `CCR`.** `mapEnter()` runs right
+  after an indirect transfer, and that transfer waits for `TC`, not for `BUSY`
+  to fall. Configuring `CCR` on a busy controller wedges it. The vendor's
+  `QSPI_MemoryMap_QuadIO()` does this wait; it is not decoration.
+- **Never dereference the window on a path that has not confirmed the mode
+  took.** `PSRAM.data()` returns `nullptr` unless `_mapped` is set, and
+  `read()` returns 0 rather than calling `memcpy` on an address that might
+  hang. A null pointer is a far better failure than a board that has to be
+  physically rescued.
+
+The controller's memory-mapped timeout counter
+(`QSPI_TimeoutCounterCmd`) is deliberately **not** armed. It looks like free
+insurance against tCEM -- it drops CE# during idle gaps, and this part only
+refreshes while CE# is high -- but the vendor example does not use it, and it
+was armed in the version that hung. It was removed together with the missing
+idle wait, so which of the two caused the hang is not established. It is not
+armed again without a reason, because the thing it would protect against
+measures clean without it: a 64 KB burst, about 5 ms of continuous reading,
+leaves witness rows across the whole array intact.
+
+## SIOO corrupts every read on an APS6404L
+
+`SIOOMode_Enable` sends the instruction on the first transaction only and lets
+later ones continue without it. On paper that is QPI's saving without QPI's
+mode state -- 8 clocks off each transaction. On this chip it is simply wrong:
+with SIOO enabled, **every** word of a 64 KB memory-mapped burst came back
+corrupt (16384 of 16384), along with 379 of 384 witness bytes elsewhere.
+
+It does not even trade correctness for speed. The corrupt burst took 5262 us,
+against 5250 us for the correct one -- no gain at all, because memory-mapped
+reads already stream at the full line rate (12.5 MB/s = 25 MHz x 4 lines) and
+the instruction phase was never being paid per word to begin with.
+
+## QSPI CKMode Mode 3 lowers the clock ceiling rather than raising it
+
+Mode 3 was the last untested knob on the 25 MHz read ceiling, and it is worse
+than Mode 0, not better:
+
+| CKMode | Clock | 1-byte quad | 16-byte quad read | 64-byte quad round-trip |
+|---|---|---|---|---|
+| Mode 0 | 25.0 MHz | pass | pass | pass |
+| Mode 0 | 33.3 MHz | pass | pass | fail |
+| Mode 3 | 25.0 MHz | pass | pass | fail |
+
+Two traps in measuring this again. **Asking for 33 MHz does not give you
+33 MHz**: the prescaler is an integer divider and `begin()` rounds it up so the
+clock never exceeds the request, so ceil(100/33) = 4 lands back on 25 MHz and
+the test measures the default twice while appearing to prove 33 MHz works.
+Ask for 34 MHz to get divider 3. And **short transfers pass on settings that
+do not work** -- single bytes and 16-byte reads survived both failing
+configurations above. Only the 64-byte round trip separates them.
