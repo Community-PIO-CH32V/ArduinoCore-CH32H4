@@ -9,20 +9,31 @@
  * bank sits elsewhere on the package with the clock on a different AF from
  * the data.
  *
- * READS ARE FREE, WRITES ARE NOT. After begin() the controller rests in
- * memory-mapped mode, so reading is a CPU load with no library involvement at
- * all and random access costs nothing extra. Memory-mapped mode is read-only
- * in hardware -- that is the design of this controller, not an omission -- so
- * every write has to abort out of it, transfer, and re-enter.
+ * RANDOM ACCESS IS FREE; BULK COPYING IS NOT. After begin() the controller
+ * rests in memory-mapped mode, so data() is a live pointer and indexing it is
+ * an ordinary CPU load with no library involvement at all. Memory-mapped mode
+ * is read-only in hardware -- that is the design of this controller, not an
+ * omission -- so every write has to abort out of it, transfer, and re-enter.
  *
- * TWO CONSEQUENCES, both real:
+ * USE data() FOR RANDOM ACCESS AND read() FOR BULK. They are not the same
+ * speed, and not in the direction you would guess: the window is unbeatable
+ * per access but only reaches ~2.9 MB/s when copied from in a loop, because
+ * discrete CPU loads do not keep the controller streaming. read() runs DMA
+ * instead and sustains 12.5 MB/s -- the full line rate, and over 4x a memcpy
+ * from the window. So `memcpy(dst, PSRAM.data() + off, len)` is the slow way
+ * to do what `PSRAM.read(off, dst, len)` does.
  *
- *   1. data() MUST NOT be dereferenced while write() is running. A
- *      single-threaded sketch cannot hit this, because write() returns before
- *      anything else runs. Reading from an interrupt while the main loop
- *      writes WILL return rubbish.
- *   2. A write costs a mode flip. Batch into few large write() calls rather
- *      than many small ones.
+ * THREE CONSEQUENCES, all real:
+ *
+ *   1. data() MUST NOT be dereferenced while read() or write() is running.
+ *      Both leave memory-mapped mode to do their work. A single-threaded
+ *      sketch cannot hit this, because they return before anything else runs.
+ *      Touching it from an interrupt WILL return rubbish.
+ *   2. Transfers cost a mode flip -- about 5 us. Batch into few large calls
+ *      rather than many small ones.
+ *   3. DMA needs a word-aligned pointer and a whole number of words. Anything
+ *      else still works, on the slow path, silently. If bulk throughput
+ *      matters, align the buffer.
  *
  * THE CLOCK IS 25 MHz AND SHOULD STAY THERE. QSPI divides HCLK at 100 MHz --
  * the V5F's 400 MHz never reaches this peripheral -- and 25 MHz (divider 4) is
@@ -102,8 +113,15 @@ public:
        flips, which a large write amortises and a small one does not. */
     uint32_t lastWriteMicros() const { return _lastWriteUs; }
 
+    /* Benchmark hook: force the DMA read path regardless of the threshold.
+       read() picks between DMA and the window on its own; this exists so the
+       crossover between them can be re-measured on another board, which is
+       where PSRAM_READ_DMA_THRESHOLD comes from. 0 unless word-aligned. */
+    size_t readViaDMA(uint32_t addr, void *dst, size_t len);
+
 private:
     bool identify();
+    bool readDMA(uint32_t addr, uint8_t *dst, uint32_t len);
     bool xfer(uint8_t ins, uint32_t addr, bool hasAddr, uint8_t *rx,
               const uint8_t *tx, uint32_t len, int lines, int dummy);
     bool writeDMA(uint32_t addr, const uint8_t *src, uint32_t len,

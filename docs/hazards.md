@@ -1517,3 +1517,40 @@ was the stale-`TC` bug, not the memory region.
 Result: `PSRAM.write()` moves 64 KB at **12.29 MB/s** by DMA against
 **2.27 MB/s** byte-at-a-time polled -- 5.4x, and within 2% of the 12.5 MB/s
 line rate, so writes now saturate the bus the way reads do.
+
+## The memory-mapped window is the slow way to copy out of PSRAM
+
+Reading through the window looks like the obvious fast path -- it is a plain
+pointer, it needs no mode flip, and `data()` exists precisely so random access
+costs nothing. It is nonetheless **4x slower than DMA** for bulk copying, and
+the gap is not small:
+
+| path, 65500 bytes | time | rate |
+|---|---|---|
+| `memcpy` from the window, word-aligned | 22779 us | 2.88 MB/s |
+| hand-written 32-bit loop from the window | 15097 us | 4.34 MB/s |
+| `memcpy` from the window, misaligned (byte-wise) | 88580 us | 0.74 MB/s |
+| **indirect DMA read** | **5247 us** | **12.48 MB/s** |
+
+12.48 MB/s is the line rate (25 MHz x 4 bits). The window path is not limited
+by the QSPI clock at all -- it is limited by the CPU issuing discrete AHB
+loads, which leaves gaps the controller cannot stream across. DMA issues
+back-to-back word reads and keeps the pipe full.
+
+Note the three different window numbers. The same window, the same clock, the
+same bytes: 4.34 MB/s for a hand-written word loop, 2.88 for an aligned
+`memcpy`, 0.74 for a misaligned one. Access pattern dominates everything else
+here, which is also why a benchmark over this window measures the loop as much
+as the hardware. An earlier measurement of 12.47 MB/s through the window came
+from a loop that only compared and never stored, and is not a copy rate.
+
+`PSRAM.read()` therefore uses DMA above `PSRAM_DMA_THRESHOLD` (64 bytes) when
+the destination is word-aligned and the length is a whole number of words, and
+falls back to the window otherwise. **The threshold is measured.** DMA reads
+from 256 to 1024 bytes fit to about 5 us of fixed cost plus 12.4 MB/s; against
+the window's 0.347 us/byte that crosses over at roughly 20 bytes, so 64 is
+already comfortably inside DMA's favour.
+
+The practical consequence for a sketch: `memcpy(dst, PSRAM.data() + off, len)`
+is the slow way to do what `PSRAM.read(off, dst, len)` does. Use the pointer
+for indexing structures, and `read()` for moving blocks.

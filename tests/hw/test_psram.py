@@ -149,3 +149,29 @@ def test_a_large_write_is_faster_than_byte_at_a_time_polling(psram):
     print(f"\n  write {n} B: DMA {n / r['dma_us']:.2f} MB/s, "
           f"polled {n / r['poll_us']:.2f} MB/s "
           f"({r['poll_us'] / r['dma_us']:.1f}x)")
+
+
+def test_a_large_read_uses_dma_not_the_window(psram):
+    """read() is DMA-backed above the threshold, and that is worth 4x.
+
+    Copying from the memory-mapped window is the intuitive implementation and
+    the slow one: it needs no mode flip, but discrete CPU loads do not keep the
+    controller streaming, so an aligned memcpy manages 2.88 MB/s against DMA's
+    12.4 MB/s. A misaligned one -- which is what this compares against, since
+    misalignment is how read() is forced onto the window path -- is slower
+    still, because it copies byte-wise.
+
+    Asserted as a ratio rather than an absolute duration, so it fails if the
+    DMA path stops being taken rather than only if the board gets slower.
+    """
+    kv(psram.command("begin", timeout=20))
+    r = kv(psram.command("readperf 65536", timeout=90))
+    assert r["memcpy_ok"] == 1, "the windowed read did not land correctly"
+    assert r["dma_ok"] == 1, "the DMA read did not land correctly"
+    assert r["dma_us"] * 3 < r["memcpy_us"], (
+        "DMA read (%s us) was not clearly faster than the window (%s us) -- "
+        "is read() still using DMA?" % (r["dma_us"], r["memcpy_us"]))
+    n = r["bytes"]
+    print(f"\n  read {n} B: DMA {n / r['dma_us']:.2f} MB/s, "
+          f"window {n / r['memcpy_us']:.2f} MB/s "
+          f"({r['memcpy_us'] / r['dma_us']:.1f}x)")

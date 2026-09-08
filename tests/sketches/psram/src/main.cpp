@@ -11,6 +11,13 @@ static int len = 0;
 
 static uint8_t pat(uint32_t a) { return (uint8_t)(a * 7u + (a >> 11)); }
 
+/* Shared by readperf and writeperf. Two 64 KB buffers each would be 256 KB and
+   DTCM is 255 KB, so the benchmarks take turns rather than each owning a pair.
+   The extra 4 bytes give readperf/writeperf a misaligned source to work with
+   without running off the end. */
+static uint8_t bigA[65536 + 4] __attribute__((aligned(4)));
+static uint8_t bigB[65536 + 4] __attribute__((aligned(4)));
+
 static void handle(const char *cmd) {
   if (!strcmp(cmd, "begin")) {
     PSRAM.end();
@@ -163,6 +170,42 @@ static void handle(const char *cmd) {
     PSRAM.begin();
     Serial1.println("sweep_done=1");
 
+  } else if (!strncmp(cmd, "readperf ", 9)) {
+    /* readperf <n> -- the two read paths over the same n bytes.
+     *
+     * memcpy from the window pays no mode flip but only manages ~2.9 MB/s,
+     * because discrete CPU loads do not keep the controller streaming. DMA
+     * runs at the line rate but pays a flip at each end. Where they cross is
+     * what PSRAM_READ_DMA_THRESHOLD encodes, so it is measured, not guessed.
+     */
+    uint32_t n = (uint32_t)strtoul(cmd + 9, nullptr, 0);
+    if (n > 65500) { n = 65500; }
+    n &= ~3u;
+    uint8_t *seed = bigA, *got = bigB;
+    const uint32_t a = 0x500000u;
+    for (uint32_t i = 0; i < n; i++) { seed[i] = pat(a + i * 5 + 3); }
+    PSRAM.write(a, seed, n);
+
+    /* Misaligned destination, so read() must use the window. */
+    memset(got, 0, n + 1);
+    uint32_t t0 = micros();
+    PSRAM.read(a, got + 1, n);
+    const uint32_t mc = micros() - t0;
+    const int mc_ok = memcmp(seed, got + 1, n) == 0 ? 1 : 0;
+
+    /* DMA forced, so the crossover can be found below the threshold too. */
+    memset(got, 0, n + 1);
+    t0 = micros();
+    const size_t dn = PSRAM.readViaDMA(a, got, n);
+    const uint32_t dm = micros() - t0;
+    const int dm_ok = (dn == n && memcmp(seed, got, n) == 0) ? 1 : 0;
+
+    Serial1.print("bytes="); Serial1.println(n);
+    Serial1.print("memcpy_us="); Serial1.println(mc);
+    Serial1.print("memcpy_ok="); Serial1.println(mc_ok);
+    Serial1.print("dma_us="); Serial1.println(dm);
+    Serial1.print("dma_ok="); Serial1.println(dm_ok);
+
   } else if (!strncmp(cmd, "writeperf ", 10)) {
     /* DMA against polling, over the same bytes with one mode flip each.
      *
@@ -175,8 +218,7 @@ static void handle(const char *cmd) {
     uint32_t n = (uint32_t)strtoul(cmd + 10, nullptr, 0);
     if (n > 65500) { n = 65500; }
     n &= ~3u;                        /* the DMA path needs a whole word count */
-    static uint8_t buf[65536 + 4] __attribute__((aligned(4)));
-    static uint8_t back[65536 + 4];
+    uint8_t *buf = bigA, *back = bigB;
     for (uint32_t i = 0; i < n + 1; i++) { buf[i] = pat(i * 3 + 1); }
 
     uint32_t t0 = micros();
