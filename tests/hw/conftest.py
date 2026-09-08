@@ -319,7 +319,7 @@ def _sync(sketch: str) -> str:
 BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "tls_server_board", "web_board",
                   "dualcore_board",
-                  "adc_board", "i2s_board", "dac_board",
+                  "adc_board", "i2s_board", "dac_board", "psram_board",
                   "lfs_board", "fatfs_board", "two_volume_board",
                   "uart_board", "spi_board",
                   "wire_board", "dog_board", "spi_slave_board",
@@ -671,6 +671,14 @@ def i2s_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("i2stest")
+
+
+@pytest.fixture(scope="session")
+def psram_board():
+    """The PSRAM sketch. Needs the ESP-PSRAM64H breakout on PE10-PE15."""
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("psram")
 
 
 @pytest.fixture(scope="session")

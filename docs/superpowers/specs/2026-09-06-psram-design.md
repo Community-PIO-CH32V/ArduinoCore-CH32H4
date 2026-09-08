@@ -63,9 +63,27 @@ Three measurements say timing rather than signal quality:
 
 STM32's QUADSPI absorbs exactly this with `SSHIFT` (`CR` bit 4). On this part
 that bit position is undefined in WCH's header and setting it changes nothing
-measurable. `CKMode` (Mode 0 against Mode 3) is the one remaining knob and was
-NOT tested during the probe; task 1 tests it before the 25 MHz default is
-treated as final.
+measurable. `CKMode` (Mode 0 against Mode 3) was the one remaining knob, and
+task 1 has now measured it. Mode 3 does not raise the ceiling — it lowers it:
+
+| CKMode | Clock | 1-byte quad | 16-byte quad read | 64-byte quad round-trip |
+|---|---|---|---|---|
+| Mode 0 | 25.0 MHz | pass | pass | pass |
+| Mode 0 | 33.3 MHz | pass | pass | **fail** |
+| Mode 3 | 25.0 MHz | pass | pass | **fail** |
+
+So 25 MHz is confirmed against both clock modes, and Mode 0 is the correct
+default rather than an arbitrary one. `DEFAULT_CLOCK` stays at 25 MHz.
+
+Two details of that measurement are worth keeping. First, asking for 33 MHz
+does not give 33 MHz: the prescaler holds an integer divider and `begin()`
+rounds it up so the clock never exceeds what was requested, and
+ceil(100/33) = 4 lands back on 25 MHz. Reaching 33.3 MHz means asking for
+34 MHz (divider 3). A test that asks for 33 MHz and believes it got it
+measures the default twice. Second, the failures are length-dependent: short
+transfers survive both off-nominal settings and only the 64-byte round trip
+breaks, so any future re-test of this ceiling has to use long transfers or it
+will pass on a setting that does not work.
 
 Separately, single-line reads fail above 33 MHz because `0x02`/`0x03` are the
 APS6404L's own slow commands — also not the board.
