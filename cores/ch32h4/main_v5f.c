@@ -73,14 +73,26 @@ void ch32h4_v5f_main(void) {
 
     /* Flash "enhance mode" is the code accelerator, and it is OFF at reset.
      *
-     * Without it this core executes from flash at roughly a 145th of its ITCM
-     * speed -- flash is clocked at HCLK/2 = 50 MHz against a 400 MHz core, and
-     * every fetch pays it. With it, XIP becomes usable and the whole
-     * "run from flash, keep the RAM for the heap" strategy holds up.
-     *
      * The vendor SDK exposes it but nothing calls it, and nothing reports that
-     * it is off: the board simply runs, slowly. */
+     * it is off: the board simply runs, slowly.
+     *
+     * IT MUST BE UNLOCKED FIRST, and for a long time this was not. FLASH->ACTLR
+     * is write-protected while the flash is locked, so the call below returned
+     * having changed nothing and read back with EHMOD still clear -- silently,
+     * because the function returns void and the register accepts the write.
+     * Measured, decoding a fixed MP3 with everything else held constant:
+     * 543829 us with EHMOD off against 411959 us with it on, a 32% difference
+     * that this core believed it already had.
+     *
+     * ENHANCE_STATUS (bit 6) is the hardware's own confirmation and is checked
+     * rather than assumed, because "the write appeared to work" is exactly the
+     * failure being fixed here. */
+    FLASH_Unlock();
     FLASH_Enhance_Mode(ENABLE);
+    FLASH_Lock();
+    if (!(FLASH->ACTLR & FLASH_ACTLR_ENHANCE_STATUS)) {
+        ch32h4_console_puts("V5F: WARNING flash enhance mode did not take\r\n");
+    }
 
     /* millis()/micros()/delay() from here on. SysTick counts at HCLK, so this
      * must come after the clock variables are refreshed. */

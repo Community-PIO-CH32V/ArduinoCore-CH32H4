@@ -77,3 +77,20 @@ def test_decoding_keeps_ahead_of_real_time(mp3_board):
         "decoding 2 s of mono 64 kbps took %d us (%.1fx real time). Stereo at "
         "128 kbps is roughly twice this work, so anything near 2x will not "
         "sustain a real stream." % (r["decode_us"], margin))
+
+
+def test_flash_enhance_mode_is_actually_on(mp3_board):
+    """The core enables flash enhance mode, and for a long time that failed.
+
+    FLASH->ACTLR is write-protected while the flash is locked, so the call
+    returned having changed nothing -- silently, because it returns void and
+    the register accepts the write. It is worth 32% of decode throughput, so
+    it is asserted here against the hardware's own ENHANCE_STATUS bit rather
+    than trusted.
+    """
+    r = kv(mp3_board.command("actlr", timeout=20))
+    assert r["ehmod"] == 1, (
+        "EHMOD is clear: flash enhance mode did not take. Is FLASH_Unlock() "
+        "still called before it in main_v5f.c? ACTLR=%s" % r["actlr"])
+    assert r["enhance_status"] == 1, (
+        "EHMOD is set but the hardware did not confirm it: ACTLR=%s" % r["actlr"])

@@ -1760,6 +1760,46 @@ exceeding the limit *safe*; it makes it *observed-benign here*. It is kept as
 a hardware test rather than a note precisely so that a part which behaves
 differently is caught rather than assumed away.
 
+## `FLASH_Enhance_Mode(ENABLE)` does nothing unless the flash is unlocked
+
+**Symptom.** None. The board runs, slowly, and the code that turns the
+accelerator on is right there in `main_v5f.c` looking as though it worked.
+
+**Cause.** `FLASH->ACTLR` is write-protected while the flash is locked. The
+SDK's `FLASH_Enhance_Mode()` returns `void`, the register accepts the write,
+and `EHMOD` reads back clear. Nothing anywhere reports it.
+
+**Measured**, decoding a fixed MP3 with everything else held constant:
+
+| `EHMOD` | decode of 2 s of audio | real-time margin |
+|---|---|---|
+| 0, as the core actually was | 543829 us | 3.7x |
+| 1, as the core believed it was | 411959 us | **4.9x** |
+
+A 32% throughput difference that this core thought it already had, on every
+sketch, since the accelerator was first "enabled".
+
+**Fix.** `FLASH_Unlock()` around it, and then check the hardware's own
+confirmation rather than the value written back:
+
+```c
+FLASH_Unlock();
+FLASH_Enhance_Mode(ENABLE);
+FLASH_Lock();
+if (!(FLASH->ACTLR & FLASH_ACTLR_ENHANCE_STATUS)) { /* warn */ }
+```
+
+`ENHANCE_STATUS` is bit 6 and goes high only when the mode really engaged.
+`tests/hw/test_mp3audio.py` asserts it, because "the write appeared to work"
+is exactly the failure being fixed.
+
+**Read the boot value before trusting a baseline.** `ACTLR` is `0x00004801`
+out of reset: access clock HCLK/2, `EHMOD` clear, and `RD_MD` (bit 11,
+continuous read) already **set**. An earlier pass at this measurement cleared
+`RD_MD` while establishing a "default" baseline and so compared against
+something the part never boots into. The prior async port on this silicon
+recorded the same `0x00004801`, which is what caught it.
+
 ## The flash access clock is HCLK/2, and it costs nearly half the CPU's speed
 
 **Symptom.** Code that reads a lot of constant data from flash runs about half
@@ -1790,10 +1830,12 @@ each time:
 
 | Setting | Decode time | Real-time margin | PCM checksum |
 |---|---|---|---|
-| as the core ships | 581659 us | 3.4x | 3487879107 |
-| `FLASH_Continue_Mode(ENABLE)` | 538731 us | 3.7x | 3487879107 |
-| flash clock `HCLK/1` | 315502 us | **6.3x** | 3487879107 |
-| both | 304967 us | **6.6x** | 3487879107 |
+| boot: `EHMOD` off, clock HCLK/2 | 543829 us | 3.7x | 3487879107 |
+| `EHMOD` on (the fix above) | 411959 us | 4.9x | 3487879107 |
+| clock `HCLK/1` only | 305350 us | 6.5x | 3487879107 |
+| **both** | **240328 us** | **8.3x** | 3487879107 |
+
+The core now ships the second row. The remaining 1.7x is the access clock.
 
 The checksum is identical in every row, so the faster settings are not trading
 correctness for speed. Twelve consecutive decodes at the fastest setting gave

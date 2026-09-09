@@ -52,6 +52,14 @@ static void handle(const char *cmd) {
     Serial1.print("errors="); Serial1.println(decoder.errors());
     Serial1.print("pcm_fnv="); Serial1.println(h);
 
+  } else if (!strcmp(cmd, "actlr")) {
+    const uint32_t a = FLASH->ACTLR;
+    Serial1.print("actlr=0x"); Serial1.println(a, HEX);
+    Serial1.print("sck_cfg="); Serial1.println(a & 3u);
+    Serial1.print("enhance_status="); Serial1.println((a >> 6) & 1u);
+    Serial1.print("ehmod="); Serial1.println((a >> 7) & 1u);
+    Serial1.print("rd_md="); Serial1.println((a >> 11) & 1u);
+
   } else {
     Serial1.print("unknown: "); Serial1.println(cmd);
   }
