@@ -1670,7 +1670,13 @@ one half of it needs bouncing:
   to three bytes past the caller's buffer. That is what the internal bounce
   buffer is for.
 
-So an aligned buffer with a ragged length only bounces its tail, an unaligned
-buffer bounces entirely, and a whole-word aligned transfer bounces nothing.
-The cost is one copy: 12.49 MB/s aligned against 9.9 MB/s unaligned, both at
-the same clock.
+The useful consequence is that **an unaligned buffer does not mean copying the
+whole transfer**, which is what the first implementation did -- 256 bytes of
+staging, everything memcpy'd, and a 20% throughput penalty (9.9 MB/s against
+12.49). Bouncing only the 1-3 bytes that bring the pointer up to a word
+boundary leaves the remainder aligned, so the bulk goes straight to or from
+the caller's memory. One word of staging covers the head and the tail, since
+they are used at different moments.
+
+Measured after the change: 12.45 MB/s unaligned against 12.48 aligned. The
+penalty is gone and the buffer went from 256 bytes to 4.

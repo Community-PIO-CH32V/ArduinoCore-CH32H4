@@ -131,14 +131,20 @@ bool PSRAMClass::xfer(uint8_t ins, uint32_t addr, bool hasAddr, uint8_t *rx,
  * data. See docs/hazards.md. */
 #define PSRAM_DMA_REQ         72
 
-/* Staging for transfers DMA cannot do directly. DMA moves whole words to and
- * from memory, so a caller's unaligned pointer, or a length that is not a
- * multiple of four, needs one copy through here. A ragged BYTE COUNT on the
- * wire is fine -- DLR sets it exactly while the DMA supplies a rounded-up word
- * count, which is measured to work -- so only the memory side ever bounces.
+/* One word of staging, which is all this ever needs.
  *
- * In DTCM, which DMA1 reads and writes without trouble. */
-static uint8_t s_bounce[256] __attribute__((aligned(4)));
+ * DMA moves whole words to and from MEMORY, so a caller's pointer has to be
+ * word-aligned and the transfer a whole number of words. Neither constrains
+ * the PSRAM side: the device is byte-addressed, and a ragged byte count on the
+ * wire is fine because DLR sets it exactly while the DMA supplies a rounded-up
+ * word count.
+ *
+ * So an unaligned buffer does NOT mean copying the whole transfer. Bouncing
+ * the 1-3 bytes that bring the pointer up to a word boundary makes the rest of
+ * it aligned, and the bulk then goes straight to or from the caller's memory
+ * with no copy at all. Head and tail are used at different moments, so one
+ * word covers both. */
+static uint8_t s_bounce[4] __attribute__((aligned(4)));
 
 bool PSRAMClass::writeDMA(uint32_t addr, const uint8_t *src, uint32_t len,
                           uint32_t req) {
@@ -379,33 +385,29 @@ size_t PSRAMClass::read(uint32_t addr, void *dst, size_t len) {
     if (len > CAPACITY - addr) { len = CAPACITY - addr; }
     uint8_t *d = (uint8_t *)dst;
 
-    if (((uintptr_t)d % 4) != 0) {
-        /* Unaligned destination: everything goes through the bounce buffer,
-           in chunks, so DMA never writes into the caller's buffer directly. */
-        size_t done = 0;
-        while (done < len) {
-            size_t n = len - done;
-            if (n > sizeof(s_bounce)) { n = sizeof(s_bounce); }
-            /* Rounded up to whole words. Reading a few bytes more than asked
-               for is harmless: the device's address space is exactly its
-               capacity, so a read off the end wraps, and the extra bytes are
-               discarded here rather than handed back. */
-            const uint32_t want = (uint32_t)((n + 3u) & ~(size_t)3);
-            if (!readDMA(addr + done, s_bounce, want)) { return done; }
-            memcpy(d + done, s_bounce, n);
-            done += n;
-        }
-        return done;
+    /* Bytes needed to bring the destination up to a word boundary. */
+    size_t head = (4u - ((uintptr_t)d & 3u)) & 3u;
+    if (head > len) { head = len; }
+    if (head) {
+        /* A whole word is read and only the wanted bytes kept. Over-reading
+           the device is harmless -- its address space is exactly its capacity,
+           so a read off the end wraps and the extra is discarded here. */
+        if (!readDMA(addr, s_bounce, 4)) { return 0; }
+        memcpy(d, s_bounce, head);
     }
 
-    /* Aligned destination: the whole-word part lands straight in the caller's
-       buffer with no copy at all, and only a ragged tail is bounced. */
-    const size_t head = len & ~(size_t)3;
-    if (head && !readDMA(addr, d, (uint32_t)head)) { return 0; }
-    const size_t tail = len - head;
+    const size_t rest = len - head;
+    const size_t mid = rest & ~(size_t)3;
+    if (mid) {
+        /* d + head is word-aligned by construction, so the bulk lands in the
+           caller's buffer directly. */
+        if (!readDMA(addr + head, d + head, (uint32_t)mid)) { return head; }
+    }
+
+    const size_t tail = rest - mid;
     if (tail) {
-        if (!readDMA(addr + head, s_bounce, 4)) { return head; }
-        memcpy(d + head, s_bounce, tail);
+        if (!readDMA(addr + head + mid, s_bounce, 4)) { return head + mid; }
+        memcpy(d + head + mid, s_bounce, tail);
     }
     return len;
 }
@@ -417,33 +419,34 @@ size_t PSRAMClass::write(uint32_t addr, const void *src, size_t len) {
 
     const uint32_t t0 = micros();
     size_t done = 0;
-    if (((uintptr_t)s % 4) != 0) {
-        while (done < len) {
-            size_t n = len - done;
-            if (n > sizeof(s_bounce)) { n = sizeof(s_bounce); }
-            memcpy(s_bounce, s + done, n);
-            if (!writeDMA(addr + done, s_bounce, (uint32_t)n, PSRAM_DMA_REQ)) {
-                break;
-            }
-            done += n;
+
+    size_t head = (4u - ((uintptr_t)s & 3u)) & 3u;
+    if (head > len) { head = len; }
+    if (head) {
+        memcpy(s_bounce, s, head);
+        if (!writeDMA(addr, s_bounce, (uint32_t)head, PSRAM_DMA_REQ)) {
+            _lastWriteUs = micros() - t0;
+            return 0;
         }
-    } else {
-        /* Aligned source: the whole-word part is sent straight from the
-           caller's buffer. The tail is bounced rather than letting DMA read
-           up to three bytes past the end of it. */
-        const size_t head = len & ~(size_t)3;
-        bool ok = true;
-        if (head) {
-            ok = writeDMA(addr, s, (uint32_t)head, PSRAM_DMA_REQ);
-            if (ok) { done = head; }
+        done = head;
+    }
+
+    const size_t rest = len - head;
+    const size_t mid = rest & ~(size_t)3;
+    if (mid) {
+        if (!writeDMA(addr + head, s + head, (uint32_t)mid, PSRAM_DMA_REQ)) {
+            _lastWriteUs = micros() - t0;
+            return done;
         }
-        const size_t tail = len - head;
-        if (ok && tail) {
-            memcpy(s_bounce, s + head, tail);
-            if (writeDMA(addr + head, s_bounce, (uint32_t)tail,
-                         PSRAM_DMA_REQ)) {
-                done = len;
-            }
+        done = head + mid;
+    }
+
+    const size_t tail = rest - mid;
+    if (tail) {
+        memcpy(s_bounce, s + head + mid, tail);
+        if (writeDMA(addr + head + mid, s_bounce, (uint32_t)tail,
+                     PSRAM_DMA_REQ)) {
+            done = len;
         }
     }
     _lastWriteUs = micros() - t0;

@@ -107,7 +107,7 @@ def test_read_throughput_is_reported(psram):
     kv(psram.command("begin", timeout=20))
     r = kv(psram.command("burst 65536", timeout=40))
     kbps = 65536 * 1000 // max(r["burst_us"], 1)
-    print(f"\n  memory-mapped read: {kbps / 1000.0:.2f} MB/s")
+    print(f"\n  bulk read: {kbps / 1000.0:.2f} MB/s")
     assert kbps > 0
 
 
