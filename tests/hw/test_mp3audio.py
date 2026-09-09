@@ -64,16 +64,17 @@ def test_decoding_keeps_ahead_of_real_time(mp3_board):
     decoder edit that halves throughput does not fail anything else -- the
     radio just starts stuttering, on someone else's bench, later.
 
-    The bound is deliberately loose. The measured margin is about 3.6x on this
-    fixture (mono, 64 kbps); a real station is stereo at 128 kbps and roughly
-    twice the work, so the useful question is whether the number has moved,
-    not whether it clears some absolute bar.
+    The bound tracks the flash tuning in main_v5f.c. With enhance mode on the
+    margin is about 5x on this fixture (mono, 64 kbps); a real station is
+    stereo at 128 kbps and roughly twice the work, so 5x is comfortable and a
+    floor of 4x catches enhance mode silently failing again, which would drop
+    it to 3.7x.
     """
     r = kv(mp3_board.command("decode", timeout=30))
     margin = 2000000.0 / r["decode_us"]
     print(f"\n  decode: {r['decode_us']} us for 2 s of audio "
           f"({margin:.1f}x real time, {r['decode_us'] / r['frames']:.0f} us/frame)")
-    assert margin > 2.0, (
+    assert margin > 4.0, (
         "decoding 2 s of mono 64 kbps took %d us (%.1fx real time). Stereo at "
         "128 kbps is roughly twice this work, so anything near 2x will not "
         "sustain a real stream." % (r["decode_us"], margin))
@@ -94,3 +95,6 @@ def test_flash_enhance_mode_is_actually_on(mp3_board):
         "still called before it in main_v5f.c? ACTLR=%s" % r["actlr"])
     assert r["enhance_status"] == 1, (
         "EHMOD is set but the hardware did not confirm it: ACTLR=%s" % r["actlr"])
+    assert r["sck_cfg"] == 1, (
+        "the flash access clock is not HCLK/2: ACTLR=%s. HCLK/1 measures 1.7x "
+        "faster and BRICKS the board -- see docs/hazards.md." % r["actlr"])

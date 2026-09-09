@@ -1800,64 +1800,47 @@ continuous read) already **set**. An earlier pass at this measurement cleared
 something the part never boots into. The prior async port on this silicon
 recorded the same `0x00004801`, which is what caught it.
 
-## The flash access clock is HCLK/2, and it costs nearly half the CPU's speed
+## The flash access clock is HCLK/2, and raising it bricks the board
 
-**Symptom.** Code that reads a lot of constant data from flash runs about half
-as fast as it should, with no warning and no failing test. The MP3 decoder
-found it: helix decoded 2 seconds of audio in 582 ms, roughly 25x slower per
-sample than its reputation on much weaker parts.
+**Do not set `FLASH_Access_Clock_Cfg(FLASH_CLK_HCLKDIV1)` on this core.** It
+measures beautifully and it does not work.
 
-**It is not what you would check first.** The instruction cache is already on
-and already effective -- the entry above measures flash execution at 1.00x
-ITCM with it enabled. And the decode is not compute-bound: `-Os`, `-O2` and
-`-O3` give times identical to within noise, and moving the *input* buffer from
-flash to RAM changes it by 3%. What is slow is **constant-data reads** from
-flash, which the instruction cache does not cache. libhelix does random
-lookups into roughly 58 KB of Huffman and trig tables.
+`FLASH->ACTLR` bits 1:0 (`SCK_CFG`) divide HCLK for flash access, and the
+vendor startup sets HCLK/2 -- 50 MHz against a 100 MHz HCLK -- unconditionally
+in all six of its clock paths rather than as a function of the frequency it
+just configured. That looks exactly like a conservative default worth
+reclaiming.
 
-**Cause.** `FLASH->ACTLR` bits 1:0, `SCK_CFG`, set the flash access clock as a
-divider of HCLK. The startup code sets `FLASH_ACTLR_LATENCY_HCLK_DIV2` -- 50 MHz
-against a 100 MHz HCLK -- in **six** places, once per clock configuration path,
-unconditionally rather than as a function of the resulting frequency.
+**Measured**, decoding a fixed MP3 with everything else held constant:
 
-Two other bits in the same register are also unused. `EHMOD` (bit 7) is the
-"enhance mode" the core does enable via `FLASH_Enhance_Mode()`. `RD_MD` (bit
-11) is a continuous read mode reached through `FLASH_Continue_Mode()`, and
-nothing anywhere calls it.
-
-**Measured**, decoding the same 2-second MP3 and checking the PCM checksum
-each time:
-
-| Setting | Decode time | Real-time margin | PCM checksum |
+| Setting | Decode of 2 s of audio | Margin | PCM checksum |
 |---|---|---|---|
-| boot: `EHMOD` off, clock HCLK/2 | 543829 us | 3.7x | 3487879107 |
-| `EHMOD` on (the fix above) | 411959 us | 4.9x | 3487879107 |
-| clock `HCLK/1` only | 305350 us | 6.5x | 3487879107 |
-| **both** | **240328 us** | **8.3x** | 3487879107 |
+| boot: `EHMOD` off, HCLK/2 | 543829 us | 3.7x | 3487879107 |
+| `EHMOD` on, HCLK/2 (**shipped**) | 411959 us | 4.9x | 3487879107 |
+| `EHMOD` off, HCLK/1 | 305350 us | 6.5x | 3487879107 |
+| `EHMOD` on, HCLK/1 | 240328 us | 8.3x | 3487879107 |
 
-The core now ships the second row. The remaining 1.7x is the access clock.
+Identical checksums in all four rows. Twelve consecutive decodes at HCLK/1
+gave zero mismatches and a 2.7 ms spread. A prior port on this silicon reached
+HCLK/1 independently and recorded it as free.
 
-The checksum is identical in every row, so the faster settings are not trading
-correctness for speed. Twelve consecutive decodes at the fastest setting gave
-zero checksum mismatches and a 2.7 ms spread.
+**It still bricks the board.** Enabling it left a part that no longer runs well
+enough for the debug probe to halt it: `wlink` fails three times with
+`protocol error 0x55`, and recovery is NRST plus an erase.
 
-**This is NOT enabled, deliberately.** `HCLK/1` is a 1.9x speedup for anything
-that reads flash, which is most code, but it overrides a value the vendor sets
-unconditionally in every clock path. Twelve clean decodes on one part at room
-temperature is not evidence that 100 MHz flash access is within spec, and
-flash timing margin moves with temperature and voltage. This is the same shape
-as the QSPI clock earlier in this file: a setting that measures clean on the
-bench and is not therefore correct.
+**Why the benchmark did not see it.** A decode benchmark measures *data* reads
+inside one hot loop, which stays resident and survives. Sketches execute from
+flash across the whole image, and an access clock the array cannot sustain
+corrupts *instruction* fetch in code the benchmark never touches. Passing a
+throughput test is not evidence that a memory interface is sound.
 
-To reproduce, or to adopt it after checking the datasheet's maximum flash
-access frequency:
+**The datasheet said so.** The MicroPython port's notes record code flash as
+having an "equivalent frequency of about 25 MHz" for the 960 KB user area.
+HCLK/2 is already 50 MHz of interface clock against that array. There was no
+headroom to reclaim, and the prior port's "free" verdict came from a firmware
+that ran entirely from RAM and so never fetched instructions through the
+setting it was praising.
 
-```c
-FLASH_Unlock();
-FLASH_Continue_Mode(ENABLE);                    /* RD_MD, bit 11 */
-FLASH_Access_Clock_Cfg(FLASH_CLK_HCLKDIV1);     /* SCK_CFG, bits 1:0 */
-FLASH_Lock();
-```
+Enhance mode (`EHMOD`) is the real win and is safe: see the entry above. It is
+worth 32%, and it is what this core already intended to do.
 
-`FLASH_Continue_Mode(ENABLE)` alone is worth 7% and changes no timing
-relationship, so it is the lower-risk half if only one is taken.

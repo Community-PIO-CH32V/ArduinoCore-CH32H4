@@ -87,6 +87,25 @@ void ch32h4_v5f_main(void) {
      * ENHANCE_STATUS (bit 6) is the hardware's own confirmation and is checked
      * rather than assumed, because "the write appeared to work" is exactly the
      * failure being fixed here. */
+    /* THE ACCESS CLOCK IS LEFT AT HCLK/2, AND THAT IS NOT AN OVERSIGHT.
+     *
+     * ACTLR bits 1:0 (SCK_CFG) divide HCLK for flash access. HCLK/1 measures
+     * as a further 1.7x on top of enhance mode -- 411959 us of MP3 decode
+     * falling to 240328 us, with the decoded PCM checksum identical, and a
+     * prior port on this silicon reached the same setting independently and
+     * called it free.
+     *
+     * IT BRICKS THIS CORE. Enabling it left a board that no longer runs well
+     * enough for the debug probe to halt: wlink fails three times with
+     * protocol error 0x55 and the part needs NRST plus an erase to recover.
+     * Sketches run from flash, so an access clock the array cannot sustain
+     * corrupts instruction fetch across the whole image -- and a decode
+     * benchmark does not see it, because that measures data reads in one hot
+     * loop that happens to survive.
+     *
+     * The MicroPython port's notes give the reason: the datasheet rates this
+     * flash at an "equivalent frequency of about 25 MHz". HCLK/2 is already
+     * 50 MHz. There is no headroom to take. See docs/hazards.md. */
     FLASH_Unlock();
     FLASH_Enhance_Mode(ENABLE);
     FLASH_Lock();
