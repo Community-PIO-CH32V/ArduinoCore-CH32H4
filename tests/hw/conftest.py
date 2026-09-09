@@ -320,6 +320,7 @@ BOARD_FIXTURES = ("board", "sd_board", "fs_board", "ethernet_board",
                   "tls_board", "tls_server_board", "web_board",
                   "dualcore_board",
                   "adc_board", "i2s_board", "dac_board", "psram_board",
+                  "mp3_board",
                   "lfs_board", "fatfs_board", "two_volume_board",
                   "uart_board", "spi_board",
                   "wire_board", "dog_board", "spi_slave_board",
@@ -679,6 +680,15 @@ def psram_board():
     if serial is None:
         pytest.skip("pyserial is not installed")
     return Board("psram")
+
+
+@pytest.fixture(scope="session")
+def mp3_board():
+    """The MP3 sketch. Silent: its sink counts and checksums frames rather
+    than playing them, because a real speaker is wired to I2S1."""
+    if serial is None:
+        pytest.skip("pyserial is not installed")
+    return Board("mp3audio")
 
 
 @pytest.fixture(scope="session")

@@ -53,11 +53,17 @@ relicensed or reused on another vendor's silicon. Anyone repackaging this core
 should read it as written rather than assuming it behaves like the permissive
 licences above.
 
-## Planned
+## Copyleft-style: RealNetworks RPSL/RCSL
 
-| Component | Licence | Note |
+| Component | Where | Origin |
 |---|---|---|
-| libhelix-mp3 | RealNetworks RPSL/RCSL | To be vendored under `libraries/MP3Audio/src/libhelix-mp3/` for the MP3 web radio work. Chosen knowingly over public-domain minimp3 for its fixed-point arithmetic and its record on ESP8266 and ESP32. It is neither MIT nor BSD, and it will be the only copyleft-style component that is not already LGPL. See `docs/superpowers/specs/2026-09-09-mp3-webradio-design.md`. |
+| libhelix-mp3 | `libraries/MP3Audio/src/libhelix-mp3/` | RealNetworks, via ESP8266Audio |
+
+Neither MIT nor BSD, and the only component here that is neither permissive
+nor LGPL. It was chosen over the public-domain minimp3 for its fixed-point
+arithmetic and its record on ESP8266 and ESP32. Its own `LICENSE.txt`,
+`RPSL.txt` and `RCSL.txt` are vendored alongside the sources and every file
+keeps its original header.
 
 ## Keeping this accurate
 
