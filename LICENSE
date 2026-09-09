@@ -1,0 +1,53 @@
+MIT License
+
+Copyright (c) 2025-2026 Community-PIO-CH32V
+
+SCOPE
+-----
+
+This licence applies to the files in this repository that do NOT carry their
+own copyright and licence notice.
+
+A great deal of this repository is third-party code, bundled so the core can
+be built and used from a single checkout. Every such file or directory carries
+the copyright and licence notice of its own authors, and those terms — not
+this licence — govern it. Nothing here claims copyright over that work, grants
+rights in it, or relicenses it. THIRD-PARTY.md enumerates the bundled
+components and their licences.
+
+Two consequences worth stating plainly rather than leaving to be discovered:
+
+  * This repository as a whole is NOT distributable under the MIT licence
+    alone. It bundles LGPL-2.1 components — including ArduinoCore-API, on
+    which the core is built, and several libraries derived from the ESP8266
+    and arduino-pico cores — whose terms continue to apply to the combined
+    distribution.
+
+  * The vendor SDK under system/ is supplied by Nanjing Qinheng
+    Microelectronics (WCH) under terms that restrict its use to WCH-made
+    microcontrollers. It is not a free-software licence and cannot be treated
+    as one.
+
+If you are reusing individual files, check the header of the file you are
+taking. If it has no notice, this licence covers it.
+
+MIT LICENSE
+-----------
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

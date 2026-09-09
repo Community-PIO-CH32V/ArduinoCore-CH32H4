@@ -351,3 +351,19 @@ and `--specs=nano.specs` makes every `throw` reach `std::terminate` after a
 clean link. `docs/superpowers/specs/` records them and the design that routes
 around them; the prior ports' `PORTING.md` and `STATUS.md` are the deeper
 source, with three corrections noted in the spec.
+
+## Licence
+
+The code written for this core is MIT, copyright the Community-PIO-CH32V
+contributors. See `LICENSE`.
+
+Most of what is in this repository is not that. The core is built on
+ArduinoCore-API and bundles a network stack, a TLS library, two filesystems,
+a USB stack and the vendor's peripheral SDK, each under its own terms —
+LGPL-2.1 for several of them, so **the repository as a whole is not
+redistributable under MIT alone**. The vendor SDK under `system/` is
+restricted by WCH to their own microcontrollers and is not a free-software
+licence at all.
+
+`THIRD-PARTY.md` lists every bundled component, grouped by what its licence
+obliges you to do.
