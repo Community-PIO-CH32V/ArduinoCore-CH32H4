@@ -1680,3 +1680,82 @@ they are used at different moments.
 
 Measured after the change: 12.45 MB/s unaligned against 12.48 aligned. The
 penalty is gone and the buffer went from 256 bytes to 4.
+
+## `QSPI_EnableQuad()` gates IO2 and IO3, and nothing documents it
+
+The single most expensive discovery in this library. `QSPI_EnableQuad()` sets
+a bit the reference manual does not describe -- `SIOXEN`, `CR` bit 13, in a
+position ST reserves -- and that bit gates IO2 and IO3 entirely. Without it:
+
+- every 1-line phase works perfectly, so the chip identifies itself, reports
+  the right manufacturer and a stable die serial, and single-line reads and
+  writes round-trip;
+- every 4-line phase fails, at every clock, with every dummy-cycle count.
+
+That is indistinguishable from a signal-integrity wall. Two of the four data
+lines appear dead while the clock, chip-select and the other two are fine, the
+failure is total rather than marginal, and it does not improve as the clock
+comes down -- which is exactly the story "the wiring cannot carry quad at
+speed" tells. It cost a full frequency sweep of false negatives, and it very
+nearly became a conclusion about the circuit board.
+
+The tell, in hindsight: a genuine signal-integrity problem gets *better* at
+lower clocks. This did not get better at 12.5 MHz, and a fault that is
+completely independent of frequency is not analog.
+
+Call it before every 4-line phase, including memory-mapped mode. It is not
+sticky across a controller reset.
+
+## QSPI2's window is at `0x70000000`, and reading QSPI1's returns zeros
+
+The two QSPI instances have different memory-mapped windows: QSPI1 at
+`0x90000000`, which is what the vendor example uses, and QSPI2 at
+`0x70000000`. Reading the wrong one does not fault. It returns zeros, so a
+port that keeps the vendor's address gets a device that identifies correctly,
+accepts writes, and reads back nothing but zeros -- which looks like a dead
+chip rather than a wrong constant.
+
+`libraries/PSRAM` no longer uses either window (see below), but the addresses
+are recorded because anything else driving QSPI on this part will need them,
+and because the failure mode is silent.
+
+## The core never writes `GPIOx->SPEED`
+
+This part has **two** pin-configuration mechanisms: the F1-style `CFGLR` and
+`CFGHR` mode registers, and an additional F4-style `GPIOx->SPEED` slew
+register with two bits per pin. The core's `ch32h4_pin_af()` writes only the
+first, so every pin configured through the core sits at `SPEED`'s reset value
+regardless of what the caller asked for.
+
+`libraries/PSRAM` sidesteps this by configuring its six pins with the SDK's
+`GPIO_Init` at `GPIO_Speed_Very_High` rather than through the core helper.
+
+For PSRAM it turned out not to matter -- drive strength was swept across Low,
+Medium, High and Very High at every clock, with byte-identical results. That
+is a real measurement, but it is a measurement about a 25 MHz QSPI link and
+it does not generalise. **SPI and I2S at their top speeds go through
+`ch32h4_pin_af()` and have never been tested against this**, and they are the
+cases where a slew setting is most likely to matter.
+
+## tCEM: 8 microseconds on paper, 5 milliseconds in practice
+
+The APS6404L is DRAM behind a serial front end and refreshes itself only while
+CE# is high, so the datasheet caps CE#-low time at **8 us**. Read literally,
+that forbids bulk transfers outright: a 64 KB read holds CE# low for
+milliseconds and no API can prevent it.
+
+Measured, with witness rows seeded across the whole array so that a missed
+refresh would show up somewhere other than where the burst was reading:
+
+| burst | CE# low | errors in the burst | errors in 48 witness rows |
+|---|---|---|---|
+| 64 B | 21 us | 0 | 0 |
+| 4 KB | 329 us | 0 | 0 |
+| 64 KB | **5244 us** | **0** | **0** |
+
+655x over the datasheet limit with no loss anywhere. Two caveats are worth
+keeping rather than burying: this is one chip at room temperature, and DRAM
+retention margin shrinks as temperature rises. The measurement does not make
+exceeding the limit *safe*; it makes it *observed-benign here*. It is kept as
+a hardware test rather than a note precisely so that a part which behaves
+differently is caught rather than assumed away.
