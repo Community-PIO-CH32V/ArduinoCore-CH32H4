@@ -82,30 +82,15 @@ def test_every_address_line_decodes(psram):
     assert r["zero_ok"] == 1, "address 0 was disturbed by a boundary write"
 
 
-def test_the_mapped_pointer_agrees_with_read(psram):
-    """Two paths to the same bytes that could silently diverge: one is a CPU
-    load through the window, the other an indirect transfer."""
-    kv(psram.command("begin", timeout=20))
-    kv(psram.command("rw 0x2000", timeout=20))
-    r = kv(psram.command("mapcmp 0x2000", timeout=20))
-    assert r["base"] == 0x70000000, r.raw
-    assert r["mismatch"] == 0, r.raw
-
-
-def test_a_long_mapped_burst_does_not_disturb_the_rest_of_the_array(psram):
-    """The tCEM regression, run in the configuration the library ships.
+def test_a_long_burst_does_not_disturb_the_rest_of_the_array(psram):
+    """The tCEM regression.
 
     The part refreshes itself only while CE# is high and the datasheet caps
-    CE#-low at 8 us, but a 64 KB memory-mapped read is milliseconds of traffic.
-    This is what lets data() be a plain pointer rather than a guarded accessor,
-    so it is kept as a test rather than a note -- it is one chip at one
-    temperature, and the whole read path rests on it.
-
-    burst_us is the wall time of the read loop, not a CE#-low time. The
-    library does not arm the controller's timeout counter -- the vendor's
-    memory-mapped example does not either -- so nothing here is deliberately
-    dropping CE# between accesses. That is precisely why the witness rows
-    matter.
+    CE#-low at 8 us, but a 64 KB read is milliseconds of traffic. It is kept as
+    a test rather than a note because it is one chip at one temperature and the
+    whole read path rests on it. The witness rows are the point: a refresh
+    missed during the burst shows up as damage somewhere other than where we
+    were reading.
     """
     kv(psram.command("begin", timeout=20))
     r = kv(psram.command("burst 65536", timeout=40))
@@ -126,52 +111,62 @@ def test_read_throughput_is_reported(psram):
     assert kbps > 0
 
 
-def test_a_large_write_is_faster_than_byte_at_a_time_polling(psram):
-    """DMA is the point of this task, so the test has to be able to tell that
-    it happened.
+def test_writes_are_correct_and_fast_at_any_alignment(psram):
+    """Every write is DMA now, whatever the alignment.
 
-    Both halves write the same 64 KB in ONE call, with one mode flip each --
-    the only difference is that the polled half is handed a misaligned source,
-    which is what makes write() decline the DMA path. An earlier version of
-    this test forced polling by writing 32 bytes at a time, which charged the
-    polled side 2048 mode flips and would have passed even if DMA were the
-    slower of the two.
+    An unaligned source cannot be handed to DMA directly, so the library
+    bounces it through an internal buffer. That costs one copy and must not
+    cost correctness -- the whole reason data() was removed was to stop having
+    an API whose correctness depended on how you used it, so this is asserted
+    rather than assumed.
     """
     kv(psram.command("begin", timeout=20))
     r = kv(psram.command("writeperf 65536", timeout=60))
-    assert r["match"] == 1, "the DMA write did not land correctly"
-    assert r["poll_match"] == 1, "the polled write did not land correctly"
-    assert r["dma_us"] > 0, r.raw
-    assert r["dma_us"] < r["poll_us"], (
-        "DMA (%s us) was no faster than polling (%s us) -- is it actually "
-        "being used?" % (r["dma_us"], r["poll_us"]))
+    assert r["aligned_ok"] == 1, "the aligned write did not land correctly"
+    assert r["unaligned_ok"] == 1, "the unaligned write did not land correctly"
     n = r["bytes"]
-    print(f"\n  write {n} B: DMA {n / r['dma_us']:.2f} MB/s, "
-          f"polled {n / r['poll_us']:.2f} MB/s "
-          f"({r['poll_us'] / r['dma_us']:.1f}x)")
+    print(f"\n  write {n} B: aligned {n / r['aligned_us']:.2f} MB/s, "
+          f"unaligned {n / r['unaligned_us']:.2f} MB/s")
 
 
-def test_a_large_read_uses_dma_not_the_window(psram):
-    """read() is DMA-backed above the threshold, and that is worth 4x.
-
-    Copying from the memory-mapped window is the intuitive implementation and
-    the slow one: it needs no mode flip, but discrete CPU loads do not keep the
-    controller streaming, so an aligned memcpy manages 2.88 MB/s against DMA's
-    12.4 MB/s. A misaligned one -- which is what this compares against, since
-    misalignment is how read() is forced onto the window path -- is slower
-    still, because it copies byte-wise.
-
-    Asserted as a ratio rather than an absolute duration, so it fails if the
-    DMA path stops being taken rather than only if the board gets slower.
-    """
+def test_reads_are_correct_and_fast_at_any_alignment(psram):
+    """The read counterpart. Same reasoning as the write case."""
     kv(psram.command("begin", timeout=20))
     r = kv(psram.command("readperf 65536", timeout=90))
-    assert r["memcpy_ok"] == 1, "the windowed read did not land correctly"
-    assert r["dma_ok"] == 1, "the DMA read did not land correctly"
-    assert r["dma_us"] * 3 < r["memcpy_us"], (
-        "DMA read (%s us) was not clearly faster than the window (%s us) -- "
-        "is read() still using DMA?" % (r["dma_us"], r["memcpy_us"]))
+    assert r["aligned_ok"] == 1, "the aligned read did not land correctly"
+    assert r["unaligned_ok"] == 1, "the unaligned read did not land correctly"
     n = r["bytes"]
-    print(f"\n  read {n} B: DMA {n / r['dma_us']:.2f} MB/s, "
-          f"window {n / r['memcpy_us']:.2f} MB/s "
-          f"({r['memcpy_us'] / r['dma_us']:.1f}x)")
+    print(f"\n  read {n} B: aligned {n / r['aligned_us']:.2f} MB/s, "
+          f"unaligned {n / r['unaligned_us']:.2f} MB/s")
+
+
+def test_reads_work_at_every_offset_within_a_word(psram):
+    """The device addresses bytes; DMA moves words. read() has to bridge that.
+
+    All four offsets must return the same bytes that were written, because the
+    API promises any address. This is the case an all-DMA rewrite is most
+    likely to get subtly wrong.
+    """
+    kv(psram.command("begin", timeout=20))
+    r = kv(psram.command("unaligned", timeout=30))
+    for off in range(4):
+        assert r[f"off{off}"].split(",")[0] == "1", (
+            f"a read at word offset {off} did not match: {r.raw}")
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 5, 7, 15, 63, 65, 255, 257, 1023])
+def test_awkward_lengths_round_trip(psram, n):
+    """Sizes that are not whole words, which DMA cannot move directly.
+
+    These are what the bounce buffer exists for, and what an all-DMA rewrite
+    is most likely to get wrong -- a ragged tail is easy to drop silently, and
+    easy to over-send into the bytes that follow it. Both edges of the
+    256-byte bounce buffer are covered.
+    """
+    kv(psram.command("begin", timeout=20))
+    r = kv(psram.command(f"ragged {n}", timeout=30))
+    assert r["wrote"] == n, r.raw
+    assert r["read"] == n, r.raw
+    assert r["match"] == 1, f"{n}-byte round trip differs: {r.raw}"
+    assert r["neighbour_ok"] == 1, (
+        f"a {n}-byte write ran past its length: {r.raw}")

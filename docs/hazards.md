@@ -1623,3 +1623,54 @@ does offer DIV2, which would put 50 MHz on the known-good divider 4, but that
 field also clocks the V3F core (rated 100 MHz), the flash interface at HCLK/2,
 every timer, SysTick, and every UART baud rate. It overclocks the whole bus to
 tune one peripheral.
+
+## A length sweep that misses the wrong address calls a broken clock clean
+
+`PSRAM` ran at 25 MHz because a memory-mapped `data()` pointer could not be
+made to work faster. With `data()` removed and every transfer on DMA, 50 MHz
+looked available: a sweep of lengths from 1 byte to 1 KB, in both directions,
+across every prescaler, showed reads and writes clean at divider 2.
+
+It is not clean. A 64-byte read at **address 0** returns correct data for
+32 bytes and then slips by one nibble:
+
+```
+want: E0 E7 EE F5 FC 03 0A 11
+got:  0E 7E EF 5F C0 30 A1 11
+```
+
+32 bytes is the QSPI FIFO depth, and this is the same signature as the
+divider-3 corruption recorded above. The failure is address-dependent: the
+same 64-byte transfer at 0x4, 0x40 and 0x1000 is perfect. The length sweep
+used 0x100000 upward and never touched address 0, so it reported clean.
+
+Two lessons, both cheap to act on:
+
+- **Sweep addresses as well as lengths.** A transfer-size sweep silently
+  assumes the fault is size-dependent. This one is not.
+- **Address 0 deserves its own case.** It is the address most likely to be
+  special in an address-generation path and the least likely to be picked at
+  random for a test buffer.
+
+25 MHz remains the default. What the all-DMA rewrite bought was not speed but
+a uniform API: there is no longer a fast path and a slow path, or a pointer
+whose correctness depends on how far you read through it.
+
+## Bounce buffers, and where DMA cannot go directly
+
+`PSRAM.read()` and `write()` accept any address, length and alignment, but DMA
+moves whole words to and from memory. The split is worth stating because only
+one half of it needs bouncing:
+
+- **A ragged byte count on the wire is fine.** `DLR` sets the count exactly
+  while the DMA supplies a rounded-up word count, and the controller stops
+  after `DLR` bytes. Measured: 1-, 2- and 3-byte DMA writes land correctly and
+  do not touch the bytes after them.
+- **A ragged or unaligned MEMORY pointer is not.** DMA would read or write up
+  to three bytes past the caller's buffer. That is what the internal bounce
+  buffer is for.
+
+So an aligned buffer with a ragged length only bounces its tail, an unaligned
+buffer bounces entirely, and a whole-word aligned transfer bounces nothing.
+The cost is one copy: 12.49 MB/s aligned against 9.9 MB/s unaligned, both at
+the same clock.

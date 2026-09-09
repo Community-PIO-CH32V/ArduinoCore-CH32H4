@@ -10,9 +10,18 @@ internal SRAM. This makes it usable from a sketch:
 
 ```cpp
 PSRAM.begin();
-memcpy(buf, PSRAM.data() + offset, len);   // reads are ordinary loads
-PSRAM.write(offset, src, len);             // writes go through the library
+PSRAM.read(offset, buf, len);
+PSRAM.write(offset, src, len);
 ```
+
+> **Superseded.** This spec was written around a memory-mapped `data()`
+> pointer, and that pointer has since been removed. It could not be made
+> correct at every clock -- a long `memcpy` through the window returns corrupt
+> data at 50 MHz -- and an API whose correctness depends on how far you read
+> through it is worse to own than a function call. Every transfer is now DMA,
+> at any size and alignment. The random-access goal below is served by reading
+> a structure into RAM rather than by indexing the device directly. See
+> `docs/qspi-read-timing.md`.
 
 Two uses drive the design and both were asked for: **bulk streaming buffers**
 (audio staging, ahead of the ESP8266Audio port) and **random-access

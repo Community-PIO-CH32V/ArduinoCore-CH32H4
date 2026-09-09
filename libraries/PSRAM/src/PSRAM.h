@@ -1,57 +1,51 @@
-/* 8 MB of pseudo-SRAM on QSPI2, memory-mapped for reading.
+/* 8 MB of pseudo-SRAM on QSPI2.
  *
  *     PSRAM.begin();
- *     memcpy(dst, PSRAM.data() + off, len);   // an ordinary load
- *     PSRAM.write(off, src, len);             // goes through the library
+ *     PSRAM.write(off, src, len);
+ *     PSRAM.read(off, dst, len);
  *
  * The chip is an ESP-PSRAM64H, which is an AP Memory APS6404L die. It is
  * wired to PE10..PE15 and those pins reach QSPI2 on AF7 -- not QSPI1, whose
  * bank sits elsewhere on the package with the clock on a different AF from
  * the data.
  *
- * RANDOM ACCESS IS FREE; BULK COPYING IS NOT. After begin() the controller
- * rests in memory-mapped mode, so data() is a live pointer and indexing it is
- * an ordinary CPU load with no library involvement at all. Memory-mapped mode
- * is read-only in hardware -- that is the design of this controller, not an
- * omission -- so every write has to abort out of it, transfer, and re-enter.
+ * EVERY TRANSFER IS DMA, AT ANY SIZE OR ALIGNMENT. There is no fast path and
+ * no slow path to know about: read() and write() take any address, any length
+ * and any alignment, and all of them run at the full line rate. Odd lengths
+ * and unaligned buffers are handled internally through a bounce buffer, so
+ * they cost one extra copy and nothing else.
  *
- * USE data() FOR RANDOM ACCESS AND read() FOR BULK. They are not the same
- * speed, and not in the direction you would guess: the window is unbeatable
- * per access but only reaches ~2.9 MB/s when copied from in a loop, because
- * discrete CPU loads do not keep the controller streaming. read() runs DMA
- * instead and sustains 12.5 MB/s -- the full line rate, and over 4x a memcpy
- * from the window. So `memcpy(dst, PSRAM.data() + off, len)` is the slow way
- * to do what `PSRAM.read(off, dst, len)` does.
+ * THERE IS DELIBERATELY NO data() POINTER. An earlier version exposed the
+ * controller's memory-mapped window as a live const uint8_t *, which made
+ * random access a plain CPU load. It was removed because it could not be made
+ * to work at every clock: at 50 MHz a long memcpy through that window returns
+ * corrupt data, while every DMA transfer is clean. An API that hands out a
+ * pointer which is only valid for short reads, at one clock, is a worse thing
+ * to own than a function call -- so the window is gone and the clock went up
+ * instead. Bulk copying through that window was never the fast way anyway: it
+ * managed 2.9 MB/s against DMA's 12.5 at the same clock.
  *
- * THREE CONSEQUENCES, all real:
+ * The cost is random access. Indexing a structure now means a read() call of
+ * a few microseconds rather than a pointer dereference of a few hundred
+ * nanoseconds. Read a struct once into RAM, work on it there, write it back.
  *
- *   1. data() MUST NOT be dereferenced while read() or write() is running.
- *      Both leave memory-mapped mode to do their work. A single-threaded
- *      sketch cannot hit this, because they return before anything else runs.
- *      Touching it from an interrupt WILL return rubbish.
- *   2. Transfers cost a mode flip -- about 5 us. Batch into few large calls
- *      rather than many small ones.
- *   3. DMA needs a word-aligned pointer and a whole number of words. Anything
- *      else still works, on the slow path, silently. If bulk throughput
- *      matters, align the buffer.
+ * ON THE CLOCK: 25 MHz, and it is not negotiable on current evidence. QSPI
+ * divides HCLK at 100 MHz -- the V5F's 400 MHz never reaches this peripheral
+ * -- and 25 MHz is divider 4.
  *
- * THE CLOCK IS 25 MHz AND SHOULD STAY THERE. QSPI divides HCLK at 100 MHz --
- * the V5F's 400 MHz never reaches this peripheral -- and 25 MHz (divider 4) is
- * the only setting measured clean on every test.
+ * 50 MHz was tried and rejected, which is worth knowing before trying it
+ * again. Sweeping lengths from 1 byte to 1 KB across a range of addresses
+ * showed it clean, and it is not: a 64-byte read at address 0 comes back with
+ * everything from byte 32 onward slipped by one nibble. 32 bytes is the FIFO
+ * depth. It is address- and pattern-dependent, so a sweep that misses the
+ * wrong address calls it clean -- which is exactly what happened.
  *
- * It is NOT a simple "faster is worse" ceiling, and that matters if you are
- * tempted to raise it. Reads fail at divider 3 (33.3 MHz) but pass at divider
- * 2 (50 MHz) and divider 1 (100 MHz); writes fail only at divider 2. The
- * corruption has integer structure -- exactly 32 bytes wrong at divider 3
- * regardless of transfer length, exactly half the bytes wrong at divider 2 --
- * so it is a data-path fault, not analog marginality, and the mechanism is not
- * understood. 100 MHz very nearly works: it streams a 64 KB read at 49 MB/s,
- * but with 2 corrupt words in 16384, which is far too many for a pointer you
- * dereference without checking.
- *
- * So: do not raise this on the strength of one sketch that appears to work.
- * Several settings pass some tests and fail others. See
- * docs/qspi-read-timing.md and tests/hw/test_psram_clock_matrix.py.
+ * The ceiling is also not monotonic, so a lower clock is not automatically
+ * safer and a higher one not merely slower: reads fail at divider 3
+ * (33.3 MHz) and pass at divider 2 and divider 1. Anything that changes this
+ * clock needs the whole matrix, several addresses included, not one sketch
+ * that appears to work. See docs/qspi-read-timing.md and
+ * tests/hw/test_psram_clock_matrix.py.
  */
 #pragma once
 
@@ -82,42 +76,17 @@ public:
        so is usually a little under what was asked for. */
     uint32_t clock() const { return _clock; }
 
-    /* Both clamp to the device and return bytes actually transferred, so
+    /* Any address, any length, any alignment; all of it by DMA.
+       Both clamp to the device and return bytes actually transferred, so
        running off the end gives a short count rather than a wrapped address
        quietly corrupting the bottom of the array. 0 before begin(). */
     size_t read(uint32_t addr, void *dst, size_t len);
     size_t write(uint32_t addr, const void *src, size_t len);
 
-    /* QSPI2's memory-mapped window. QSPI1's is at 0x90000000 and is NOT this
-       one -- reading there returns zeros. */
-    static const uint32_t MMAP_BASE = 0x70000000u;
-
-    /* The device as ordinary memory, or nullptr when the window is not live.
-     *
-     * Safe to hold across calls, but see the header note: it must not be
-     * dereferenced while write() is running, because a write has to leave
-     * memory-mapped mode to do its job.
-     *
-     * The nullptr case is deliberately checked against _mapped and not just
-     * _begun. Reading this window while the controller is not actually in
-     * memory-mapped mode does not return rubbish -- it hangs the CPU on an AHB
-     * access that never completes and never faults, which also locks out the
-     * debug probe. A null pointer is a far better failure than that. */
-    const uint8_t *data() const {
-        return (_begun && _mapped) ? (const uint8_t *)MMAP_BASE : nullptr;
-    }
-
-    bool mapped() const { return _mapped; }
 
     /* How long the last write() took, end to end -- including the two mode
        flips, which a large write amortises and a small one does not. */
     uint32_t lastWriteMicros() const { return _lastWriteUs; }
-
-    /* Benchmark hook: force the DMA read path regardless of the threshold.
-       read() picks between DMA and the window on its own; this exists so the
-       crossover between them can be re-measured on another board, which is
-       where PSRAM_READ_DMA_THRESHOLD comes from. 0 unless word-aligned. */
-    size_t readViaDMA(uint32_t addr, void *dst, size_t len);
 
 private:
     bool identify();
@@ -126,11 +95,7 @@ private:
               const uint8_t *tx, uint32_t len, int lines, int dummy);
     bool writeDMA(uint32_t addr, const uint8_t *src, uint32_t len,
                   uint32_t req);
-    void mapEnter();
-    void mapExit();
-
     uint32_t _lastWriteUs = 0;
-    bool _mapped = false;
     bool _begun = false;
     bool _detected = false;
     uint8_t _mfid = 0;

@@ -118,60 +118,6 @@ bool PSRAMClass::xfer(uint8_t ins, uint32_t addr, bool hasAddr, uint8_t *rx,
     return true;
 }
 
-void PSRAMClass::mapEnter(void) {
-    if (_mapped) { return; }
-    /* Wait for idle before touching CCR. The vendor example does this and it
-       is not optional: mapEnter() runs straight after an indirect transfer,
-       which waits for TC but not for BUSY to fall, and configuring CCR on a
-       busy controller wedges it. A wedged controller is not a normal failure
-       -- the first AHB read of the window then hangs the CPU forever, with no
-       fault and no timeout, and the debug probe cannot halt the core. */
-    uint32_t t0 = micros();
-    while (QSPI_GetFlagStatus(PSRAM_QSPI, QSPI_FLAG_IDLE) == RESET) {
-        if (micros() - t0 > 5000) { return; }    /* stay unmapped, not wedged */
-    }
-    QSPI_ComConfig_InitTypeDef c = {};
-    c.QSPI_ComConfig_IMode = QSPI_ComConfig_IMode_1Line;
-    c.QSPI_ComConfig_ADMode = QSPI_ComConfig_ADMode_4Line;
-    c.QSPI_ComConfig_DMode = QSPI_ComConfig_DMode_4Line;
-    c.QSPI_ComConfig_ABMode = QSPI_ComConfig_ABMode_NoAlternateByte;
-    c.QSPI_ComConfig_FMode = QSPI_ComConfig_FMode_Memory_Mapped;
-    /* SIOO stays disabled. Sending 0xEB once and letting later transactions
-       continue without it is measurably wrong on this chip: every word of a
-       64 KB burst came back corrupt, and the burst took exactly as long as
-       before, so it does not even buy the instruction phase back. Reads are
-       already at line rate; there was nothing to win here. */
-    c.QSPI_ComConfig_SIOOMode = QSPI_ComConfig_SIOOMode_Disable;
-    c.QSPI_ComConfig_ABSize = QSPI_ComConfig_ABSize_8bit;
-    c.QSPI_ComConfig_ADSize = QSPI_ComConfig_ADSize_24bit;
-    c.QSPI_ComConfig_Ins = CMD_QUAD_READ;
-    c.QSPI_ComConfig_DummyCycles = QUAD_READ_DUMMY;
-    QSPI_ComConfig_Init(PSRAM_QSPI, &c);
-    QSPI_EnableQuad(PSRAM_QSPI, ENABLE);
-
-    /* No timeout counter. It looks like free tCEM insurance -- it drops CE#
-       after an idle gap, and this part only refreshes while CE# is high -- but
-       the vendor's memory-mapped example does not arm it, and nothing here has
-       shown it is safe to. The burst test can turn it on to measure whether it
-       is worth having; until that says yes, this matches the one sequence
-       known to work. */
-    QSPI_Start(PSRAM_QSPI);
-    _mapped = true;
-}
-
-/* Memory-mapped mode leaves the controller permanently busy, so an indirect
- * transfer cannot simply wait for idle -- it has to abort out first. */
-void PSRAMClass::mapExit(void) {
-    if (!_mapped) { return; }
-    QSPI_TimeoutCounterCmd(PSRAM_QSPI, DISABLE);   /* no-op unless a test armed it */
-    QSPI_AbortRequest(PSRAM_QSPI);
-    uint32_t t0 = micros();
-    while (QSPI_GetFlagStatus(PSRAM_QSPI, QSPI_FLAG_IDLE) == RESET) {
-        if (micros() - t0 > 5000) { break; }
-    }
-    _mapped = false;
-}
-
 /* DMA1 channels 1-5 and 7 are taken: DACAudio has 1, SPI 2 and 3, I2S 4 and
  * 5, ADCInput 7. Channel 6 is free. */
 #define PSRAM_DMA_CHANNEL     DMA1_Channel6
@@ -185,16 +131,14 @@ void PSRAMClass::mapExit(void) {
  * data. See docs/hazards.md. */
 #define PSRAM_DMA_REQ         72
 
-/* Below this, setting up a DMA costs more than it saves.
+/* Staging for transfers DMA cannot do directly. DMA moves whole words to and
+ * from memory, so a caller's unaligned pointer, or a length that is not a
+ * multiple of four, needs one copy through here. A ragged BYTE COUNT on the
+ * wire is fine -- DLR sets it exactly while the DMA supplies a rounded-up word
+ * count, which is measured to work -- so only the memory side ever bounces.
  *
- * MEASURED, and the crossover is far lower than it looks. Timing DMA reads
- * from 256 to 1024 bytes fits to about 5 us of fixed cost plus 12.4 MB/s,
- * while a word-aligned memcpy from the memory-mapped window runs at 2.88 MB/s
- * (0.347 us/byte). Those cross at roughly 20 bytes, so 64 is already well into
- * DMA's favour and the same number serves both directions. Below it the loss
- * is a few microseconds, and random access should be using data() anyway. */
-#define PSRAM_DMA_THRESHOLD        64
-#define PSRAM_READ_DMA_THRESHOLD   PSRAM_DMA_THRESHOLD
+ * In DTCM, which DMA1 reads and writes without trouble. */
+static uint8_t s_bounce[256] __attribute__((aligned(4)));
 
 bool PSRAMClass::writeDMA(uint32_t addr, const uint8_t *src, uint32_t len,
                           uint32_t req) {
@@ -203,9 +147,9 @@ bool PSRAMClass::writeDMA(uint32_t addr, const uint8_t *src, uint32_t len,
         if (micros() - t0 > 3000) { return false; }
     }
     /* Clear the previous transfer's flags before waiting on this one's. TC is
-       sticky, and mapExit() leaves one behind: without this the wait below
-       returns instantly on a stale flag, the DMA is disabled before it has
-       moved a word, and the whole thing reports success having written
+       sticky, and the previous transfer leaves one set: without this the wait
+       below returns instantly on a stale flag, the DMA is disabled before it
+       has moved a word, and the whole thing reports success having written
        nothing. That failure is indistinguishable from a wrong DMAMUX request
        number, which is exactly how it wasted a sweep. */
     QSPI_ClearFlag(PSRAM_QSPI, QSPI_FLAG_TC);
@@ -237,7 +181,7 @@ bool PSRAMClass::writeDMA(uint32_t addr, const uint8_t *src, uint32_t len,
     d.DMA_PeripheralBaseAddr = (uint32_t)&PSRAM_QSPI->DR;
     d.DMA_Memory0BaseAddr = (uint32_t)src;
     d.DMA_DIR = DMA_DIR_PeripheralDST;
-    d.DMA_BufferSize = len / 4;
+    d.DMA_BufferSize = (len + 3) / 4;
     d.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
     d.DMA_MemoryInc = DMA_MemoryInc_Enable;
     d.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Word;
@@ -315,7 +259,7 @@ bool PSRAMClass::readDMA(uint32_t addr, uint8_t *dst, uint32_t len) {
     d.DMA_PeripheralBaseAddr = (uint32_t)&PSRAM_QSPI->DR;
     d.DMA_Memory0BaseAddr = (uint32_t)dst;
     d.DMA_DIR = DMA_DIR_PeripheralSRC;
-    d.DMA_BufferSize = len / 4;
+    d.DMA_BufferSize = (len + 3) / 4;
     d.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
     d.DMA_MemoryInc = DMA_MemoryInc_Enable;
     d.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Word;
@@ -353,16 +297,6 @@ bool PSRAMClass::readDMA(uint32_t addr, uint8_t *dst, uint32_t len) {
     QSPI_DMACmd(PSRAM_QSPI, DISABLE);
     DMA_Cmd(PSRAM_DMA_CHANNEL, DISABLE);
     return true;
-}
-
-size_t PSRAMClass::readViaDMA(uint32_t addr, void *dst, size_t len) {
-    if (!_begun || addr >= CAPACITY) { return 0; }
-    if (len > CAPACITY - addr) { len = CAPACITY - addr; }
-    if ((len % 4) || ((uintptr_t)dst % 4)) { return 0; }
-    mapExit();
-    const bool ok = readDMA(addr, (uint8_t *)dst, (uint32_t)len);
-    mapEnter();
-    return ok ? len : 0;
 }
 
 bool PSRAMClass::identify(void) {
@@ -424,13 +358,11 @@ bool PSRAMClass::begin(uint32_t clockHz) {
         return false;
     }
     _begun = true;
-    mapEnter();                 /* the resting state from here on */
     return true;
 }
 
 bool PSRAMClass::end(void) {
     if (!_begun) { return true; }
-    mapExit();
     QSPI_AbortRequest(PSRAM_QSPI);
     QSPI_Cmd(PSRAM_QSPI, DISABLE);
     _begun = false;
@@ -443,51 +375,77 @@ void PSRAMClass::eid(uint8_t out[6]) const {
 }
 
 size_t PSRAMClass::read(uint32_t addr, void *dst, size_t len) {
-    if (!_begun || addr >= CAPACITY) { return 0; }
+    if (!_begun || addr >= CAPACITY || len == 0) { return 0; }
     if (len > CAPACITY - addr) { len = CAPACITY - addr; }
-    /* Big aligned reads go through DMA; everything else copies from the
-       memory-mapped window.
-       
-       Copying from the window is not free, which is the counter-intuitive
-       part: it needs no mode flip, but a CPU memcpy over the window only
-       manages 2.88 MB/s against DMA's 12.36 MB/s, because discrete CPU loads
-       do not keep the controller streaming the way back-to-back DMA word
-       reads do. DMA pays about 60 us of mode-flip and setup, so it wins above
-       a few hundred bytes and loses below. */
-    if (len >= PSRAM_READ_DMA_THRESHOLD && (len % 4) == 0
-        && ((uintptr_t)dst % 4) == 0) {
-        mapExit();
-        const bool ok = readDMA(addr, (uint8_t *)dst, (uint32_t)len);
-        mapEnter();
-        if (ok) { return len; }
-        /* Fall through to the window rather than failing the call. */
+    uint8_t *d = (uint8_t *)dst;
+
+    if (((uintptr_t)d % 4) != 0) {
+        /* Unaligned destination: everything goes through the bounce buffer,
+           in chunks, so DMA never writes into the caller's buffer directly. */
+        size_t done = 0;
+        while (done < len) {
+            size_t n = len - done;
+            if (n > sizeof(s_bounce)) { n = sizeof(s_bounce); }
+            /* Rounded up to whole words. Reading a few bytes more than asked
+               for is harmless: the device's address space is exactly its
+               capacity, so a read off the end wraps, and the extra bytes are
+               discarded here rather than handed back. */
+            const uint32_t want = (uint32_t)((n + 3u) & ~(size_t)3);
+            if (!readDMA(addr + done, s_bounce, want)) { return done; }
+            memcpy(d + done, s_bounce, n);
+            done += n;
+        }
+        return done;
     }
-    mapEnter();
-    if (!_mapped) { return 0; }   /* never touch a window that is not live */
-    memcpy(dst, (const void *)(MMAP_BASE + addr), len);
+
+    /* Aligned destination: the whole-word part lands straight in the caller's
+       buffer with no copy at all, and only a ragged tail is bounced. */
+    const size_t head = len & ~(size_t)3;
+    if (head && !readDMA(addr, d, (uint32_t)head)) { return 0; }
+    const size_t tail = len - head;
+    if (tail) {
+        if (!readDMA(addr + head, s_bounce, 4)) { return head; }
+        memcpy(d + head, s_bounce, tail);
+    }
     return len;
 }
 
 size_t PSRAMClass::write(uint32_t addr, const void *src, size_t len) {
-    if (!_begun || addr >= CAPACITY) { return 0; }
+    if (!_begun || addr >= CAPACITY || len == 0) { return 0; }
     if (len > CAPACITY - addr) { len = CAPACITY - addr; }
+    const uint8_t *s = (const uint8_t *)src;
 
     const uint32_t t0 = micros();
-    mapExit();
-    bool ok;
-    /* DMA moves whole words, so a length that is not a multiple of four, or a
-       source that is not word-aligned, finishes on the polled path rather than
-       silently dropping the tail. DTCM sources are fine -- DMA1 reads them
-       without trouble, unlike the USB and Ethernet masters. */
-    if (len >= PSRAM_DMA_THRESHOLD && (len % 4) == 0
-        && ((uintptr_t)src % 4) == 0) {
-        ok = writeDMA(addr, (const uint8_t *)src, (uint32_t)len,
-                      PSRAM_DMA_REQ);
+    size_t done = 0;
+    if (((uintptr_t)s % 4) != 0) {
+        while (done < len) {
+            size_t n = len - done;
+            if (n > sizeof(s_bounce)) { n = sizeof(s_bounce); }
+            memcpy(s_bounce, s + done, n);
+            if (!writeDMA(addr + done, s_bounce, (uint32_t)n, PSRAM_DMA_REQ)) {
+                break;
+            }
+            done += n;
+        }
     } else {
-        ok = xfer(CMD_QUAD_WRITE, addr, true, nullptr,
-                  (const uint8_t *)src, (uint32_t)len, 4, 0);
+        /* Aligned source: the whole-word part is sent straight from the
+           caller's buffer. The tail is bounced rather than letting DMA read
+           up to three bytes past the end of it. */
+        const size_t head = len & ~(size_t)3;
+        bool ok = true;
+        if (head) {
+            ok = writeDMA(addr, s, (uint32_t)head, PSRAM_DMA_REQ);
+            if (ok) { done = head; }
+        }
+        const size_t tail = len - head;
+        if (ok && tail) {
+            memcpy(s_bounce, s + head, tail);
+            if (writeDMA(addr + head, s_bounce, (uint32_t)tail,
+                         PSRAM_DMA_REQ)) {
+                done = len;
+            }
+        }
     }
-    mapEnter();
     _lastWriteUs = micros() - t0;
-    return ok ? len : 0;
+    return done;
 }
