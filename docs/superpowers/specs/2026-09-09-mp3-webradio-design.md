@@ -59,14 +59,16 @@ public:
     bool begin();                 // allocates helix's working state
     void end();
 
-    /* Decode ONE frame starting at `in`. Returns the number of int16_t
-       samples written to `pcm` (0 if more input is needed), and always sets
-       `*consumed` to how many input bytes were taken -- including bytes
-       skipped to reach a sync word, so a caller that advances by *consumed
-       cannot desynchronise. */
-    /* >0 = samples produced. 0 = need more input, nothing consumed beyond
-       any skipped bytes. <0 = a frame was dropped and resynced past; the
-       caller advances by *consumed and carries on. */
+    /* Decode ONE frame starting at `in`.
+     *
+     *   >0  int16_t samples written to `pcm`
+     *    0  more input needed; nothing consumed beyond any skipped bytes
+     *   <0  a frame was dropped and resynced past; carry on
+     *
+     * `*consumed` is ALWAYS set, in every case, to how many input bytes were
+     * taken -- including bytes skipped to reach a sync word. A caller that
+     * advances by `*consumed` therefore cannot desynchronise, which is what
+     * makes the error path and the mid-stream join the same code. */
     int decodeFrame(const uint8_t *in, size_t inLen, size_t *consumed,
                     int16_t *pcm, size_t pcmCap);
 
