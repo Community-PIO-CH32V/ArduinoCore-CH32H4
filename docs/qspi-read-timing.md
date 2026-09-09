@@ -259,3 +259,97 @@ The failures remain deterministic and structured rather than marginal. The
 scope measurement described earlier is still the way to settle it, and it now
 has a sharper question to answer: what differs on the wire between a CPU-paced
 transaction and a DMA-paced one at the same clock.
+
+
+---
+
+# Addendum 2: is this what an STM32 would do?
+
+Probably not, and part of the matrix is likely mine rather than the silicon's.
+
+## What ST would be expected to do
+
+**A monotonic ceiling, not a per-divider one.** `SSHIFT` exists on ST's
+QUADSPI precisely because the round-trip sampling problem is real there: their
+guidance is to shift the sample point by half a cycle above a certain
+frequency. That is a knob for a limit that only ever worsens with clock. The
+first version of this document argued exactly that shape -- it was the
+STM32-shaped answer, and it does not describe this part.
+
+**Memory-mapped reads would not be this fragile.** A large fraction of STM32
+designs execute code in place from memory-mapped QUADSPI flash. If the window
+corrupted data at particular prescaler values while DMA stayed clean, it would
+break instruction fetch rather than a data buffer, and it would be notorious
+rather than obscure. That it is not is reasonable evidence the base IP does
+not behave this way.
+
+**What is shared** is the physics of the round trip, and the general fact that
+ST publishes QUADSPI errata and documents constraints on clock ratios in some
+modes. "The prescaler value matters in ways the header does not say" is not
+alien to the family. The specific matrix here is.
+
+The concrete difference is documented: ST has `SSHIFT`, this part does not
+implement it, and WCH added `SIOXEN` in an ST-reserved bit. A clone that
+differs in two known ways can differ in unknown ones.
+
+## Part of this matrix is probably the driver
+
+An honest correction to how the matrix was presented above. It was written as
+though it characterises the hardware. It does not, cleanly:
+
+- **The corruption signature is not stable across driver changes.** The
+  50 MHz polled write was reported as corrupting exactly `n/2` bytes -- every
+  other byte -- when reads still came from the window. After `read()` moved to
+  DMA, the same test at the same clock corrupts *all* bytes of the short
+  lengths. A hardware property does not change when unrelated code does.
+- **The failing paths are the ones the CPU paces.** Divider 3 breaks the
+  memory-mapped window; divider 2 breaks the polled FIFO loop; DMA is clean at
+  both. Two of the three failures are in loops in this repository.
+- **Only one failure has no CPU in the loop:** DMA reads at divider 1. That
+  one is a hardware candidate.
+
+A fair statement is therefore: *at 25 MHz everything works; away from it, two
+CPU-paced paths break in ways that plausibly implicate their own loops, and one
+DMA path breaks in a way that does not.*
+
+**The FIFO threshold is not the cause.** The obvious suspect for the polled
+write was a race in the one-byte-per-`FTF`-check loop, which `FTHRES` should
+move. It does not: 0, 1, 2, 3, 7 and 15 all give byte-identical corruption at
+50 MHz. Worth recording separately -- `FTHRES` 31 makes things much worse and
+corrupts the **DMA** path too (10674 bad bytes against 491), so the SDK will
+let you set a threshold that breaks transfers that otherwise work.
+
+**QSPI1 cannot be used as a control.** The obvious way to separate IP from
+driver is to run the same matrix on the other instance, but nothing is wired
+to QSPI1's pins on this board. It needs hardware, not firmware.
+
+## 50 MHz is reachable, and does not need `data()` removed
+
+With the DMA threshold lowered to 4 bytes so that every whole-word transfer
+takes the DMA path:
+
+| | 25 MHz | 50 MHz |
+|---|---|---|
+| reads, 1-1024 B | clean | **clean** |
+| writes, 1-1024 B | clean | **clean except 2-byte** |
+
+The only remaining failure is writes of 1 to 3 bytes, which cannot be DMA'd
+because DMA moves whole words, and so fall back to the polled path.
+
+Note what this does *not* require. `data()` random access still works at
+50 MHz -- short window reads are clean there. What fails at 50 MHz is a *long*
+`memcpy` through the window, which is precisely the thing the header already
+tells callers not to do, because `read()` is four times faster. So the choice
+is not "50 MHz or `data()`". It is:
+
+- **25 MHz, the default.** Everything works, including bulk copying through
+  the window. 12.5 MB/s.
+- **50 MHz, opt-in.** 25 MB/s. `data()` for indexing is fine; bulk `memcpy`
+  through the window is not; writes under 4 bytes are not. Needs the DMA
+  threshold at 4, and sub-word writes bounced through an aligned buffer or
+  refused.
+
+Removing `data()` would give up the random-access case that the design set out
+to serve -- a pointer dereference is a few hundred nanoseconds against about
+5 us for a DMA round trip plus two mode flips -- and it would not be what
+bought 50 MHz. The DMA threshold is.

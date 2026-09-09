@@ -22,9 +22,11 @@ static uint8_t bigB[65536 + 4] __attribute__((aligned(4)));
    drive strength can be varied without touching the library. */
 static uint32_t g_extraCR = 0;
 static int g_padSpeed = -1;          /* -1 = leave as the library set it */
+static int g_fthres = -1;            /* -1 = leave begin()'s value (0) */
 
 static void applyExtra(void) {
   if (g_extraCR) { QSPI2->CR |= g_extraCR; }
+  if (g_fthres >= 0) { QSPI_SetFIFOThreshold(QSPI2, (uint32_t)g_fthres); }
   if (g_padSpeed >= 0) {
     static const uint16_t sp[4] = { GPIO_Speed_Low, GPIO_Speed_Medium,
                                     GPIO_Speed_High, GPIO_Speed_Very_High };
@@ -317,6 +319,10 @@ static void handle(const char *cmd) {
   } else if (!strncmp(cmd, "extracr ", 8)) {
     g_extraCR = (uint32_t)strtoul(cmd + 8, nullptr, 0);
     Serial1.print("extracr=0x"); Serial1.println(g_extraCR, HEX);
+
+  } else if (!strncmp(cmd, "fthres ", 7)) {
+    g_fthres = (int)strtol(cmd + 7, nullptr, 0);
+    Serial1.print("fthres="); Serial1.println(g_fthres);
 
   } else if (!strncmp(cmd, "padspeed ", 9)) {
     g_padSpeed = (int)strtol(cmd + 9, nullptr, 0);
