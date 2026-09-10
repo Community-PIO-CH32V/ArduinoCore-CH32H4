@@ -13,12 +13,17 @@
    Ethernet, not WiFi: this part has a MAC and this core has lwIP. Plug the
    RJ45 in before powering up.
 
-   SET THE CLOCK, AND KNOW WHY. TLS compares a certificate's validity window
-   against the clock, and an unset RTC on this part reads as the year 2000 --
-   so every certificate looks "not yet valid" and every connection fails
-   verification with no hint that the time is the problem. This sketch sets the
-   RTC from a build-time constant below, which is crude but honest. A real
-   product would use NTP or a battery-backed RTC.
+   THE CLOCK COMES FROM NTP, AND IT HAS TO. TLS compares a certificate's
+   validity window against the clock, and an unset RTC on this part reads as
+   the year 2000 -- so every certificate looks "not yet valid" and every
+   connection fails verification with no hint that the time is the problem.
+
+   Two steps, because they are two different things. ch32h4_rtc_begin() starts
+   the counter, or adopts one already running: the RTC lives in the backup
+   domain, so after a warm reset it is still going and keeps the time it had.
+   NTP then tells it what that time actually is. Without the first step the
+   second silently does nothing -- ch32h4_rtc_set() refuses when no source is
+   running, and NTP goes through settimeofday(), which is the same path.
 
    FINDING A STREAM URL. Most stations publish a .pls or .m3u playlist; open it
    in a text editor and take the http:// or https:// line inside. A URL that
@@ -29,6 +34,7 @@
 */
 
 #include <LwipEthernet.h>
+#include <NTP.h>
 #include <EthernetClientSecure.h>
 #include <HTTPClient.h>
 #include <I2S.h>
@@ -46,14 +52,20 @@ static const char *STREAM_URL = "https://example.org/stream.mp3";
 /* A tenth of full scale. See the note at the top. */
 static const float VOLUME = 0.1f;
 
-/* Seconds since 1970, only so TLS can check a certificate. Any roughly
-   correct value works; being a few days out is fine, being 26 years out is
-   not. Update it or replace this with NTP. */
-static const uint32_t BUILD_EPOCH = 1789000000u;
+/* Empty uses whatever DHCP offered, which on most networks is something.
+   Name it explicitly if your router offers no NTP option. */
+static const char *NTP_SERVER = "pool.ntp.org";
 
-/* Verification is on. To try a station whose CA this core does not carry,
-   swap setCACert() for setInsecure() below -- and understand that this stops
-   checking who you are talking to. */
+/* Paste the PEM of the CA that signed your station's certificate here to
+   verify it. Leave it null and the connection is encrypted but UNAUTHENTICATED
+   -- anything that can answer for that address can feed you audio.
+   
+   Null is the default only because this core ships no CA bundle, so there is
+   nothing sensible to verify against out of the box. It is not the safe
+   choice. Now that the clock comes from NTP, setCACert() actually works --
+   before that it could not, because certificate dates were checked against a
+   clock that read the year 2000. */
+static const char *STATION_CA_PEM = nullptr;
 
 /* ---- the pipeline -------------------------------------------------------- */
 
@@ -72,10 +84,34 @@ static uint32_t lastReport = 0;
 static uint32_t lastTitleChanges = 0;
 static IcyStream *icy = nullptr;
 
-static void setClock() {
-  ch32h4_rtc_begin(CH32H4_RTC_SRC_LSE);
-  struct timeval tv = { (time_t)BUILD_EPOCH, 0 };
-  settimeofday(&tv, nullptr);
+/* Start the RTC, then learn the time. False if we still do not know it, in
+   which case TLS will reject every certificate and saying so here is far
+   kinder than letting it fail as a verification error. */
+static bool startClock() {
+  /* LSE is the crystal at PC14/PC15 and the only source that survives on
+     VBAT alone. If this board has no crystal, CH32H4_RTC_SRC_HSE is accurate
+     while powered; LSI needs nothing but drifts minutes a day. */
+  if (!ch32h4_rtc_begin(CH32H4_RTC_SRC_LSE)) {
+    Serial.println("no 32 kHz crystal -- falling back to HSE");
+    if (!ch32h4_rtc_begin(CH32H4_RTC_SRC_HSE)) {
+      Serial.println("could not start the RTC at all");
+      return false;
+    }
+  }
+
+  NTP.begin(NTP_SERVER);
+  /* Returns true immediately if the clock was already right -- which after a
+     warm reset it usually is, because the counter kept running. */
+  if (!NTP.waitSynced(15000)) {
+    Serial.println("NTP did not answer; the clock is unknown, so TLS will");
+    Serial.println("reject every certificate. Check DNS and the route out.");
+    return false;
+  }
+
+  time_t now = time(nullptr);
+  Serial.print("clock set: ");
+  Serial.print(ctime(&now));            /* ctime() supplies the newline */
+  return true;
 }
 
 /* Open the stream and start the player. False if anything failed, in which
@@ -85,7 +121,11 @@ static bool connectStream() {
 
   if (https) {
     secure.setHandshakeTimeout(20000);
-    secure.setInsecure();       /* see the note above; use setCACert() in anger */
+    if (STATION_CA_PEM) {
+      secure.setCACert(STATION_CA_PEM);
+    } else {
+      secure.setInsecure();     /* encrypted, not authenticated -- see above */
+    }
     if (!http.begin(secure, STREAM_URL)) { return false; }
   } else {
     if (!http.begin(plain, STREAM_URL)) { return false; }
@@ -130,8 +170,6 @@ void setup() {
   Serial.println();
   Serial.println("WebRadio");
 
-  setClock();
-
   i2s.setBCLK(PB12);
   i2s.setDATA(PB15);
   i2s.setBitsPerSample(16);
@@ -147,6 +185,10 @@ void setup() {
   }
   Serial.print("ip ");
   Serial.println(Ethernet.localIP());
+
+  /* AFTER the link is up, because NTP needs the network -- and before the
+     stream, because TLS needs the clock. */
+  startClock();
 
   connectStream();
 }
