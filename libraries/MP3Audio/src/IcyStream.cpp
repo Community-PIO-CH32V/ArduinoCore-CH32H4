@@ -3,18 +3,20 @@
 #include <string.h>
 
 int IcyStream::available() {
-    if (_metaint == 0) { return _up.available(); }
+    if (!_up) { return 0; }
+    if (_metaint == 0) { return _up->available(); }
     if (_untilMeta == 0) { consumeMetadata(); }
-    const int a = _up.available();
+    const int a = _up->available();
     /* Never promise past the next metadata block: a caller that reads the
        whole of available() in one go must not swallow the length byte. */
     return a < (int)_untilMeta ? a : (int)_untilMeta;
 }
 
 int IcyStream::read() {
-    if (_metaint == 0) { return _up.read(); }
+    if (!_up) { return -1; }
+    if (_metaint == 0) { return _up->read(); }
     if (_untilMeta == 0) { consumeMetadata(); }
-    const int c = _up.read();
+    const int c = _up->read();
     if (c >= 0 && _untilMeta > 0) { _untilMeta--; }
     return c;
 }
@@ -24,7 +26,7 @@ int IcyStream::read() {
  * nothing and is retried on the next call, so a socket that delivers the
  * boundary in two pieces does not lose sync. */
 void IcyStream::consumeMetadata() {
-    const int lenByte = _up.read();
+    const int lenByte = _up->read();
     if (lenByte < 0) { return; }
     _untilMeta = _metaint;
 
@@ -34,7 +36,7 @@ void IcyStream::consumeMetadata() {
     char buf[MAX_TITLE];
     size_t got = 0;
     while (n--) {
-        const int c = _up.read();
+        const int c = _up->read();
         if (c < 0) { break; }
         if (got + 1 < sizeof(buf)) { buf[got++] = (char)c; }
     }

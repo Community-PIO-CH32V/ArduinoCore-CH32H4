@@ -35,8 +35,7 @@
 
 #include <LwipEthernet.h>
 #include <NTP.h>
-#include <EthernetClientSecure.h>
-#include <HTTPClient.h>
+#include <HTTPClientSecure.h>
 #include <I2S.h>
 #include <IcyStream.h>
 #include <MP3Player.h>
@@ -56,16 +55,31 @@ static const float VOLUME = 0.1f;
    Name it explicitly if your router offers no NTP option. */
 static const char *NTP_SERVER = "pool.ntp.org";
 
-/* Paste the PEM of the CA that signed your station's certificate here to
-   verify it. Leave it null and the connection is encrypted but UNAUTHENTICATED
-   -- anything that can answer for that address can feed you audio.
-   
-   Null is the default only because this core ships no CA bundle, so there is
-   nothing sensible to verify against out of the box. It is not the safe
-   choice. Now that the clock comes from NTP, setCACert() actually works --
-   before that it could not, because certificate dates were checked against a
-   clock that read the year 2000. */
-static const char *STATION_CA_PEM = nullptr;
+/* THE ROOT YOUR STATION CHAINS TO. This core ships no CA bundle -- 140-odd
+   roots is more RAM than mbedTLS can spend parsing them here -- so verifying
+   means naming the one you need.
+
+   ISRG Root X1 is Let's Encrypt's and covers a large share of stations.
+   To find out which root a particular one uses, and get its PEM:
+
+     openssl s_client -showcerts -connect stream.example.org:443 </dev/null        | openssl x509 -noout -issuer
+
+   That names the issuer of the server's certificate. Servers usually send
+   their intermediates but NOT the root, so fetch the root itself from the CA's
+   own site rather than from the connection -- a root taken from the peer
+   proves nothing, since the peer is what you are trying to verify.
+
+   Left as a placeholder deliberately: this example fails closed rather than
+   appearing to verify something it does not. */
+static const char root_ca[] =
+  "-----BEGIN CERTIFICATE-----\n"
+  "...paste the root certificate here...\n"
+  "-----END CERTIFICATE-----\n";
+
+/* Set true to run without verification while bringing a board up. The
+   connection is then encrypted against a passive listener and offers nothing
+   at all against anyone who can answer for the station's address. */
+static const bool INSECURE = false;
 
 /* ---- the pipeline -------------------------------------------------------- */
 
@@ -76,13 +90,13 @@ static const char *STATION_CA_PEM = nullptr;
 static I2S i2s(OUTPUT, 0);
 static MP3Player player;
 
-static EthernetClient plain;
-static EthernetClientSecure secure;
-static HTTPClient http;
+static HTTPClientSecure http;
 
 static uint32_t lastReport = 0;
 static uint32_t lastTitleChanges = 0;
-static IcyStream *icy = nullptr;
+/* Static and re-bound per connection rather than new'd, so nothing here
+   allocates and the reconnect path cannot leak. */
+static IcyStream icy;
 
 /* Start the RTC, then learn the time. False if we still do not know it, in
    which case TLS will reject every certificate and saying so here is far
@@ -117,19 +131,16 @@ static bool startClock() {
 /* Open the stream and start the player. False if anything failed, in which
    case loop() waits and tries again. */
 static bool connectStream() {
-  const bool https = strncmp(STREAM_URL, "https:", 6) == 0;
-
-  if (https) {
-    secure.setHandshakeTimeout(20000);
-    if (STATION_CA_PEM) {
-      secure.setCACert(STATION_CA_PEM);
-    } else {
-      secure.setInsecure();     /* encrypted, not authenticated -- see above */
-    }
-    if (!http.begin(secure, STREAM_URL)) { return false; }
+  /* HTTPClientSecure rather than HTTPClient, which is this core's idiom: the
+     HTTPS setters live on the subclass because including its header is what
+     pulls mbedTLS into the build, so a sketch speaking plain HTTP never pays
+     for it. It handles http:// URLs too, so one path covers both. */
+  if (INSECURE) {
+    http.setInsecure();
   } else {
-    if (!http.begin(plain, STREAM_URL)) { return false; }
+    http.setCACert(root_ca);
   }
+  if (!http.begin(STREAM_URL)) { return false; }
 
   /* BEFORE GET(). HTTPClient keeps only the headers it is told to keep, and a
      metaint that silently reads as zero turns Shoutcast's metadata blocks into
@@ -150,12 +161,11 @@ static bool connectStream() {
   Serial.print("connected, icy-metaint=");
   Serial.println(metaint);
 
-  delete icy;
-  icy = new IcyStream(http.getStream(), metaint);
+  icy.begin(http.getStream(), metaint);
   lastTitleChanges = 0;
 
   player.setVolume(VOLUME);
-  if (!player.begin(*icy, i2s)) {
+  if (!player.begin(icy, i2s)) {
     Serial.println("player.begin() failed");
     http.end();
     return false;
@@ -207,10 +217,10 @@ void loop() {
     return;
   }
 
-  if (icy && icy->titleChanges() != lastTitleChanges) {
-    lastTitleChanges = icy->titleChanges();
+  if (icy.titleChanges() != lastTitleChanges) {
+    lastTitleChanges = icy.titleChanges();
     Serial.print("now playing: ");
-    Serial.println(icy->title());
+    Serial.println(icy.title());
   }
 
   /* underruns() is the number that matters: it says the network or the CPU

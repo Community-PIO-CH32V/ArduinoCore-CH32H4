@@ -22,8 +22,22 @@ class IcyStream : public Stream {
 public:
     static const size_t MAX_TITLE = 128;
 
-    IcyStream(Stream &upstream, uint32_t metaint)
-        : _up(upstream), _metaint(metaint), _untilMeta(metaint) { }
+    /* Default-constructible and re-bindable, so a sketch can declare one
+       static and point it at each new connection. The metaint is not known
+       until the response headers arrive, so a constructor-only design forces
+       new/delete per connection -- which on an MCU is worth avoiding, and
+       which also trips -Wdelete-non-virtual-dtor through the Stream base. */
+    IcyStream() { }
+    IcyStream(Stream &upstream, uint32_t metaint) { begin(upstream, metaint); }
+    virtual ~IcyStream() { }
+
+    void begin(Stream &upstream, uint32_t metaint) {
+        _up = &upstream;
+        _metaint = metaint;
+        _untilMeta = metaint;
+        _titleChanges = 0;
+        _title[0] = '\0';
+    }
 
     /* "" until a metadata block carrying a StreamTitle arrives. */
     const char *title() const { return _title; }
@@ -31,16 +45,16 @@ public:
 
     int available() override;
     int read() override;
-    int peek() override { return _up.peek(); }
-    void flush() override { _up.flush(); }
-    size_t write(uint8_t b) override { return _up.write(b); }
+    int peek() override { return _up ? _up->peek() : -1; }
+    void flush() override { if (_up) { _up->flush(); } }
+    size_t write(uint8_t b) override { return _up ? _up->write(b) : 0; }
 
 private:
     void consumeMetadata();
 
-    Stream &_up;
-    uint32_t _metaint;
-    uint32_t _untilMeta;
+    Stream *_up = nullptr;
+    uint32_t _metaint = 0;
+    uint32_t _untilMeta = 0;
     uint32_t _titleChanges = 0;
     char _title[MAX_TITLE] = {0};
 };
