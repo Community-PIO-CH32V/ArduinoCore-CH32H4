@@ -1,10 +1,20 @@
 /*
    WebRadio - an MP3 internet radio station, over HTTPS, out of the I2S port.
 
-   QUIET ON PURPOSE. VOLUME is a tenth of full scale, because this is the
-   first thing anyone runs and the first thing anyone runs should not be at
-   full volume into whatever happens to be connected. Raise it once you know
-   what is on the other end.
+   QUIET ON PURPOSE. It starts at 10%, because this is the first thing anyone
+   runs and the first thing anyone runs should not be at full volume into
+   whatever happens to be connected.
+
+   TYPE TWO DIGITS ON THE SERIAL CONSOLE TO CHANGE IT. "05" is 5%, "15" is
+   15%, "99" is as loud as two digits go -- about a tenth of a decibel below
+   full scale, which is close enough that a third digit buys nothing. "00"
+   mutes. No newline needed; the pair applies as soon as the second digit
+   arrives.
+
+   The change is heard a moment after it is typed, because the output buffer
+   already holds audio at the old volume. That buffer is what makes a stalled
+   connection inaudible, so it is not worth shortening to make the knob feel
+   quicker.
 
    WIRING. I2S1: BCLK on PB12, WS follows it in hardware, data on PB15. Feed a
    proper I2S DAC or amplifier board -- a PCM5102, a MAX98357 and so on. These
@@ -48,8 +58,9 @@ extern "C" {
 
 static const char *STREAM_URL = "https://example.org/stream.mp3";
 
-/* A tenth of full scale. See the note at the top. */
-static const float VOLUME = 0.1f;
+/* Percent of full scale. See the note at the top; two digits on the console
+   change it while playing. */
+static const uint8_t START_VOLUME_PCT = 10;
 
 /* Empty uses whatever DHCP offered, which on most networks is something.
    Name it explicitly if your router offers no NTP option. */
@@ -164,7 +175,7 @@ static bool connectStream() {
   icy.begin(http.getStream(), metaint);
   lastTitleChanges = 0;
 
-  player.setVolume(VOLUME);
+  player.setVolumePercent(START_VOLUME_PCT);
   if (!player.begin(icy, i2s)) {
     Serial.println("player.begin() failed");
     http.end();
@@ -203,7 +214,36 @@ void setup() {
   connectStream();
 }
 
+/* Two digits set the volume, applied on the second.
+ *
+ * ANY NON-DIGIT CLEARS THE PAIR, which is not fussiness: a terminal that
+ * sends a newline, or one mistyped letter, would otherwise pair with the next
+ * digit typed and shift every command after it by one. */
+static void pollVolume() {
+  static char digits[2];
+  static uint8_t n = 0;
+
+  while (Serial.available()) {
+    const int c = Serial.read();
+    if (c >= '0' && c <= '9') {
+      digits[n++] = (char)c;
+      if (n == 2) {
+        const uint8_t pct = (uint8_t)((digits[0] - '0') * 10 + (digits[1] - '0'));
+        player.setVolumePercent(pct);
+        n = 0;
+        Serial.print("volume ");
+        Serial.print(player.volumePercent());
+        Serial.println("%");
+      }
+    } else {
+      n = 0;
+    }
+  }
+}
+
 void loop() {
+  pollVolume();
+
   /* One frame of work per call, non-blocking. */
   if (!player.loop()) {
     /* RECONNECTING IS THIS SKETCH'S JOB, not the library's. A retry policy
@@ -234,6 +274,9 @@ void loop() {
     Serial.print(" B, underruns ");
     Serial.print(player.underruns());
     Serial.print(", decode errors ");
-    Serial.println(player.decodeErrors());
+    Serial.print(player.decodeErrors());
+    Serial.print(", volume ");
+    Serial.print(player.volumePercent());
+    Serial.println("%");
   }
 }

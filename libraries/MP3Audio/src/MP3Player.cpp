@@ -8,6 +8,11 @@ void MP3Player::setVolume(float v) {
     _volQ8 = (uint16_t)(v * 256.0f + 0.5f);
 }
 
+void MP3Player::setVolumePercent(uint8_t percent) {
+    if (percent > 100) { percent = 100; }
+    _volQ8 = (uint16_t)((uint32_t)percent * 256u / 100u);
+}
+
 bool MP3Player::begin(Stream &source, AudioSink &sink) {
     if (_running) { return false; }
     if (!_decoder.begin()) { return false; }

@@ -48,6 +48,16 @@ public:
     void setVolume(float v);
     float volume() const { return (float)_volQ8 / 256.0f; }
 
+    /* The same knob in whole percent, clamped to 0-100.
+     *
+     * Integer-exact rather than going through the float form: 256 is unity, so
+     * the scale is percent * 256 / 100 and the multiply-and-shift in the hot
+     * path stays a multiply and a shift. Two digits reach 99%, which is about
+     * a tenth of a decibel below full scale -- close enough that a third digit
+     * buys nothing. */
+    void setVolumePercent(uint8_t percent);
+    uint8_t volumePercent() const { return (uint8_t)((_volQ8 * 100u + 128u) / 256u); }
+
     bool running() const { return _running; }
     uint32_t sampleRate() const { return _decoder.sampleRate(); }
     size_t buffered() const { return _fill; }

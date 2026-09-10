@@ -159,6 +159,21 @@ static void handle(const char *cmd) {
     player.end();
     player.setVolume(1.0f);
 
+  } else if (!strncmp(cmd, "playpct ", 8)) {
+    /* playpct <0..100> -- the integer percent knob, which is what the
+       WebRadio example's two-digit console command drives. */
+    MemStream src(tone_mp3, tone_mp3_len);
+    sink.reset();
+    player.end();
+    player.setVolumePercent((uint8_t)strtoul(cmd + 8, nullptr, 10));
+    player.begin(src, sink);
+    uint32_t guard = 0;
+    while (player.loop() && ++guard < 200000u) { }
+    Serial1.print("pct="); Serial1.println(player.volumePercent());
+    Serial1.print("peak="); Serial1.println(sink.peak());
+    player.end();
+    player.setVolume(1.0f);
+
   } else if (!strcmp(cmd, "icytest")) {
     /* 32 bytes of payload, a metadata block, then 32 more. */
     static uint8_t raw[160];

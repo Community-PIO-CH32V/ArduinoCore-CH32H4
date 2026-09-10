@@ -162,3 +162,26 @@ def test_volume_scales_the_samples(mp3_board):
         % (half["peak"], full["peak"], ratio))
     assert kv(mp3_board.command("playvol 0.0", timeout=40))["peak"] == 0, (
         "zero volume still produced signal")
+
+
+def test_the_percent_volume_knob_agrees_with_the_float_one(mp3_board):
+    """setVolumePercent() is what the WebRadio console command drives.
+
+    50% and 0.5 must land on the same Q8 scale, or the two APIs would disagree
+    about what half volume means. 100% must be unity, not 255/256 -- an
+    off-by-one there is inaudible and would quietly make full volume not full.
+    """
+    pct = kv(mp3_board.command("playpct 50", timeout=40))
+    flt = kv(mp3_board.command("playvol 0.5", timeout=40))
+    assert pct["pct"] == 50, pct.raw
+    assert pct["peak"] == flt["peak"], (
+        "50%% gave a peak of %s but 0.5 gave %s" % (pct["peak"], flt["peak"]))
+
+    full = kv(mp3_board.command("playpct 100", timeout=40))
+    unity = kv(mp3_board.command("playvol 1.0", timeout=40))
+    assert full["pct"] == 100, full.raw
+    assert full["peak"] == unity["peak"], "100%% is not unity gain"
+
+    assert kv(mp3_board.command("playpct 0", timeout=40))["peak"] == 0
+    # Clamped rather than wrapped: 200 would be 512 in Q8 and would clip.
+    assert kv(mp3_board.command("playpct 200", timeout=40))["pct"] == 100
