@@ -7,7 +7,24 @@ symbol, a section that no longer fits, a build option that stopped composing
 with another one.
 
 It does not replace tests/hw. It is what runs when tests/hw cannot.
+
+RUNTIME. About 7 minutes for 97 tests, and it used to be 16. Two things cost
+the difference, both worth not reintroducing:
+
+  * Every sketch was built TWICE, because test_sketch_links and
+    test_no_region_overflows each ran `pio run` on it -- the second only to
+    re-read output the first had already produced. Two assertions about one
+    build are two tests, not two builds. _build() memoises.
+
+  * The core and the vendor SDK were compiled from scratch once per sketch,
+    because each has its own .pio directory. PLATFORMIO_BUILD_CACHE_DIR shares
+    the objects across all 31, which is why a cold tree now costs the same as
+    a warm one (417 s against 400 s) rather than half again as much.
+
+The cache is about 150 MB in tests/.pio-cache and is gitignored. Deleting it
+costs one slow run, not a wrong result.
 """
+import os
 import subprocess
 import pathlib
 import shutil
@@ -25,10 +42,32 @@ def _sketches():
                   if (p / "platformio.ini").is_file())
 
 
+# One build per sketch, not one per assertion.
+#
+# This used to invoke `pio run` from both test_sketch_links and
+# test_no_region_overflows, so every sketch was built twice and the second
+# build existed only to re-read output the first had already produced. Two
+# assertions about one build are two tests, not two builds.
+_builds = {}
+
+
+def _build(sketch):
+    if sketch not in _builds:
+        env = dict(os.environ)
+        # Share compiled objects across the 31 sketch projects. Each has its
+        # own .pio directory, so without this the core and the vendor SDK are
+        # compiled from scratch 31 times over -- which was most of the runtime.
+        env.setdefault("PLATFORMIO_BUILD_CACHE_DIR",
+                       str(ROOT / "tests" / ".pio-cache"))
+        _builds[sketch] = subprocess.run(
+            ["pio", "run", "-d", str(SKETCHES / sketch)],
+            capture_output=True, text=True, env=env)
+    return _builds[sketch]
+
+
 @pytest.mark.parametrize("sketch", _sketches())
 def test_sketch_links(sketch):
-    r = subprocess.run(["pio", "run", "-d", str(SKETCHES / sketch)],
-                       capture_output=True, text=True)
+    r = _build(sketch)
     assert r.returncode == 0, r.stdout[-5000:] + r.stderr[-5000:]
 
 
@@ -36,8 +75,7 @@ def test_sketch_links(sketch):
 def test_no_region_overflows(sketch):
     """--print-memory-usage is on for every build precisely so this is
     checkable. A region on this part will fill up."""
-    r = subprocess.run(["pio", "run", "-d", str(SKETCHES / sketch)],
-                       capture_output=True, text=True)
+    r = _build(sketch)
     out = r.stdout + r.stderr
     assert "region `" not in out or "overflowed" not in out, out[-3000:]
 
