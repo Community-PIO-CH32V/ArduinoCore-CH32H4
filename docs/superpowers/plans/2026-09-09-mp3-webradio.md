@@ -79,7 +79,7 @@ Decodes an MP3 held in flash. No network, no ring, no sink.
 **Interfaces:**
 - Produces: `class MP3Decoder` with `bool begin()`, `void end()`, `int decodeFrame(const uint8_t *in, size_t inLen, size_t *consumed, int16_t *pcm, size_t pcmCap)`, `uint32_t sampleRate() const`, `uint8_t channels() const`, `uint32_t bitrate() const`, `uint32_t frames() const`, `uint32_t errors() const`, and `static const size_t MAX_SAMPLES = 2304`.
 
-- [ ] **Step 1: Vendor the decoder**
+- [x] **Step 1: Vendor the decoder**
 
 Take `src/libhelix-mp3/` from ESP8266Audio (https://github.com/earlephilhower/ESP8266Audio) into `libraries/MP3Audio/src/libhelix-mp3/`. Keep every file header as-is and keep its licence file. Delete only the ESP-specific assembly variants if any are present; the portable C sources are what this builds.
 
@@ -97,7 +97,7 @@ nor LGPL. It was chosen over the public-domain minimp3 for its fixed-point
 arithmetic and its record on ESP8266 and ESP32.
 ```
 
-- [ ] **Step 2: Generate the test fixture**
+- [x] **Step 2: Generate the test fixture**
 
 ```bash
 mkdir -p tests/data
@@ -143,7 +143,7 @@ Run it:
 python tools/mp3_to_header.py tests/data/tone.mp3 tests/data/tone_mp3.h tone_mp3
 ```
 
-- [ ] **Step 3: Write the failing tests**
+- [x] **Step 3: Write the failing tests**
 
 Create `tests/hw/test_mp3audio.py`:
 
@@ -205,7 +205,7 @@ def test_decoding_is_deterministic(mp3_board):
     assert first == second, "decoding the same buffer twice differed"
 ```
 
-- [ ] **Step 4: Run them and watch them fail**
+- [x] **Step 4: Run them and watch them fail**
 
 ```bash
 WLINK=tools/bin/wlink.exe python -m pytest tests/hw/test_mp3audio.py -q
@@ -213,7 +213,7 @@ WLINK=tools/bin/wlink.exe python -m pytest tests/hw/test_mp3audio.py -q
 
 Expected: every test errors on a missing `mp3_board` fixture.
 
-- [ ] **Step 5: Add the board fixture**
+- [x] **Step 5: Add the board fixture**
 
 In `tests/hw/conftest.py`, next to `psram_board`:
 
@@ -229,7 +229,7 @@ def mp3_board():
 
 and add `"mp3_board"` to `BOARD_FIXTURES`.
 
-- [ ] **Step 6: Write the decoder header**
+- [x] **Step 6: Write the decoder header**
 
 Create `libraries/MP3Audio/src/MP3Decoder.h`:
 
@@ -285,7 +285,7 @@ private:
 };
 ```
 
-- [ ] **Step 7: Implement the decoder**
+- [x] **Step 7: Implement the decoder**
 
 Create `libraries/MP3Audio/src/MP3Decoder.cpp`:
 
@@ -369,7 +369,7 @@ category=Signal Input/Output
 architectures=ch32h4
 ```
 
-- [ ] **Step 8: Write the test sketch**
+- [x] **Step 8: Write the test sketch**
 
 Create `tests/sketches/mp3audio/platformio.ini`:
 
@@ -461,7 +461,7 @@ void loop() {
 }
 ```
 
-- [ ] **Step 9: Run the tests until they pass**
+- [x] **Step 9: Run the tests until they pass**
 
 ```bash
 cd tests/sketches/mp3audio && pio run && cd -
@@ -472,13 +472,13 @@ Expected: 4 passed. **Record the `pcm_fnv` value** printed by `decode` — Task 
 
 If `frames` is outside 74–80, do not widen the bound without understanding why: a decoder dropping frames is exactly what that assertion is for.
 
-- [ ] **Step 10: Measure the decode cost**
+- [x] **Step 10: Measure the decode cost**
 
 The spec records decode cost as unmeasured on this part. Add a temporary line to the `decode` command that times the loop with `micros()` and prints `decode_us`, run it once, and work out the real-time margin: 2 seconds of audio decoded in `decode_us` microseconds gives a margin of `2000000 / decode_us`. Record the number in the commit message and delete the temporary line.
 
 A margin below about 3x is a problem worth raising before Task 3, because TLS and lwIP have to run in the gaps.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add -A
@@ -525,7 +525,7 @@ Plays from a `Stream` into an `AudioSink`, with no network involved.
 - Consumes: `MP3Decoder` from Task 1, exactly as declared there.
 - Produces: `class IcyStream : public Stream` with `IcyStream(Stream &upstream, uint32_t metaint)`, `const char *title() const`, `uint32_t titleChanges() const`. `class MP3Player` with `bool begin(Stream &source, AudioSink &sink)`, `bool loop()`, `void end()`, `bool running() const`, `uint32_t sampleRate() const`, `size_t buffered() const`, `uint32_t underruns() const`, `uint32_t decodeErrors() const`, `uint32_t rateChanges() const`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/hw/test_mp3audio.py`:
 
@@ -569,7 +569,7 @@ def test_the_player_widens_mono_to_stereo(mp3_board):
     assert r["mono_widened"] == 1, "left and right differed on a mono source"
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 ```bash
 WLINK=tools/bin/wlink.exe python -m pytest tests/hw/test_mp3audio.py -q -k "icy or player or widens"
@@ -577,7 +577,7 @@ WLINK=tools/bin/wlink.exe python -m pytest tests/hw/test_mp3audio.py -q -k "icy 
 
 Expected: unknown-command replies, so `payload_ok` and friends are missing.
 
-- [ ] **Step 3: Write `IcyStream`**
+- [x] **Step 3: Write `IcyStream`**
 
 Create `libraries/MP3Audio/src/IcyStream.h`:
 
@@ -674,7 +674,7 @@ void IcyStream::consumeMetadata() {
 }
 ```
 
-- [ ] **Step 4: Write `MP3Player`**
+- [x] **Step 4: Write `MP3Player`**
 
 Create `libraries/MP3Audio/src/MP3Player.h`:
 
@@ -849,7 +849,7 @@ bool MP3Player::loop() {
 }
 ```
 
-- [ ] **Step 5: Add the counting sink and the sketch commands**
+- [x] **Step 5: Add the counting sink and the sketch commands**
 
 In `tests/sketches/mp3audio/src/main.cpp`, add above `handle()`:
 
@@ -966,7 +966,7 @@ Add these commands before the unknown-command `else`:
     Serial1.print("title_changes="); Serial1.println(icy.titleChanges());
 ```
 
-- [ ] **Step 6: Run the tests until they pass**
+- [x] **Step 6: Run the tests until they pass**
 
 ```bash
 cd tests/sketches/mp3audio && pio run && cd -
@@ -975,7 +975,7 @@ WLINK=tools/bin/wlink.exe python -m pytest tests/hw/test_mp3audio.py -q -s
 
 Expected: 8 passed. The equality between `play`'s `pcm_fnv` and `decode`'s is the assertion that matters — it says the player changed nothing about the audio.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -1022,7 +1022,7 @@ The same MP3, over Ethernet, decoding to the same checksum.
 - Consumes: `MP3Player`, `IcyStream`, `CountingSink` from Task 2.
 - Produces: sketch commands `netplay <url>` and `netplays <url>`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/hw/test_mp3radio.py`:
 
@@ -1116,7 +1116,7 @@ def test_a_slow_server_underruns_but_keeps_playing(radio):
         _Handler.slow = False
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 ```bash
 WLINK=tools/bin/wlink.exe python -m pytest tests/hw/test_mp3radio.py -q
@@ -1124,7 +1124,7 @@ WLINK=tools/bin/wlink.exe python -m pytest tests/hw/test_mp3radio.py -q
 
 Expected: skipped if the RJ45 is unplugged, otherwise failures on the unknown `netplay` command.
 
-- [ ] **Step 3: Bring the network up in the sketch**
+- [x] **Step 3: Bring the network up in the sketch**
 
 In `tests/sketches/mp3audio/src/main.cpp`, add the includes and a banner line that the fixture reads:
 
@@ -1146,7 +1146,7 @@ Consult `tests/sketches/webserver/src/main.cpp` for the exact bring-up this
 core uses and copy it rather than inventing one; the fixture only needs
 `net_ip=` in the banner.
 
-- [ ] **Step 4: Add the `netplay` command**
+- [x] **Step 4: Add the `netplay` command**
 
 ```cpp
   } else if (!strncmp(cmd, "netplay ", 8)) {
@@ -1177,7 +1177,7 @@ core uses and copy it rather than inventing one; the fixture only needs
     http.end();
 ```
 
-- [ ] **Step 5: Run the tests until they pass**
+- [x] **Step 5: Run the tests until they pass**
 
 ```bash
 cd tests/sketches/mp3audio && pio run && cd -
@@ -1188,7 +1188,7 @@ Expected: 2 passed.
 
 If the checksums differ, the fault is almost certainly a partial read: `Stream::available()` on a socket returns what has arrived, not what was asked for, and a `readBytes` that returns short is normal rather than an error. `MP3Player::fillRing()` already handles this; check the sketch is not doing its own reading.
 
-- [ ] **Step 6: Add the HTTPS variant**
+- [x] **Step 6: Add the HTTPS variant**
 
 Add a `netplays` command identical to `netplay` but using `EthernetClientSecure` with `setInsecure()`, and a test in `tests/hw/test_mp3radio.py` that serves the same file over TLS using `test_tls_server.py`'s certificate helper and calls `rtcset` first:
 
@@ -1206,11 +1206,11 @@ def test_https_decodes_to_the_same_bytes(radio):
 
 Build `tls_base` with a `ThreadingHTTPServer` wrapped in `ssl.SSLContext`, reusing the self-signed certificate generation already in `tests/hw/test_tls_server.py`. Add the `rtcset` command to the sketch, copying it from `tests/sketches/tlstest/src/main.cpp`.
 
-- [ ] **Step 7: Write up what was learned**
+- [x] **Step 7: Write up what was learned**
 
 Append to `docs/hazards.md` whatever the network work turned up. At minimum, if `HTTPClient` refused an `ICY 200 OK` status line, record that and the workaround; the spec names this as the most likely thing to need one. If it did not come up, record that instead — "the stations tested answered HTTP/1.0" is useful to the next person.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A
@@ -1240,10 +1240,16 @@ EOF
 
 ## Task 4: The examples, and the regression
 
+> **As built.** `setVolume()` went on `MP3Player` rather than the examples, with the ratio test the plan asked for: 0.5 gives a peak of 1947 against 3895, 0.0 gives silence.
+>
+> Writing `PlayFromSD` exposed a defect the plan could not have anticipated: it did not **link**. `.sdram` is the 8 KB `SD_RAM` region and the SDMMC bounce buffers are 2 x 8 x 512 = 8192 bytes, all of it, so any sketch combining I2S and SD had never compiled. SDMMC cannot move -- its controller cannot reach DTCM -- so the I2S buffers did. `ADCInput` has the same latent conflict and is recorded rather than fixed, because nothing combines it with SD and the fix would be untested.
+>
+> Step 4's regression also found the link matrix taking 16 minutes for work that takes 7, which is fixed in its own commit.
+
 **Files:**
 - Create: `libraries/MP3Audio/examples/WebRadio/WebRadio.ino`, `libraries/MP3Audio/examples/PlayFromSD/PlayFromSD.ino`
 
-- [ ] **Step 1: Write the WebRadio example**
+- [x] **Step 1: Write the WebRadio example**
 
 `libraries/MP3Audio/examples/WebRadio/WebRadio.ino`. It must:
 
@@ -1257,20 +1263,20 @@ EOF
 
 Volume is applied by scaling samples before the sink; add a `setVolume(float)` to `MP3Player` if that is cleaner, and if you do, add a test asserting a scaled frame comes out scaled.
 
-- [ ] **Step 2: Write the PlayFromSD example**
+- [x] **Step 2: Write the PlayFromSD example**
 
 `libraries/MP3Audio/examples/PlayFromSD/PlayFromSD.ino`: open `/track.mp3` from SD, hand the `File` to the same `MP3Player`, play into `I2S` at the same low default volume. The head comment's job is to make the point that this is the *same player* as the radio with a different `Stream`, and to give somewhere to debug decoding with no network in the way.
 
 The SD wiring on this bench is 1-bit: MISO PC8, CLK PC12, MOSI PD2, CS PC11.
 
-- [ ] **Step 3: Build both examples both ways**
+- [x] **Step 3: Build both examples both ways**
 
 ```bash
 python tools/buildexamples.py MP3Audio
 python tools/buildexamples.py --ide MP3Audio
 ```
 
-- [ ] **Step 4: Full regression**
+- [x] **Step 4: Full regression**
 
 Run these **strictly one at a time**. Running a build sweep concurrently with anything else exhausted memory on this machine and the job was killed.
 
@@ -1284,7 +1290,7 @@ python tools/buildexamples.py
 python tools/buildexamples.py --ide
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
