@@ -90,15 +90,26 @@ size_t EthernetClientSecure::write(const uint8_t *buf, size_t size) {
 }
 
 int EthernetClientSecure::available() {
-    if (!_s || !_s->connected) {
+    if (!_s) {
         return 0;
     }
     /* Ask mbedtls what it has already decrypted first; only then pump, so a
      * sketch polling available() does not spin the network stack for data that
-     * is already sitting in the record buffer. */
+     * is already sitting in the record buffer.
+     *
+     * THIS RUNS EVEN AFTER THE PEER HAS CLOSED, and that is the point. A short
+     * HTTP response arrives and is followed by close_notify in the same burst,
+     * so by the time a caller reads the body, `connected` is already false.
+     * Returning 0 here on that basis discarded the entire body of every small
+     * response -- a 16 KB file over TLS delivered nothing at all, while the
+     * same file over plain HTTP worked. Buffered plaintext is still ours to
+     * hand over; being closed only means no MORE will arrive. */
     int n = (int)mbedtls_ssl_get_bytes_avail(&_s->ssl);
     if (n > 0) {
         return n;
+    }
+    if (!_s->connected) {
+        return 0;               /* drained and closed: now it really is 0 */
     }
 
     /* Nothing buffered: give the transport a chance to deliver a record.
@@ -118,7 +129,14 @@ int EthernetClientSecure::available() {
 }
 
 int EthernetClientSecure::read(uint8_t *buf, size_t size) {
-    if (!_s || !_s->connected || size == 0) {
+    if (!_s || size == 0) {
+        return -1;
+    }
+    /* Buffered plaintext survives the peer hanging up -- see available(). Only
+     * refuse once there is nothing left AND the connection is gone, otherwise
+     * the tail of every response that arrives alongside close_notify is
+     * thrown away. */
+    if (!_s->connected && mbedtls_ssl_get_bytes_avail(&_s->ssl) == 0) {
         return -1;
     }
     int ret = mbedtls_ssl_read(&_s->ssl, buf, size);

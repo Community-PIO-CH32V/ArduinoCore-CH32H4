@@ -4,6 +4,20 @@
 
 extern "C" {
 #include "mbedtls/error.h"
+
+#ifdef CH32H4_TLS_DEBUG
+#include "mbedtls/debug.h"
+/* mbedtls' own logging, routed to Serial1 rather than printf: this core has no
+ * _write, so printf output goes nowhere. Build with -DCH32H4_TLS_DEBUG=N,
+ * where N is 1 (errors) to 4 (every record). Level 4 is very loud and slow
+ * enough to change timing, which matters when the bug is a race. */
+static void ch32h4_tls_dbg(void *ctx, int level, const char *file, int line,
+                           const char *str) {
+    (void)ctx; (void)file; (void)line;
+    Serial1.print("tls"); Serial1.print(level); Serial1.print(": ");
+    Serial1.print(str);
+}
+#endif
 }
 
 /* The transport error codes mbedtls uses.
@@ -215,6 +229,27 @@ bool EthernetTlsSession::handshake(bool server, const char *hostname,
             return false;
         }
     }
+
+#ifdef CH32H4_TLS_DEBUG
+    mbedtls_debug_set_threshold(CH32H4_TLS_DEBUG);
+    mbedtls_ssl_conf_dbg(&conf, ch32h4_tls_dbg, nullptr);
+#endif
+
+    /* TELL THE SERVER HOW BIG OUR INPUT BUFFER IS, or it will send records
+     * that do not fit and mbedtls fails with "requesting more data than fits".
+     *
+     * Two extensions are needed, because they cover different protocol
+     * versions and neither covers both:
+     *
+     *   max_fragment_length (RFC 6066) is TLS 1.2 and earlier.
+     *   record_size_limit   (RFC 8449) is TLS 1.3 only.
+     *
+     * The config previously claimed mbedtls sent record_size_limit already.
+     * It did not: MBEDTLS_SSL_RECORD_SIZE_LIMIT was commented out, and
+     * nothing ever called conf_max_frag_len either, so a 4096-byte input
+     * buffer was advertised to nobody. A 16 KB file over TLS 1.3 delivered
+     * zero bytes while the same file over plain HTTP worked. */
+    (void)mbedtls_ssl_conf_max_frag_len(&conf, MBEDTLS_SSL_MAX_FRAG_LEN_4096);
 
     mbedtls_ssl_set_bio(&ssl, &tcp, bioSend, bioRecv, nullptr);
 

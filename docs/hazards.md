@@ -1844,3 +1844,72 @@ setting it was praising.
 Enhance mode (`EHMOD`) is the real win and is safe: see the entry above. It is
 worth 32%, and it is what this core already intended to do.
 
+
+## A 4 KB TLS input buffer silently loses the whole body of a large response
+
+**Symptom.** An HTTPS GET returns 200, `getSize()` reports the right
+Content-Length, and then not one byte of the body can be read. `available()`
+stays 0, `connected()` goes false, and the same URL over plain HTTP works
+perfectly. Nothing reports an error to the caller.
+
+**Cause.** `MBEDTLS_SSL_IN_CONTENT_LEN` was 4096. A server that sends a
+full-size TLS record -- 16384 bytes of plaintext, which the protocol allows
+and which Python's `ssl` module and OpenSSL both do -- produces a record the
+board cannot buffer. mbedtls fails the *record*, not the handshake:
+
+```
+requesting more data than fits
+mbedtls_ssl_fetch_input() returned -28928 (-0x7100)   MBEDTLS_ERR_SSL_BAD_INPUT_DATA
+```
+
+That error never reaches the sketch. `EthernetClientSecure` marks itself
+disconnected and `available()` returns 0, which is indistinguishable from a
+server that sent nothing.
+
+**Why the size-limit extensions do not save you.** The config used to assert
+that "TLS 1.3 servers must honour the record_size_limit extension, which
+mbedtls sends". All three parts of that were false:
+
+| | |
+|---|---|
+| `MBEDTLS_SSL_RECORD_SIZE_LIMIT` | was **commented out** -- not compiled in, so not sent |
+| `max_fragment_length` (RFC 6066) | compiled in, but `mbedtls_ssl_conf_max_frag_len()` was never called, so not sent -- and it is **TLS 1.2 only** |
+| the negotiated session | was **TLS 1.3**, where RFC 6066 does not apply |
+
+Both are now enabled and requested, and **it changed nothing** -- the test
+server sent full-size records regardless. A client cannot rely on a peer
+honouring a size limit. The input buffer must fit what the protocol permits.
+
+**Fix.** `MBEDTLS_SSL_IN_CONTENT_LEN 16384`, about 12 KB more than 4096.
+`OUT_CONTENT_LEN` stays at 2048: the asymmetry is real, because an HTTPS GET
+sends little and receives a lot.
+
+**Why the existing TLS tests missed it.** `test_tls.py` fetches pages small
+enough to fit one small record, and `test_tls_server.py` exercises the board
+as a *server*, where `OUT_CONTENT_LEN` governs. It took a 16 KB download to
+expose it -- which is to say, the first realistic one.
+
+**How it was found**, because the technique generalises: `MBEDTLS_DEBUG_C` is
+already compiled in, but nothing was routed anywhere. Build with
+`-DCH32H4_TLS_DEBUG=N` (1 for errors, 4 for every record) and
+`EthernetTlsSession` registers a callback that prints to `Serial1` rather than
+through `printf`, which this core has no `_write` for. Level 1 named the
+failure in one line after an hour of guessing at it. Level 3 and above is loud
+enough to change timing, so start at 1.
+
+## Buffered TLS plaintext must survive the peer hanging up
+
+`EthernetClientSecure::available()` and `read()` both began with
+`if (!_s || !_s->connected)`, so once close_notify arrived, any plaintext
+mbedtls had already decrypted became unreachable. A short HTTP response
+arrives and is closed in the same burst, so by the time a caller reads the
+body `connected` is already false.
+
+Both now check for buffered bytes first and only refuse when there are none
+*and* the connection is gone. Being closed means no more will arrive; it does
+not mean what already arrived is void.
+
+This was found while chasing the buffer-size bug above and is a genuine second
+defect, but it was not the cause of it -- the fix alone changed nothing,
+because in that failure mbedtls had never managed to decrypt anything to
+buffer.

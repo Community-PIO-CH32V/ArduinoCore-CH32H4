@@ -5,6 +5,19 @@
  * needs to hear anything to know whether the decoder works.
  */
 #include <Arduino.h>
+#include <LwipEthernet.h>
+#include <EthernetClientSecure.h>
+#include <HTTPClient.h>
+
+extern "C" {
+#include "ch32h4_rtc.h"
+}
+
+/* Fed in a line at a time: a PEM does not fit one command line, and baking one
+   into the firmware would make the test depend on a certificate that
+   expires. */
+static char ca_pem[2048];
+static size_t ca_len = 0;
 #include <AudioSink.h>
 #include <MP3Decoder.h>
 #include <IcyStream.h>
@@ -160,6 +173,103 @@ static void handle(const char *cmd) {
     Serial1.print("payload_ok="); Serial1.println(ok);
     Serial1.print("title_changes="); Serial1.println(icy.titleChanges());
 
+  } else if (!strncmp(cmd, "netplay ", 8)) {
+    /* Fetch an MP3 over HTTP and play it into the counting sink.
+       The URL points at a server on the test machine, not at this board --
+       lwIP here is built without LWIP_NETIF_LOOPBACK, so a packet addressed to
+       our own IP leaves the Ethernet port and never comes back. */
+    static EthernetClient client;
+    static HTTPClient http;
+    if (!http.begin(client, String(cmd + 8))) {
+      Serial1.println("http_rc=-1000"); Serial1.print("> "); return;
+    }
+    /* BEFORE GET(). HTTPClient keeps only the headers it was told to keep, and
+       a metaint that silently reads as zero turns metadata into corrupt
+       audio. */
+    static const char *keys[] = { "icy-metaint" };
+    http.collectHeaders(keys, 1);
+    const int rc = http.GET();
+    Serial1.print("http_rc="); Serial1.println(rc);
+    if (rc != 200) { http.end(); Serial1.print("> "); return; }
+
+    const uint32_t metaint = (uint32_t)http.header("icy-metaint").toInt();
+    IcyStream icy(http.getStream(), metaint);
+    sink.reset();
+    player.end();
+    player.begin(icy, sink);
+    const uint32_t start = millis();
+    while (player.loop() && millis() - start < 60000u) { }
+    Serial1.print("rate="); Serial1.println(player.sampleRate());
+    Serial1.print("sink_frames="); Serial1.println(sink.frames());
+    Serial1.print("pcm_fnv="); Serial1.println(sink.fnv());
+    Serial1.print("decode_errors="); Serial1.println(player.decodeErrors());
+    Serial1.print("metaint="); Serial1.println(metaint);
+    Serial1.print("title="); Serial1.println(icy.title());
+    player.end();
+    http.end();
+
+  } else if (!strcmp(cmd, "cabegin")) {
+    ca_len = 0;
+    Serial1.println("ca_reset=1");
+
+  } else if (!strncmp(cmd, "caline ", 7)) {
+    const char *p = cmd + 7;
+    const size_t n = strlen(p);
+    if (ca_len + n + 2 < sizeof(ca_pem)) {
+      memcpy(ca_pem + ca_len, p, n);
+      ca_len += n;
+      ca_pem[ca_len++] = '\n';
+    }
+    Serial1.print("ca_bytes="); Serial1.println((uint32_t)ca_len);
+
+  } else if (!strcmp(cmd, "caend")) {
+    ca_pem[ca_len] = '\0';
+    Serial1.print("ca_bytes="); Serial1.println((uint32_t)ca_len);
+
+  } else if (!strncmp(cmd, "rtcset ", 7)) {
+    /* Without this, TLS rejects every certificate: mbedtls compares the
+       validity window against the clock, and an unset clock reads as the year
+       2000. See docs/hazards.md. */
+    ch32h4_rtc_begin(CH32H4_RTC_SRC_LSE);
+    struct timeval tv = { (time_t)strtoul(cmd + 7, nullptr, 10), 0 };
+    Serial1.print("rtc_set=");
+    Serial1.println(settimeofday(&tv, nullptr) == 0 ? 1 : 0);
+
+  } else if (!strncmp(cmd, "netplays ", 9)) {
+    /* The same as netplay, over TLS, verifying against the uploaded CA rather
+       than with setInsecure() -- a real station needs verification, and this
+       is the path that also proves the clock is set. */
+    static EthernetClientSecure sclient;
+    static HTTPClient shttp;
+    sclient.setHandshakeTimeout(25000);
+    if (ca_len) {
+      ca_pem[ca_len] = '\0';
+      sclient.setCACert(ca_pem);
+    } else {
+      sclient.setInsecure();
+    }
+    if (!shttp.begin(sclient, String(cmd + 9))) {
+      Serial1.println("http_rc=-1000"); Serial1.print("> "); return;
+    }
+    static const char *skeys[] = { "icy-metaint" };
+    shttp.collectHeaders(skeys, 1);
+    const int src = shttp.GET();
+    Serial1.print("http_rc="); Serial1.println(src);
+    if (src != 200) { shttp.end(); Serial1.print("> "); return; }
+
+    const uint32_t smetaint = (uint32_t)shttp.header("icy-metaint").toInt();
+    IcyStream sicy(shttp.getStream(), smetaint);
+    sink.reset();
+    player.end();
+    player.begin(sicy, sink);
+    const uint32_t sstart = millis();
+    while (player.loop() && millis() - sstart < 60000u) { }
+    Serial1.print("pcm_fnv="); Serial1.println(sink.fnv());
+    Serial1.print("sink_frames="); Serial1.println(sink.frames());
+    Serial1.print("decode_errors="); Serial1.println(player.decodeErrors());
+    player.end();
+    shttp.end();
+
   } else if (!strcmp(cmd, "actlr")) {
     const uint32_t a = FLASH->ACTLR;
     Serial1.print("actlr=0x"); Serial1.println(a, HEX);
@@ -176,8 +286,19 @@ static void handle(const char *cmd) {
 
 void setup() {
   Serial1.begin(115200);
+
+  Ethernet.begin();
+  const uint32_t deadline = millis() + 20000;
+  while (!Ethernet.connected() && millis() < deadline) {
+    delay(100);
+  }
+
   Serial1.println();
   Serial1.println("mp3audio test");
+  Serial1.print("net_ip=");
+  Serial1.println(Ethernet.localIP());
+  Serial1.print("net_up=");
+  Serial1.println(Ethernet.connected() ? 1 : 0);
   Serial1.print("> ");
 }
 
