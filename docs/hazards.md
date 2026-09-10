@@ -1913,3 +1913,36 @@ This was found while chasing the buffer-size bug above and is a genuine second
 defect, but it was not the cause of it -- the fix alone changed nothing,
 because in that failure mbedtls had never managed to decrypt anything to
 buffer.
+
+## `.sdram` is 8 KB and the SD bounce buffers are all of it
+
+**Symptom.** A sketch that uses I2S and SD together does not compile. It
+fails at the LINK step, which is the good news:
+
+```
+section `.sdram' will not fit in region `SD_RAM'
+region `SD_RAM' overflowed by 1024 bytes
+```
+
+**Cause.** `.sdram` is the 8 KB `SD_RAM` region, and three libraries put DMA
+buffers there. `ch32h4_sdmmc.c` alone takes `2 x 8 x 512` = **8192 bytes** --
+the whole region -- because its controller cannot reach DTCM and it bounces
+eight blocks at a time to keep multi-block transfers multi-block. I2S wanted
+another 1024 and ADCInput wants more still.
+
+**Only SDMMC has to be there.** DMA1 reaches DTCM perfectly well, unlike the
+USB, Ethernet and SDMMC masters -- the PSRAM work verified that directly with
+a DMA transfer sourced from an ordinary static at `0x200C1B48`. I2S's buffers
+were in `.sdram` for tidiness, "so the buffers sit alongside the other DMA
+buffers rather than in the middle of the fast heap", and that tidiness cost a
+whole combination of libraries. They are now in ordinary `.bss`.
+
+**`ADCInput` still places its buffer in `.sdram` and has the same latent
+conflict with SD.** It is left alone here only because no sketch or test
+combines them, so the fix would be untested. If you hit this, the change is
+the same one line, and the reasoning above is why it is safe.
+
+The failure being a link error rather than a runtime fault is worth noting as
+the one good thing about it: a region overflow is loud, immediate, and names
+the section. The same mistake with a runtime allocator would have been a hard
+fault in whatever happened to sit next to the buffer.

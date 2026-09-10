@@ -60,20 +60,23 @@ public:
             /* Left channel only, so the checksum matches the decoder's over a
                mono source rather than counting every sample twice. */
             _fnv = fnv1a(_fnv, (const uint8_t *)&pcmIn[i * 2], 2);
+            const int32_t a = pcmIn[i * 2] < 0 ? -pcmIn[i * 2] : pcmIn[i * 2];
+            if ((uint32_t)a > _peak) { _peak = (uint32_t)a; }
         }
         _frames += frames;
         return frames;
     }
     size_t availableFrames() override { return 65535; }
+    uint32_t peak() const { return _peak; }
     uint32_t underruns() const override { return 0; }
 
-    void reset() { _fnv = 2166136261u; _frames = 0; _monoBroken = false; }
+    void reset() { _fnv = 2166136261u; _frames = 0; _peak = 0; _monoBroken = false; }
     uint32_t fnv() const { return _fnv; }
     uint32_t frames() const { return _frames; }
     bool monoOk() const { return !_monoBroken; }
 
 private:
-    uint32_t _rate = 0, _fnv = 2166136261u, _frames = 0;
+    uint32_t _rate = 0, _fnv = 2166136261u, _frames = 0, _peak = 0;
     bool _running = false, _monoBroken = false;
 };
 
@@ -140,6 +143,21 @@ static void handle(const char *cmd) {
     Serial1.print("rate_changes="); Serial1.println(player.rateChanges());
     Serial1.print("mono_widened="); Serial1.println(sink.monoOk() ? 1 : 0);
     player.end();
+
+  } else if (!strncmp(cmd, "playvol ", 8)) {
+    /* playvol <0..1> -- play at a volume and report the peak amplitude. */
+    MemStream src(tone_mp3, tone_mp3_len);
+    sink.reset();
+    player.end();
+    player.setVolume((float)atof(cmd + 8));
+    player.begin(src, sink);
+    uint32_t guard = 0;
+    while (player.loop() && ++guard < 200000u) { }
+    Serial1.print("volume="); Serial1.println((uint32_t)(player.volume() * 1000.0f));
+    Serial1.print("peak="); Serial1.println(sink.peak());
+    Serial1.print("sink_frames="); Serial1.println(sink.frames());
+    player.end();
+    player.setVolume(1.0f);
 
   } else if (!strcmp(cmd, "icytest")) {
     /* 32 bytes of payload, a metadata block, then 32 more. */

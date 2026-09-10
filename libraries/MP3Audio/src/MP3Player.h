@@ -39,6 +39,15 @@ public:
     /* False once the source is done and the ring is drained. */
     bool loop();
 
+    /* 0.0 to 1.0, applied to every sample before it reaches the sink.
+     *
+     * Here rather than in the sketch because the writes happen inside the
+     * player: scaling outside would mean wrapping the sink. Values above 1.0
+     * are clamped, because a decoded MP3 already uses the full range and
+     * amplifying it clips rather than getting louder. */
+    void setVolume(float v);
+    float volume() const { return (float)_volQ8 / 256.0f; }
+
     bool running() const { return _running; }
     uint32_t sampleRate() const { return _decoder.sampleRate(); }
     size_t buffered() const { return _fill; }
@@ -60,6 +69,9 @@ private:
     int16_t _pcm[MP3Decoder::MAX_SAMPLES];
     int16_t _stereo[MP3Decoder::MAX_SAMPLES * 2];
     uint32_t _rateChanges = 0;
+    /* Q8 fixed point: the scale is applied per sample in the hot path, and an
+       integer multiply and shift is cheaper than a float multiply there. */
+    uint16_t _volQ8 = 256;
     uint32_t _startedRate = 0;
     bool _running = false;
     bool _primed = false;

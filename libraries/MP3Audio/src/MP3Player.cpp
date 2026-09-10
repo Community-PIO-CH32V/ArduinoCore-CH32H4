@@ -2,6 +2,12 @@
 
 #include <string.h>
 
+void MP3Player::setVolume(float v) {
+    if (v < 0.0f) { v = 0.0f; }
+    if (v > 1.0f) { v = 1.0f; }
+    _volQ8 = (uint16_t)(v * 256.0f + 0.5f);
+}
+
 bool MP3Player::begin(Stream &source, AudioSink &sink) {
     if (_running) { return false; }
     if (!_decoder.begin()) { return false; }
@@ -79,6 +85,18 @@ bool MP3Player::decodeOne() {
             _stereo[i * 2 + 1] = _pcm[i];
         }
         out = _stereo;
+    }
+
+    if (_volQ8 != 256) {
+        /* In place into _stereo either way, so a mono source is scaled once
+           rather than twice and the decoder's own buffer stays untouched. */
+        if (out != _stereo) {
+            for (size_t i = 0; i < frames * 2u; i++) { _stereo[i] = out[i]; }
+            out = _stereo;
+        }
+        for (size_t i = 0; i < frames * 2u; i++) {
+            _stereo[i] = (int16_t)(((int32_t)_stereo[i] * _volQ8) >> 8);
+        }
     }
 
     size_t done = 0;

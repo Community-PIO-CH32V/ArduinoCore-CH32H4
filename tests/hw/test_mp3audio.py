@@ -142,3 +142,23 @@ def test_the_player_widens_mono_to_stereo(mp3_board):
     r = kv(mp3_board.command("play", timeout=40))
     assert r["sink_frames"] > 0, r.raw
     assert r["mono_widened"] == 1, "left and right differed on a mono source"
+
+
+def test_volume_scales_the_samples(mp3_board):
+    """setVolume() lives on the player because the writes happen inside it.
+
+    Asserted as a ratio between two runs of the same audio rather than against
+    an absolute level, so it does not depend on how loud the fixture happens
+    to be.
+    """
+    full = kv(mp3_board.command("playvol 1.0", timeout=40))
+    half = kv(mp3_board.command("playvol 0.5", timeout=40))
+    assert full["peak"] > 1000, "the fixture is too quiet to measure: %s" % full.raw
+    ratio = half["peak"] / full["peak"]
+    print(f"\n  peak at 1.0 = {full['peak']}, at 0.5 = {half['peak']} "
+          f"(ratio {ratio:.3f})")
+    assert 0.45 < ratio < 0.55, (
+        "half volume gave %s against %s at full, a ratio of %.3f"
+        % (half["peak"], full["peak"], ratio))
+    assert kv(mp3_board.command("playvol 0.0", timeout=40))["peak"] == 0, (
+        "zero volume still produced signal")

@@ -54,15 +54,19 @@ static const i2s_pins_t s_pins[2] = {
 #define DIV_MIN 2
 #define DIV_MAX 255
 
-/* The DMA buffers live in the shared region, not in .bss.
+/* The DMA buffers live in ordinary .bss, which is DTCM.
  *
- * DMA1 reaches DTCM as well -- unlike the USB and Ethernet masters -- so this
- * is not strictly required. It is here so that the audio path does not depend
- * on that remaining true, and so the buffers sit alongside the other DMA
- * buffers rather than in the middle of the fast heap. Aligned explicitly: the
- * engine moves half-words, and an odd address faults. */
+ * They used to be in .sdram, "so the buffers sit alongside the other DMA
+ * buffers rather than in the middle of the fast heap". That was tidiness, and
+ * it cost more than it bought: .sdram is the 8 KB SD_RAM region, and the
+ * SDMMC bounce buffers are 2 x 8 x 512 = 8192 bytes, which is all of it. Any
+ * sketch using I2S and SD together failed to LINK, overflowing the region by
+ * exactly this array's 1024 bytes. SDMMC has no choice -- its controller
+ * cannot reach DTCM -- and DMA1 can, so I2S is the one that moves.
+ *
+ * Aligned explicitly: the engine moves half-words and an odd address faults. */
 static uint16_t s_dma_buf[2][DMA_BUF_BYTES / 2]
-    __attribute__((aligned(4), section(".sdram")));
+    __attribute__((aligned(4)));
 
 static I2S *s_instances[2] = { nullptr, nullptr };
 
