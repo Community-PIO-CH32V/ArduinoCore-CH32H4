@@ -64,17 +64,19 @@ def test_decoding_keeps_ahead_of_real_time(mp3_board):
     decoder edit that halves throughput does not fail anything else -- the
     radio just starts stuttering, on someone else's bench, later.
 
-    The bound tracks the flash tuning in main_v5f.c. With enhance mode on the
-    margin is about 5x on this fixture (mono, 64 kbps); a real station is
-    stereo at 128 kbps and roughly twice the work, so 5x is comfortable and a
-    floor of 4x catches enhance mode silently failing again, which would drop
-    it to 3.7x.
+    The floor is deliberately far below what is measured, and the precise
+    guard lives elsewhere. Decode time varies about 14% run to run (394 ms to
+    451 ms observed for the same input), while enhance mode being off costs
+    only the difference between 3.7x and roughly 4.7x. A bound tight enough to
+    catch that would flake on the variance, so the cause is asserted directly
+    against the EHMOD bit in test_flash_enhance_mode_is_actually_on and this
+    test only catches a collapse.
     """
     r = kv(mp3_board.command("decode", timeout=30))
     margin = 2000000.0 / r["decode_us"]
     print(f"\n  decode: {r['decode_us']} us for 2 s of audio "
           f"({margin:.1f}x real time, {r['decode_us'] / r['frames']:.0f} us/frame)")
-    assert margin > 4.0, (
+    assert margin > 2.5, (
         "decoding 2 s of mono 64 kbps took %d us (%.1fx real time). Stereo at "
         "128 kbps is roughly twice this work, so anything near 2x will not "
         "sustain a real stream." % (r["decode_us"], margin))
@@ -98,3 +100,45 @@ def test_flash_enhance_mode_is_actually_on(mp3_board):
     assert r["sck_cfg"] == 1, (
         "the flash access clock is not HCLK/2: ACTLR=%s. HCLK/1 measures 1.7x "
         "faster and BRICKS the board -- see docs/hazards.md." % r["actlr"])
+
+
+def test_icystream_strips_metadata_and_reads_the_title(mp3_board):
+    """Shoutcast interleaves a metadata block every icy-metaint bytes. Leaving
+    those bytes in corrupts one frame every few seconds -- an audible periodic
+    glitch that looks exactly like a decoder bug."""
+    r = kv(mp3_board.command("icytest", timeout=20))
+    assert r["payload_ok"] == 1, "the stripped bytes did not match the payload"
+    assert r["title"] == "Artist - Track", r.raw
+    assert r["title_changes"] == 1, r.raw
+
+
+def test_icystream_with_no_metaint_is_a_passthrough(mp3_board):
+    """A stream without icy-metaint must not be altered at all."""
+    r = kv(mp3_board.command("icypass", timeout=20))
+    assert r["payload_ok"] == 1, r.raw
+    assert r["title_changes"] == 0, r.raw
+
+
+def test_the_player_delivers_every_frame_to_the_sink(mp3_board):
+    """Player from a memory Stream into the counting sink.
+
+    Same MP3 and same checksum as the decoder test, so a player that loses or
+    reorders a frame shows up here rather than as a glitch someone hears
+    later. This equality is the one every later network test reuses.
+    """
+    r = kv(mp3_board.command("play", timeout=40))
+    assert r["decode_errors"] == 0, r.raw
+    assert r["underruns"] == 0, "the counting sink cannot underrun"
+    assert r["rate"] == 44100, r.raw
+    direct = kv(mp3_board.command("decode", timeout=30))["pcm_fnv"]
+    assert r["pcm_fnv"] == direct, (
+        "the player's PCM differs from the decoder's on the same input")
+
+
+def test_the_player_widens_mono_to_stereo(mp3_board):
+    """AudioSink takes interleaved stereo. The test MP3 is mono, so every
+    frame must arrive as two identical channels rather than at half length or
+    half speed."""
+    r = kv(mp3_board.command("play", timeout=40))
+    assert r["sink_frames"] > 0, r.raw
+    assert r["mono_widened"] == 1, "left and right differed on a mono source"
