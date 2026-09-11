@@ -15,24 +15,18 @@ bool RadioStream::begin(const char *url, Print *log) {
     _metaint = 0;
     _status = 0;
 
+    /* TLS configured ONCE, for the whole chain, whatever mixture of schemes
+       the hops turn out to be. HTTPClientSecure records these rather than
+       building a client from them, and begin() builds the kind each URL needs,
+       so a chain that goes http -> https -> http needs nothing special here.
+       It did once: see the note in HTTPClientSecure.h. */
+    if (_insecure) {
+        _http.setInsecure();
+    } else if (_ca) {
+        _http.setCACert(_ca);
+    }
+
     for (_hops = 0; _hops < PlaylistURL::MAX_HOPS; _hops++) {
-        /* TLS is configured per hop, and ONLY for https hops.
-         *
-         * Touching setInsecure() or setCACert() instantiates the secure
-         * client, and HTTPClient::begin(url) only creates one `if
-         * (!_client())` -- so a TLS client configured up front gets reused for
-         * an http:// URL and attempts a handshake against a plain HTTP server.
-         * That fails as a connection error, which reads like the station being
-         * down. A chain that starts at http:// and ends at https:// hits this
-         * on its first hop. See docs/hazards.md. */
-        const bool https = strncmp(_url, "https://", 8) == 0;
-        if (https) {
-            if (_insecure) {
-                _http.setInsecure();
-            } else if (_ca) {
-                _http.setCACert(_ca);
-            }
-        }
         /* A redirect is the station's other way of moving you. HTTPClient
            follows those, and they are not counted as playlist hops. */
         _http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);

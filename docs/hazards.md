@@ -1995,57 +1995,65 @@ puts every dependency's include directory on the command line. A library that
 builds under PlatformIO can still be unbuildable in the IDE, which is the
 whole reason `tools/buildexamples.py --ide` exists.
 
-## `setInsecure()` or `setCACert()` poisons a later `http://` URL
 
-`HTTPClientSecure` builds its TLS client the first time it is configured, not
-when it connects:
+## One HTTPClient, two schemes: fixed, and why it needed fixing in the library
 
-```cpp
-EthernetClientSecure *_tls() {
-    if (!_clientMade) { _clientMade = new EthernetClientSecure(); ... }
-    _clientTLS = true;
-    return (EthernetClientSecure *)_clientMade;
-}
-```
+**This one is no longer a trap. It is recorded because the fix is not obvious
+and removing it would put the trap back.**
 
-`setInsecure()` and `setCACert()` both go through that. And `begin(url)` only
-makes a client when there is none:
+`HTTPClientSecure`'s setters used to build the TLS client the moment they were
+called, and `begin(url)` only made a client when it had none:
 
 ```cpp
 _port = (protocol == "https" ? 443 : 80);
 if (!_client()) { ... }
 ```
 
-So a sketch that configures TLS up front and then fetches an `http://` URL
-gets the TLS client it already made, pointed at port 80. It opens a plain
-socket and starts a handshake with a server that is speaking HTTP, and the
-attempt fails as a connection error.
+So whichever scheme came first decided what every later URL got. A sketch that
+configured TLS and then fetched `http://` was handed the secure client with the
+port set to 80: it opened a plain socket and began a handshake with a server
+speaking HTTP. The reverse order left a plain client aimed at port 443. Either
+way the failure was a bare connection error with nothing about certificates,
+and it worked whenever the schemes happened to agree — so the configuration
+looked right and the station looked down.
 
-**What it looks like.** Nothing about certificates. `GET` returns a negative
-connection code, or the station simply appears to be down, and the sketch works
-perfectly against an `https://` URL — which is the worst possible clue, since
-it says the TLS configuration is fine.
+**Why the library and not the caller.** A caller can avoid it by configuring
+TLS per hop, and `RadioStream` did exactly that for a while. But every caller
+that fetches more than one URL has to know, the workaround is invisible once
+written, and nothing warns the next one. A playlist chain is the ordinary case,
+not an exotic one: a published `http://` link resolving to an `https://`
+stream, or the reverse.
 
-**The shape that hits it.** Configure once, fetch several URLs. A playlist
-chain is exactly that: `RadioStream` starts at a published `http://` link that
-resolves to an `https://` stream, or the other way round. The order of the hops
-decides whether it works.
+**The fix has two halves, and one is useless without the other.**
 
-**The fix.** Configure TLS per hop, and only for the hops that need it:
+The setters now only record. No client exists until a URL needs one, so
+configuring TLS cannot decide the kind of client a later `http://` URL gets.
 
-```cpp
-const bool https = strncmp(_url, "https://", 8) == 0;
-if (https) {
-    if (_insecure) { _http.setInsecure(); }
-    else if (_ca)  { _http.setCACert(_ca); }
-}
+`begin(url)` replaces a client whose kind disagrees with the scheme — but only
+one the library made. A client the sketch passed to `begin(client, url)` is
+never touched: its kind is the sketch's decision, it may be a type this class
+has never heard of, and it is not ours to delete.
+
+Discarding a configured client is only safe because the settings live on
+`HTTPClientSecure` rather than on the client, so the replacement is configured
+exactly as its predecessor was. Move the settings back onto the client and the
+swap silently drops the CA certificate instead.
+
+`_tls()` also had to stop trusting `_clientMade` alone. A plain `EthernetClient`
+left over from an `http://` URL is not an `EthernetClientSecure`, and the old
+cast would have called mbedTLS methods on an object with no session — a crash
+rather than a wrong answer, and reachable as soon as clients started being
+reused across schemes.
+
+**The regression test.** `test_one_client_serves_both_schemes_in_either_order`
+in `tests/hw/test_mp3radio.py` drives four scheme changes through a single
+client. It was confirmed to fail with the fix reverted, on the second URL:
+
+```
+AssertionError: then http: GET http://192.168.0.114:53654/tone.mp3 -> -1
+  radio_ok=0
 ```
 
-`_http.end()` between hops destroys the made client and clears `_clientTLS`,
-so the next `begin()` builds the right kind for the scheme it is given. See
-`libraries/MP3Audio/src/RadioStream.cpp`.
-
-This is upstream behaviour, shared with the ESP and arduino-pico cores, not
-something this core introduced. Worth knowing rather than worth patching: a
-`begin()` that silently replaced the client would break a sketch that
-deliberately supplied its own.
+Both directions are exercised deliberately. Only the http-then-https one was
+reachable through the tests that already existed, and a fix for one direction
+looks complete while leaving the other broken.

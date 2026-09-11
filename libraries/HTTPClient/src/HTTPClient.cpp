@@ -189,9 +189,46 @@ bool HTTPClient::begin(String url) {
         return false;
     }
 
-    _port = (protocol == "https" ? 443 : 80);
+    const bool wants_tls = (protocol == "https");
+    _port = wants_tls ? 443 : 80;
+    _secure = wants_tls;
+
+    /* A CLIENT OF THE WRONG KIND FOR THIS URL HAS TO GO.
+     *
+     * Only one we made ourselves, and only when the scheme disagrees with it.
+     * Without this, a sketch that reaches one https:// URL and then an http://
+     * one keeps the TLS client from the first, and the second opens a plain
+     * socket to port 80 and starts a handshake with a server speaking HTTP.
+     * It fails as a connection error, says nothing about certificates, and
+     * works perfectly against https:// -- which is the most misleading clue
+     * available. The reverse order fails the same way, with a plain client
+     * left pointed at port 443.
+     *
+     * A client the SKETCH supplied through begin(client, url) is never
+     * touched. Its kind is the sketch's decision, it may be a type this class
+     * has never heard of, and it is not ours to delete.
+     *
+     * HTTPClientSecure remembers its setCACert()/setInsecure() settings and
+     * applies them to whatever TLS client gets built, so a replacement is
+     * configured exactly as the first one was. That is what makes discarding
+     * one safe. */
+    if (_clientMade && !_clientGiven && _clientTLS != wants_tls) {
+        DEBUG_HTTPCLIENT("[HTTP-Client][begin] %s URL with a %s client; "
+                         "replacing it\n",
+                         protocol.c_str(), _clientTLS ? "TLS" : "plain");
+        /* Torn down explicitly rather than through disconnect(), which honours
+           the keep-alive flags and would leave a socket open on a client that
+           is about to be deleted. */
+        if (_client()) {
+            _client()->stop();
+        }
+        _destroyMade();
+        _clientTLS = false;
+        _canReuse = false;
+    }
+
     if (!_client()) {
-        if (protocol == "https") {
+        if (wants_tls) {
             /* Refusing when there is no secure client is the point: the
                alternative is connecting in the clear to port 443, which does
                not work and, if it somehow did, would be worse. */

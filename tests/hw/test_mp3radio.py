@@ -351,3 +351,34 @@ def test_shoutcast_metadata_is_asked_for_and_stripped(radio):
     assert r["title_changes"] >= 1, "the title block was never parsed"
     assert r["decode_errors"] == 0, r.raw
     assert r["pcm_fnv"] == local, "metadata leaked into the audio"
+
+
+def test_one_client_serves_both_schemes_in_either_order(tls_radio):
+    """The trap that used to be in HTTPClient, now a regression test.
+
+    Configuring TLS once built the secure client there and then, and
+    begin(url) only made a client when it had none -- so whichever scheme came
+    first decided what every later URL got. An http:// URL on a TLS client
+    opened a plain socket to port 80 and started a handshake with a server
+    speaking HTTP; the reverse left a plain client pointed at port 443. Either
+    way it failed as a connection error, said nothing about certificates, and
+    worked when the schemes happened to agree.
+
+    Both orders are exercised because the fix has two directions and only one
+    of them was reachable through the tests that already existed. The sketch
+    holds a single RadioStream, so these four commands share one
+    HTTPClientSecure across four scheme changes.
+    """
+    board, tls_base = tls_radio
+    plain_base = _Handler.base
+    _Handler.slow = False
+    local = kv(board.command("decode", timeout=30))["pcm_fnv"]
+
+    for label, url in (("https first", tls_base + "/tone.mp3"),
+                       ("then http", plain_base + "/tone.mp3"),
+                       ("https again", tls_base + "/tone.mp3"),
+                       ("http again", plain_base + "/tone.mp3")):
+        r = kv(board.command("radio " + url, timeout=120))
+        assert r["radio_ok"] == 1, "%s: %s" % (label, r.raw)
+        assert r["decode_errors"] == 0, "%s: %s" % (label, r.raw)
+        assert r["pcm_fnv"] == local, "%s: the audio differed" % label
