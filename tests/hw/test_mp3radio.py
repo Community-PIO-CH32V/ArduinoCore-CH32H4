@@ -30,8 +30,79 @@ MP3 = DATA.read_bytes()
 
 class _Handler(http.server.BaseHTTPRequestHandler):
     slow = False
+    base = ""          # set by the fixture; playlists must name absolute URLs
+    tls_base = ""      # set by the TLS fixture, for the cross-scheme redirect
 
     def do_GET(self):
+        # Redirects. The same-scheme one is followed inside HTTPClient and must
+        # cost no hop; the cross-scheme one it refuses, so RadioStream has to
+        # take it as a hop or a station that moved to TLS stops playing.
+        if self.path == "/moved-here":
+            self.send_response(302)
+            self.send_header("Location", "%s/tone.mp3" % self.base)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if self.path == "/moved-to-tls":
+            self.send_response(302)
+            self.send_header("Location", "%s/tone.mp3" % self.tls_base)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        # Shoutcast metadata, interleaved the way a real station does it: a
+        # length byte plus that many 16-byte units of text after every metaint
+        # bytes of audio. Sent ONLY to a request carrying Icy-MetaData: 1, so
+        # this doubles as proof the client asks -- a server that is not asked
+        # sends no metaint, and the title stays empty forever.
+        if self.path == "/icy.mp3":
+            title = b"StreamTitle='Test Title';"
+            pad = (-len(title)) % 16
+            block = bytes([(len(title) + pad) // 16]) + title + b"\0" * pad
+            if self.headers.get("Icy-MetaData", "") != "1":
+                body, metaint = MP3, 0
+            else:
+                metaint = 4096
+                out = bytearray()
+                for i in range(0, len(MP3), metaint):
+                    chunk = MP3[i:i + metaint]
+                    out += chunk
+                    # Only after a FULL metaint of audio; a short tail at the
+                    # end of the file is followed by nothing.
+                    if len(chunk) == metaint:
+                        out += block
+                body = bytes(out)
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            if metaint:
+                self.send_header("icy-metaint", str(metaint))
+                self.send_header("icy-name", "test")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        # Playlists, so the resolve path is exercised over a real socket and
+        # not only against synthetic bodies in the parser tests.
+        if self.path.endswith(".m3u"):
+            body = ("#EXTM3U\n#EXTINF:-1,Test\n%s/tone.mp3\n" % self.base).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/x-mpegurl")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.endswith(".pls"):
+            # Points at the .m3u, so this is a two-hop chain.
+            body = ("[playlist]\nnumberofentries=1\nFile1=%s/list.m3u\n"
+                    % self.base).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/x-scpls")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "audio/mpeg")
         self.send_header("Content-Length", str(len(MP3)))
@@ -62,6 +133,7 @@ def radio(mp3_board):
     srv = http.server.ThreadingHTTPServer((host_ip, 0), _Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = "http://%s:%d" % (host_ip, srv.server_address[1])
+    _Handler.base = base
     yield mp3_board, base
     srv.shutdown()
     srv.server_close()
@@ -170,7 +242,9 @@ def tls_radio(radio, tmp_path_factory):
         board.command("caline " + line, timeout=10)
     board.command("caend", timeout=10)
 
-    yield board, "https://%s:%d" % (host_ip, srv.server_address[1])
+    tls_base = "https://%s:%d" % (host_ip, srv.server_address[1])
+    _Handler.tls_base = tls_base
+    yield board, tls_base
     srv.shutdown()
     srv.server_close()
 
@@ -189,3 +263,91 @@ def test_https_decodes_to_the_same_bytes(tls_radio):
     assert r["http_rc"] == 200, r.raw
     assert r["decode_errors"] == 0, r.raw
     assert r["pcm_fnv"] == local, "the TLS path altered the audio"
+
+
+@pytest.mark.parametrize("link,hops", [("tone.mp3", 0), ("list.m3u", 1),
+                                       ("list.pls", 2)])
+def test_a_playlist_link_resolves_to_the_same_audio(radio, link, hops):
+    """A station link, resolved over a real socket, must reach the same audio.
+
+    Three shapes: the stream itself, a one-hop .m3u, and a .pls that points at
+    the .m3u -- a two-hop chain, which is what real stations do. All three must
+    produce the checksum the board gets decoding the file from flash, because
+    resolution must not alter what is played.
+
+    The parser is tested separately against synthetic bodies. This is the loop
+    around it: content-type sniffing, reading the body, and re-connecting to
+    the next hop.
+    """
+    board, base = radio
+    _Handler.slow = False
+    local = kv(board.command("decode", timeout=30))["pcm_fnv"]
+    r = kv(board.command("radio %s/%s" % (base, link), timeout=90))
+    assert r["radio_ok"] == 1, r.raw
+    assert r["hops"] == hops, r.raw
+    assert r["final_url"] == "%s/tone.mp3" % base, r.raw
+    assert r["decode_errors"] == 0, r.raw
+    assert r["pcm_fnv"] == local, "resolution changed the audio"
+
+
+def test_a_same_scheme_redirect_costs_no_hop(radio):
+    """HTTPClient follows this one itself, and must keep doing so.
+
+    Asserting hops == 0 is the point: if RadioStream ever started handling
+    redirects it does not need to, every station with a load balancer would
+    burn its hop budget on them and long playlist chains would stop resolving.
+    """
+    board, base = radio
+    _Handler.slow = False
+    local = kv(board.command("decode", timeout=30))["pcm_fnv"]
+    r = kv(board.command("radio %s/moved-here" % base, timeout=90))
+    assert r["radio_ok"] == 1, r.raw
+    assert r["hops"] == 0, r.raw
+    assert r["pcm_fnv"] == local, "a redirect changed the audio"
+
+
+def test_an_http_link_that_moved_to_https_still_plays(tls_radio):
+    """The published link is http, the audio is behind TLS.
+
+    HTTPClient refuses this redirect, because the client object it already
+    holds cannot speak TLS and connecting it to port 443 would send the request
+    in the clear. So the 3xx surfaces to RadioStream, which must rebuild the
+    client for the new scheme and carry on. Stations that moved to TLS while
+    leaving their old .m3u published are the reason this matters.
+
+    Only tls_radio is requested even though the redirect starts on the plain
+    server: tls_radio depends on radio, so both are up, and asking for both
+    here trips a double-finalizer assertion inside pytest.
+    """
+    board, _ = tls_radio
+    base = _Handler.base
+    _Handler.slow = False
+    local = kv(board.command("decode", timeout=30))["pcm_fnv"]
+    r = kv(board.command("radio %s/moved-to-tls" % base, timeout=120))
+    assert r["radio_ok"] == 1, r.raw
+    assert r["hops"] == 1, r.raw
+    assert r["final_url"].startswith("https://"), r.raw
+    assert r["decode_errors"] == 0, r.raw
+    assert r["pcm_fnv"] == local, "crossing to TLS mid-chain changed the audio"
+
+
+def test_shoutcast_metadata_is_asked_for_and_stripped(radio):
+    """Titles arrive, and not one byte of them reaches the decoder.
+
+    Two failures hide behind each other here. Never sending Icy-MetaData: 1
+    gets clean audio and no titles, which looks like broken title parsing. And
+    asking without stripping puts a text block into the audio every few
+    seconds, which sounds like a broken decoder. So both halves are asserted
+    against the one checksum: the server interleaves metadata only for a client
+    that asks, and the PCM must still match the same file decoded from flash.
+    """
+    board, base = radio
+    _Handler.slow = False
+    local = kv(board.command("decode", timeout=30))["pcm_fnv"]
+    r = kv(board.command("radio %s/icy.mp3" % base, timeout=90))
+    assert r["radio_ok"] == 1, r.raw
+    assert r["metaint"] == 4096, (
+        "no metaint -- the request went out without Icy-MetaData: 1")
+    assert r["title_changes"] >= 1, "the title block was never parsed"
+    assert r["decode_errors"] == 0, r.raw
+    assert r["pcm_fnv"] == local, "metadata leaked into the audio"

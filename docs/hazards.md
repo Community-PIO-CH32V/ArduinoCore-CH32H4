@@ -1946,3 +1946,43 @@ The failure being a link error rather than a runtime fault is worth noting as
 the one good thing about it: a region overflow is loud, immediate, and names
 the section. The same mistake with a runtime allocator would have been a hard
 fault in whatever happened to sit next to the buffer.
+
+## arduino-cli finds a library only from the top of its `src/`, so lwIP needs a sentinel header
+
+`libraries/lwip/src/lwip_arduino.h` is not an API. It exists so that some
+`#include` can name the lwIP library in a way arduino-cli's resolver can see.
+
+The resolver works by compiling, catching the first unresolvable `#include`,
+and looking for a library whose `src/` holds a header of exactly that name at
+the top level. Nothing deeper counts. Every real lwIP header is
+`lwip/something.h`, two levels down, so no ordinary include can ever name the
+library. Hence the shim, and hence `ch32h4_eth.h` including it.
+
+The trap is that a sketch which includes `<LwipEthernet.h>` masks the problem
+for everything after it. `LwipEthernet.h` reaches `ch32h4_eth.h`, lwIP gets
+added, and from then on `lwip/err.h` resolves for every other file in the
+build. So `HTTPClient`'s own examples compiled for a long time while
+`LwipClientContext.h` was quietly unable to name the library it includes from.
+The failure only appeared when a sketch reached `EthernetClient.h` through a
+third library instead of directly:
+
+```
+libraries/MP3Audio/src/RadioStream.cpp:1:
+libraries/MP3Audio/src/RadioStream.h:30:  HTTPClientSecure.h
+  -> EthernetClientSecure.h -> EthernetClient.h -> LwipClientContext.h
+libraries/lwIP_Ethernet/src/LwipClientContext.h:18:10:
+    fatal error: lwip/err.h: No such file or directory
+```
+
+The fix is for every header that includes `lwip/...` to include
+`lwip_arduino.h` first, so it stands on its own regardless of what the sketch
+did. `depends=` in `library.properties` does NOT do this: for a library
+bundled with a platform, arduino-cli does not use that field to build include
+paths at all. It is honest metadata and PlatformIO reads it, but adding it
+changes nothing about an IDE build. `mbedtls_arduino.h`, included by
+`EthernetTlsSession.h`, is the same device for the same reason.
+
+PlatformIO never showed the problem because it scans includes transitively and
+puts every dependency's include directory on the command line. A library that
+builds under PlatformIO can still be unbuildable in the IDE, which is the
+whole reason `tools/buildexamples.py --ide` exists.

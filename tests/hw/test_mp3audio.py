@@ -185,3 +185,55 @@ def test_the_percent_volume_knob_agrees_with_the_float_one(mp3_board):
     assert kv(mp3_board.command("playpct 0", timeout=40))["peak"] == 0
     # Clamped rather than wrapped: 200 would be 512 in Q8 and would clip.
     assert kv(mp3_board.command("playpct 200", timeout=40))["pct"] == 100
+
+
+@pytest.mark.parametrize("kind,expect", [
+    ("m3u", "http://mp3.antenne.de/antenne"),
+    ("pls", "http://streamer.radio.co/s6117a960f/listen"),
+    ("asx", "http://radio.kahoku.net:8000"),
+    ("ref", "http://stream.laut.fm/kawaii-music"),
+])
+def test_playlist_formats_resolve(mp3_board, kind, expect):
+    """The four formats stations actually chain together.
+
+    A station rarely hands you the stream; it hands you a playlist, and often
+    a chain of them. Feeding one to the decoder produces noise that looks
+    exactly like a broken decoder, so this is not a nicety.
+
+    The .asx case is deliberately one long line, which is how they arrive.
+    The [Reference] case has its first entry pointing back at itself, which is
+    what the exclude argument exists for -- without it, resolution loops.
+    """
+    r = kv(mp3_board.command(f"pl {kind}", timeout=20))
+    assert r["found"] == 1, r.raw
+    assert r["url"] == expect, r.raw
+
+
+def test_audio_is_not_mistaken_for_a_playlist(mp3_board):
+    """MP3 frames must not parse as a URL. Otherwise a station that serves
+    audio directly would be chased through a phantom playlist hop."""
+    r = kv(mp3_board.command("pl audio", timeout=20))
+    assert r["found"] == 0, r.raw
+
+
+@pytest.mark.parametrize("ctype,audio", [
+    ("audio/mpeg", 1),
+    ("audio/mpeg; charset=utf-8", 1),
+    ("AUDIO/MPEG", 1),
+    ("audio/x-mpegurl", 0),
+    ("audio/x-scpls", 0),
+    ("video/x-ms-asf", 0),
+    ("application/octet-stream", 0),
+    ("application/octet-stream|icy", 1),
+])
+def test_audio_is_decided_by_content_type(mp3_board, ctype, audio):
+    """Not by the URL's extension.
+
+    The last hop of a chain is routinely a plain path with no extension --
+    /listen, /proxy/radiohayama, a bare host and port -- so judging by the URL
+    gets it wrong in both directions. The octet-stream pair is the case that
+    matters most: identical types, and the icy header is the only thing that
+    says one of them is a Shoutcast stream.
+    """
+    r = kv(mp3_board.command(f"ctype {ctype}", timeout=20))
+    assert r["audio"] == audio, r.raw

@@ -21,6 +21,8 @@ static size_t ca_len = 0;
 #include <AudioSink.h>
 #include <MP3Decoder.h>
 #include <IcyStream.h>
+#include <PlaylistURL.h>
+#include <RadioStream.h>
 #include <MP3Player.h>
 #include "tone_mp3.h"
 
@@ -173,6 +175,80 @@ static void handle(const char *cmd) {
     Serial1.print("peak="); Serial1.println(sink.peak());
     player.end();
     player.setVolume(1.0f);
+
+  } else if (!strncmp(cmd, "radio ", 6)) {
+    /* radio <url> -- the whole resolve-and-play path, playlists included.
+       This is the same RadioStream the WebRadio example uses, which is why it
+       lives in the library rather than in the example. */
+    static RadioStream radio;
+    radio.setInsecure();
+    sink.reset();
+    player.end();
+    radio.end();
+    if (!radio.begin(cmd + 6, &Serial1)) {
+      Serial1.println("radio_ok=0");
+      Serial1.print("status="); Serial1.println(radio.status());
+      Serial1.print("> "); return;
+    }
+    Serial1.println("radio_ok=1");
+    Serial1.print("hops="); Serial1.println(radio.hops());
+    Serial1.print("final_url="); Serial1.println(radio.url());
+    player.begin(radio.stream(), sink);
+    const uint32_t rstart = millis();
+    while (player.loop() && millis() - rstart < 60000u) { }
+    Serial1.print("pcm_fnv="); Serial1.println(sink.fnv());
+    Serial1.print("sink_frames="); Serial1.println(sink.frames());
+    Serial1.print("decode_errors="); Serial1.println(player.decodeErrors());
+    /* Before radio.end(): the IcyStream these come from lives inside it. */
+    Serial1.print("metaint="); Serial1.println(radio.metaint());
+    Serial1.print("title_changes="); Serial1.println(radio.titleChanges());
+    Serial1.print("title="); Serial1.println(radio.title());
+    player.end();
+    radio.end();
+
+  } else if (!strncmp(cmd, "pl ", 3)) {
+    /* pl <name> -- resolve one synthetic playlist body. No network. */
+    const char *name = cmd + 3;
+    const char *body = nullptr;
+    const char *exclude = nullptr;
+    if (!strcmp(name, "m3u")) {
+      body = "#EXTM3U\n#EXTINF:-1,Antenne\nhttp://mp3.antenne.de/antenne\n";
+    } else if (!strcmp(name, "pls")) {
+      body = "[playlist]\nnumberofentries=1\n"
+             "File1=http://streamer.radio.co/s6117a960f/listen\n"
+             "Title1=Some Station\nLength1=-1\n";
+    } else if (!strcmp(name, "asx")) {
+      /* One long line, which is how stations actually send these. */
+      body = "<asx version=\"3.0\"><entry>"
+             "<ref href=\"http://radio.kahoku.net:8000\"/></entry></asx>";
+    } else if (!strcmp(name, "ref")) {
+      /* A [Reference] file's first entry points back at itself, so the
+         exclude argument is what makes the second one win. */
+      body = "[Reference]\nRef1=http://self.example/list.asx\n"
+             "Ref2=http://stream.laut.fm/kawaii-music\n";
+      exclude = "http://self.example/list.asx";
+    } else if (!strcmp(name, "audio")) {
+      /* Not a playlist: MP3 frames. Must be rejected, not mis-parsed. */
+      body = "\xff\xfb\x50\xc4 rubbish that is not a url at all";
+    } else {
+      Serial1.println("found=0"); Serial1.print("> "); return;
+    }
+    char url[256];
+    const bool ok = PlaylistURL::first(body, strlen(body), exclude,
+                                       url, sizeof(url));
+    Serial1.print("found="); Serial1.println(ok ? 1 : 0);
+    Serial1.print("url="); Serial1.println(ok ? url : "");
+
+  } else if (!strncmp(cmd, "ctype ", 6)) {
+    /* ctype <content-type>[|icy] -- is this audio or a pointer to it? */
+    char buf[96];
+    strncpy(buf, cmd + 6, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = 0;
+    char *bar = strchr(buf, '|');
+    bool icy = false;
+    if (bar) { *bar = 0; icy = true; }
+    Serial1.print("audio=");
+    Serial1.println(PlaylistURL::isAudio(buf, icy) ? 1 : 0);
 
   } else if (!strcmp(cmd, "icytest")) {
     /* 32 bytes of payload, a metadata block, then 32 more. */

@@ -14,6 +14,16 @@
 
 #include <Arduino.h>
 
+/* Names the lwIP library so it lands in the build. arduino-cli resolves an
+ * #include against the headers at the TOP of a library's src/ and nothing
+ * deeper, so "lwip/err.h" below can never name lwIP by itself. Without this
+ * line the header only compiles for a sketch that happened to include
+ * <LwipEthernet.h> first; anything reaching EthernetClient.h through another
+ * library -- HTTPClient, EthernetClientSecure, MP3Audio's RadioStream -- fails
+ * on "lwip/err.h: No such file or directory". See libraries/lwip/src/
+ * lwip_arduino.h. */
+#include "lwip_arduino.h"
+
 extern "C" {
 #include "lwip/err.h"
 #include "lwip/pbuf.h"

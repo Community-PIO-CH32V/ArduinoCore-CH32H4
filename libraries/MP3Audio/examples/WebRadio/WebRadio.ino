@@ -35,19 +35,22 @@
    second silently does nothing -- ch32h4_rtc_set() refuses when no source is
    running, and NTP goes through settimeofday(), which is the same path.
 
-   FINDING A STREAM URL. Most stations publish a .pls or .m3u playlist; open it
-   in a text editor and take the http:// or https:// line inside. A URL that
-   plays in a browser is not always a stream -- a page that embeds a player is
-   HTML, and this sketch will decode HTML as MP3 and produce noise.
+   POINT IT AT WHATEVER THE STATION PUBLISHES. Playlists are resolved here, so
+   a .m3u, .pls, .asx or Windows Media [Reference] link works as well as a
+   direct stream, and chains of them work too -- one station reaches its audio
+   through http, then https, then an .asx. http:// and https:// are both fine.
+
+   What will NOT work is a web page that embeds a player: that is HTML, and
+   HTML decoded as MP3 is noise. If a link plays in a browser it is not
+   necessarily a stream.
 
    This example code is in the public domain.
 */
 
 #include <LwipEthernet.h>
 #include <NTP.h>
-#include <HTTPClientSecure.h>
+#include <RadioStream.h>
 #include <I2S.h>
-#include <IcyStream.h>
 #include <MP3Player.h>
 
 extern "C" {
@@ -56,7 +59,8 @@ extern "C" {
 
 /* ---- what to play, and how loudly ---------------------------------------- */
 
-static const char *STREAM_URL = "https://example.org/stream.mp3";
+/* A direct stream, or any playlist that points at one. */
+static const char *STREAM_URL = "http://play.antenne.de/antenne.m3u";
 
 /* Percent of full scale. See the note at the top; two digits on the console
    change it while playing. */
@@ -73,7 +77,8 @@ static const char *NTP_SERVER = "pool.ntp.org";
    ISRG Root X1 is Let's Encrypt's and covers a large share of stations.
    To find out which root a particular one uses, and get its PEM:
 
-     openssl s_client -showcerts -connect stream.example.org:443 </dev/null        | openssl x509 -noout -issuer
+     openssl s_client -showcerts -connect stream.example.org:443 < /dev/null |
+       openssl x509 -noout -issuer
 
    That names the issuer of the server's certificate. Servers usually send
    their intermediates but NOT the root, so fetch the root itself from the CA's
@@ -101,13 +106,10 @@ static const bool INSECURE = false;
 static I2S i2s(OUTPUT, 0);
 static MP3Player player;
 
-static HTTPClientSecure http;
+static RadioStream radio;
 
 static uint32_t lastReport = 0;
 static uint32_t lastTitleChanges = 0;
-/* Static and re-bound per connection rather than new'd, so nothing here
-   allocates and the reconnect path cannot leak. */
-static IcyStream icy;
 
 /* Start the RTC, then learn the time. False if we still do not know it, in
    which case TLS will reject every certificate and saying so here is far
@@ -140,47 +142,28 @@ static bool startClock() {
 }
 
 /* Open the stream and start the player. False if anything failed, in which
-   case loop() waits and tries again. */
+   case loop() waits and tries again.
+
+   RadioStream does the URL work: redirects, playlists and chains of them, and
+   Shoutcast metadata stripping. It lives in the library rather than here
+   because that loop has real edge cases and logic in an example cannot be
+   tested. */
 static bool connectStream() {
-  /* HTTPClientSecure rather than HTTPClient, which is this core's idiom: the
-     HTTPS setters live on the subclass because including its header is what
-     pulls mbedTLS into the build, so a sketch speaking plain HTTP never pays
-     for it. It handles http:// URLs too, so one path covers both. */
   if (INSECURE) {
-    http.setInsecure();
+    radio.setInsecure();
   } else {
-    http.setCACert(root_ca);
-  }
-  if (!http.begin(STREAM_URL)) { return false; }
-
-  /* BEFORE GET(). HTTPClient keeps only the headers it is told to keep, and a
-     metaint that silently reads as zero turns Shoutcast's metadata blocks into
-     corrupt audio -- a glitch every few seconds that sounds like a broken
-     decoder. */
-  static const char *keys[] = { "icy-metaint" };
-  http.collectHeaders(keys, 1);
-
-  const int rc = http.GET();
-  if (rc != 200) {
-    Serial.print("GET failed: ");
-    Serial.println(rc);
-    http.end();
-    return false;
+    radio.setCACert(root_ca);
   }
 
-  const uint32_t metaint = (uint32_t)http.header("icy-metaint").toInt();
-  Serial.print("connected, icy-metaint=");
-  Serial.println(metaint);
-
-  icy.begin(http.getStream(), metaint);
-  lastTitleChanges = 0;
+  if (!radio.begin(STREAM_URL, &Serial)) { return false; }
 
   player.setVolumePercent(START_VOLUME_PCT);
-  if (!player.begin(icy, i2s)) {
+  if (!player.begin(radio.stream(), i2s)) {
     Serial.println("player.begin() failed");
-    http.end();
+    radio.end();
     return false;
   }
+  lastTitleChanges = 0;
   return true;
 }
 
@@ -251,16 +234,16 @@ void loop() {
        application wants a different one. */
     Serial.println("stream ended, reconnecting in 2 s");
     player.end();
-    http.end();
+    radio.end();
     delay(2000);
     connectStream();
     return;
   }
 
-  if (icy.titleChanges() != lastTitleChanges) {
-    lastTitleChanges = icy.titleChanges();
+  if (radio.titleChanges() != lastTitleChanges) {
+    lastTitleChanges = radio.titleChanges();
     Serial.print("now playing: ");
-    Serial.println(icy.title());
+    Serial.println(radio.title());
   }
 
   /* underruns() is the number that matters: it says the network or the CPU
