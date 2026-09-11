@@ -1994,3 +1994,58 @@ PlatformIO never showed the problem because it scans includes transitively and
 puts every dependency's include directory on the command line. A library that
 builds under PlatformIO can still be unbuildable in the IDE, which is the
 whole reason `tools/buildexamples.py --ide` exists.
+
+## `setInsecure()` or `setCACert()` poisons a later `http://` URL
+
+`HTTPClientSecure` builds its TLS client the first time it is configured, not
+when it connects:
+
+```cpp
+EthernetClientSecure *_tls() {
+    if (!_clientMade) { _clientMade = new EthernetClientSecure(); ... }
+    _clientTLS = true;
+    return (EthernetClientSecure *)_clientMade;
+}
+```
+
+`setInsecure()` and `setCACert()` both go through that. And `begin(url)` only
+makes a client when there is none:
+
+```cpp
+_port = (protocol == "https" ? 443 : 80);
+if (!_client()) { ... }
+```
+
+So a sketch that configures TLS up front and then fetches an `http://` URL
+gets the TLS client it already made, pointed at port 80. It opens a plain
+socket and starts a handshake with a server that is speaking HTTP, and the
+attempt fails as a connection error.
+
+**What it looks like.** Nothing about certificates. `GET` returns a negative
+connection code, or the station simply appears to be down, and the sketch works
+perfectly against an `https://` URL — which is the worst possible clue, since
+it says the TLS configuration is fine.
+
+**The shape that hits it.** Configure once, fetch several URLs. A playlist
+chain is exactly that: `RadioStream` starts at a published `http://` link that
+resolves to an `https://` stream, or the other way round. The order of the hops
+decides whether it works.
+
+**The fix.** Configure TLS per hop, and only for the hops that need it:
+
+```cpp
+const bool https = strncmp(_url, "https://", 8) == 0;
+if (https) {
+    if (_insecure) { _http.setInsecure(); }
+    else if (_ca)  { _http.setCACert(_ca); }
+}
+```
+
+`_http.end()` between hops destroys the made client and clears `_clientTLS`,
+so the next `begin()` builds the right kind for the scheme it is given. See
+`libraries/MP3Audio/src/RadioStream.cpp`.
+
+This is upstream behaviour, shared with the ESP and arduino-pico cores, not
+something this core introduced. Worth knowing rather than worth patching: a
+`begin()` that silently replaced the client would break a sketch that
+deliberately supplied its own.
