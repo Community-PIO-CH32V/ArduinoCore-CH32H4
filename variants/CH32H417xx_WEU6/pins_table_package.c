@@ -1,0 +1,123 @@
+/* The pin table for the CH32H417WEU6. GENERATED -- see tools/genvariants.py.
+ *
+ * This is SILICON, which is why it lives in the package base rather than in a
+ * board variant: port, bit and ADC channel are decided by the die and its
+ * bonding, and every board on this part shares them.
+ *
+ * adc_channel is 0xFF where the pin has no ADC input.
+ */
+#include "Arduino.h"
+#include "ch32h4_gpio.h"
+
+const ch32h4_pin_t g_pins[PINS_COUNT] = {
+    /* --- Port A --- */
+    { GPIOA,  0, 0xFF },
+    { GPIOA,  1, 0xFF },
+    { GPIOA,  2, 0xFF },
+    { GPIOA,  3, 0xFF },
+    { GPIOA,  4, 0xFF },
+    { GPIOA,  5,    5 },
+    { GPIOA,  6, 0xFF },
+    { GPIOA,  7, 0xFF },
+    { GPIOA,  8, 0xFF },
+    { GPIOA,  9, 0xFF },
+    { GPIOA, 10, 0xFF },
+    { GPIOA, 11, 0xFF },
+    { GPIOA, 12, 0xFF },
+    { GPIOA, 13, 0xFF },
+    { GPIOA, 14, 0xFF },
+    { GPIOA, 15, 0xFF },
+    /* --- Port B --- */
+    { GPIOB,  0,    8 },
+    { GPIOB,  1,    9 },
+    { GPIOB,  2, 0xFF },
+    { GPIOB,  3, 0xFF },
+    { GPIOB,  4, 0xFF },
+    { GPIOB,  5, 0xFF },
+    { GPIOB,  6, 0xFF },
+    { GPIOB,  7, 0xFF },
+    { GPIOB,  8, 0xFF },
+    { GPIOB,  9, 0xFF },
+    { GPIOB, 10, 0xFF },
+    { GPIOB, 11, 0xFF },
+    { GPIOB, 12, 0xFF },
+    { GPIOB, 13, 0xFF },
+    { GPIOB, 14, 0xFF },
+    { GPIOB, 15, 0xFF },
+    /* --- Port C --- */
+    { GPIOC,  0,   10 },
+    { GPIOC,  1,   11 },
+    { GPIOC,  2,   12 },
+    { GPIOC,  3,   13 },
+    { GPIOC,  4, 0xFF },
+    { GPIOC,  5, 0xFF },
+    { GPIOC,  6, 0xFF },
+    { GPIOC,  7, 0xFF },
+    { GPIOC,  8, 0xFF },
+    { GPIOC,  9, 0xFF },
+    { GPIOC, 10, 0xFF },
+    { GPIOC, 11, 0xFF },
+    { GPIOC, 12, 0xFF },
+    { GPIOC, 13, 0xFF },
+    { GPIOC, 14, 0xFF },
+    { GPIOC, 15, 0xFF },
+    /* --- Port D --- */
+    { GPIOD,  0, 0xFF },
+    { GPIOD,  1, 0xFF },
+    { GPIOD,  2, 0xFF },
+    { GPIOD,  3, 0xFF },
+    { GPIOD,  4, 0xFF },
+    { GPIOD,  5, 0xFF },
+    { GPIOD,  6, 0xFF },
+    { GPIOD,  7, 0xFF },
+    { GPIOD,  8, 0xFF },
+    { GPIOD,  9, 0xFF },
+    { GPIOD, 10, 0xFF },
+    { GPIOD, 11, 0xFF },
+    { GPIOD, 12, 0xFF },
+    { GPIOD, 13, 0xFF },
+    { GPIOD, 14, 0xFF },
+    { GPIOD, 15, 0xFF },
+    /* --- Port E --- */
+    { GPIOE,  0, 0xFF },
+    { GPIOE,  1, 0xFF },
+    { GPIOE,  2, 0xFF },
+    { GPIOE,  3, 0xFF },
+    { GPIOE,  4, 0xFF },
+    { GPIOE,  5, 0xFF },
+    { GPIOE,  6, 0xFF },
+    { GPIOE,  7, 0xFF },
+    { GPIOE,  8, 0xFF },
+    { GPIOE,  9, 0xFF },
+    { GPIOE, 10, 0xFF },
+    { GPIOE, 11, 0xFF },
+    { GPIOE, 12, 0xFF },
+    { GPIOE, 13, 0xFF },
+    { GPIOE, 14, 0xFF },
+    { GPIOE, 15, 0xFF },
+    /* --- Port F --- */
+    { GPIOF,  0, 0xFF },
+    { GPIOF,  1, 0xFF },
+    { GPIOF,  2, 0xFF },
+    { GPIOF,  3, 0xFF },
+    { GPIOF,  4, 0xFF },
+    { GPIOF,  5, 0xFF },
+    { GPIOF,  6, 0xFF },
+    { GPIOF,  7, 0xFF },
+    { GPIOF,  8, 0xFF },
+    { GPIOF,  9, 0xFF },
+    { GPIOF, 10, 0xFF },
+    { GPIOF, 11, 0xFF },
+    { GPIOF, 12, 0xFF },
+    { GPIOF, 13, 0xFF },
+    { GPIOF, 14, 0xFF },
+    /* PF15 is not on the die; the slot keeps the numbering exact. */
+    { GPIOF, 15, 0xFF },
+};
+
+/* Which pins the QFN68 package actually bonds out, one bit per pin number.
+ *
+ * The names exist on every part so that portable code compiles, but a pad with
+ * no bond wire cannot be driven, and pretending otherwise turns a wiring
+ * mistake into silence. ch32h4_pin_bonded() reads this. */
+const uint32_t g_pin_bonded[3] = { 0x7F03E020, 0xFCFF1FCF, 0x403FE003 };

@@ -48,6 +48,22 @@ except ImportError:
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 VARIANTS = ROOT / "variants"
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import variantemit                                      # noqa: E402
+
+# The part whose C files are hand-verified and hardware-exercised, and which
+# every other part's peripheral maps are filtered from.
+REFERENCE_PART = "CH32H417QEU6"
+REFERENCE_BASE = "CH32H417xx_QEU6"
+
+
+def reference_map():
+    return (VARIANTS / REFERENCE_BASE / "pin_map_package.c").read_text()
+
+
+def reference_header():
+    return (VARIANTS / REFERENCE_BASE / "pins_package.h").read_text()
+
 # A pin name in the name column. The die has PA..PE complete and PF up to
 # PF14; anything else in this column is a supply or an analogue pad and is not
 # a GPIO.
@@ -256,6 +272,48 @@ def read_table(doc, pages, anchors):
     return rows
 
 
+def read_resources(doc):
+    """{part: {row label: cell text}} from the "Resource differences" table.
+
+    THIS, NOT THE PIN TABLE, IS WHAT SAYS WHICH PERIPHERALS A PART HAS. The
+    datasheet is explicit about it: the note above Table 2-1-1 says the
+    function descriptions "are for all functions and do not refer to specific
+    chip models" and sends you here instead. Inferring presence from whether a
+    signal appears on some pin therefore gives false positives -- it claimed
+    FSMC on CH32H416RDU6, which has none, and QSPI1 on parts that only have
+    QSPI2.
+
+    It is also a third independent check on the pin extraction, since it
+    carries a GPIO count per part.
+    """
+    pages = [i for i in range(min(12, doc.page_count))
+             if "Resource differences" in doc[i].get_text()]
+    out = {}
+    for pno in pages:
+        page = doc[pno]
+        words = page.get_text("words")
+        rbs, cbs = grid(page)
+        if len(cbs) < 9:
+            continue
+        header = {}
+        for ci in range(3, len(cbs)):
+            for rb in rbs[:3]:
+                txt = cell_text(words, rb, cbs[ci]).strip()
+                for part, meta in PARTS.items():
+                    if meta["column"][4:] in txt.split():
+                        header[ci] = part
+        for rb in rbs:
+            label = " ".join(cell_text(words, rb, cbs[ci]).strip()
+                             for ci in (1, 2, 3)).strip()
+            if not label:
+                continue
+            for ci, part in header.items():
+                value = cell_text(words, rb, cbs[ci]).strip()
+                if value:
+                    out.setdefault(part, {})[label] = value
+    return out
+
+
 def extract(pdf):
     """{part: {"pins": {name: {...}}, ...}} for all five parts."""
     doc = fitz.open(pdf)
@@ -267,6 +325,11 @@ def extract(pdf):
     tables = find_tables(doc)
     if len(tables) != 3:
         sys.exit("expected three pin-definition tables, found %s" % list(tables))
+
+    resources = read_resources(doc)
+    if len(resources) != len(PARTS):
+        sys.exit("the resource table yielded %s, expected all five parts"
+                 % sorted(resources))
 
     per_column = {}
     table_of = {}
@@ -316,6 +379,7 @@ def extract(pdf):
                 "column": col,
             },
             "pins": dict(sorted(pins.items(), key=lambda kv: kv[1]["number"])),
+            "resources": resources[part],
         }
     return out
 
@@ -340,7 +404,25 @@ def main():
         base = VARIANTS / d["base"]
         base.mkdir(parents=True, exist_ok=True)
         (base / "pinout.json").write_text(json.dumps(d, indent=2) + "\n")
-        print("               -> %s" % (base / "pinout.json").relative_to(ROOT))
+        written = ["pinout.json"]
+
+        # The QEU6 C files are NOT regenerated. They are the ones that have run
+        # on hardware, and they are the source the other parts are filtered
+        # from; rewriting them from the datasheet would put the only verified
+        # artefact in the repo at the mercy of this script. Its pinout.json is
+        # still written, because that is what the cross-check test reads.
+        if d["part"] != REFERENCE_PART:
+            (base / "pin_map_package.c").write_text(
+                variantemit.emit_pin_map(d, d["pins"], reference_map()))
+            (base / "pins_table_package.c").write_text(
+                variantemit.emit_pins_table(d, d["pins"]))
+            (base / "pins_package.h").write_text(
+                variantemit.emit_pins_header(d, d["pins"], reference_header()))
+            written += ["pin_map_package.c", "pins_table_package.c",
+                        "pins_package.h"]
+
+        print("               -> %s/{%s}" % (base.relative_to(ROOT),
+                                             ", ".join(written)))
 
 
 if __name__ == "__main__":

@@ -140,3 +140,101 @@ def test_every_pad_number_is_unique(path):
         pad = pin["pad"]
         assert pad not in seen, "pad %s claimed by %s and %s" % (pad, seen[pad], name)
         seen[pad] = name
+
+
+# ---- the extracted functions against the hand-verified table ---------------
+
+def af_tokens(text):
+    """{"TIM2_CH1": 1, ...} from a datasheet function list.
+
+    A pad that serves a timer channel and that timer's external trigger is
+    written as one name, "TIM2_CH1_ETR(AF1)", so it is also recorded under the
+    two names it actually provides. Without that, three entries of the
+    hand-verified QEU6 table look unconfirmed when they are simply spelled
+    differently.
+    """
+    out = {}
+    for name, af in re.findall(r"([A-Z0-9_]+)\(AF(\d+)\)", text):
+        out[name] = int(af)
+        if name.endswith("_ETR") and "_CH" in name:
+            head, _, _ = name.rpartition("_ETR")
+            out[head] = int(af)
+            out[head.split("_CH")[0] + "_ETR"] = int(af)
+    return out
+
+
+def test_the_verified_qeu6_pwm_table_agrees_with_the_datasheet():
+    """The one table that has been exercised on hardware, checked both ways.
+
+    variants/CH32H417xx_QEU6/pin_map_package.c came from the MicroPython port
+    for this silicon and has run on the board. Agreeing with a table extracted
+    independently from the datasheet says two things at once: that the working
+    table is right, and that the extraction it is being compared against can
+    be trusted for the four parts nobody here can test on hardware.
+    """
+    src = (VARIANTS / "CH32H417xx_QEU6" / "pin_map_package.c").read_text()
+    pins = load(VARIANTS / "CH32H417xx_QEU6" / "pinout.json")["pins"]
+
+    body = src[src.index("g_pwm_af_map[]"):]
+    body = body[:body.index("};")]
+    entries = re.findall(
+        r"\{\s*(P[A-F]\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(true|false)\s*,\s*(\d+)\s*\}",
+        body)
+    assert len(entries) > 100, "the PWM table did not parse"
+
+    missing = []
+    for name, tim, ch, negated, af in entries:
+        signal = "TIM%s_CH%s%s" % (tim, ch, "N" if negated == "true" else "")
+        have = af_tokens(pins.get(name, {}).get("af", ""))
+        if have.get(signal) != int(af):
+            missing.append("%s %s(AF%s), datasheet says AF%s"
+                           % (name, signal, af, have.get(signal)))
+    assert not missing, "not confirmed by the datasheet:\n  " + "\n  ".join(missing)
+
+
+# ---- the resource table, a third independent source ------------------------
+
+def resource(res, needle):
+    for label, value in res.items():
+        if needle.lower() in label.lower():
+            return value
+    return ""
+
+
+@pytest.mark.parametrize("path", PINOUTS, ids=lambda p: p.parent.name)
+def test_pin_count_matches_the_resource_table(path):
+    """"GPIO port number" in the datasheet's own summary table.
+
+    A third source, independent of both the pin table this was extracted from
+    and the SDK function it is checked against. All three agreeing on 95, 65,
+    50, 48 and 54 is what makes the extraction believable for the four parts
+    that cannot be tried on hardware here.
+    """
+    d = load(path)
+    stated = resource(d["resources"], "GPIO port number")
+    assert stated, "no GPIO count in the resource table for %s" % d["part"]
+    assert len(d["pins"]) == int(stated), (
+        "%s: extracted %d pins, resource table says %s"
+        % (d["part"], len(d["pins"]), stated))
+
+
+@pytest.mark.parametrize("path", PINOUTS, ids=lambda p: p.parent.name)
+def test_analog_input_count_matches_the_resource_table(path):
+    """The ADC row reads "16+2": external channels plus the two internal ones.
+
+    Counting the ADC_INn entries found on this package's pins has to come to
+    the external figure. A mismatch means either a pin was misread or an
+    analogue pad was attributed to the wrong package.
+    """
+    d = load(path)
+    stated = resource(d["resources"], "Channels")
+    if "+" not in stated:
+        pytest.skip("no channel count for %s" % d["part"])
+    external = int(stated.split("+")[0])
+
+    # Anchored: "HSADC_IN0" contains "ADC_IN0" and is a different converter.
+    found = {name for name, p in d["pins"].items()
+             if re.search(r"(?<![A-Z])ADC_IN\d", p["af"])}
+    assert len(found) == external, (
+        "%s: %d pins carry an ADC input, resource table says %s"
+        % (d["part"], len(found), stated))
