@@ -1,0 +1,254 @@
+{
+  "part": "CH32H416RDU6",
+  "package": "QFN60",
+  "base": "CH32H416xx_RDU6",
+  "package_id": "0x4160050D",
+  "source": {
+    "file": "CH32H417DS0-2.PDF",
+    "version": "V1.5",
+    "table": "2-1-2",
+    "column": "H416RDU6"
+  },
+  "pins": {
+    "PA0": {
+      "number": 0,
+      "pad": 16,
+      "af": "ADC_IN0/OPA3_OUT0/ TIM2_CH1_ETR(AF1)/TIM5_CH1(AF2) /TIM8_ETR(AF3)/QSPI2_SIOX2(AF4)/ PIOC_IO0(AF5)/TIM9_CH1(AF6)/ USART2_CTS(AF7)/USART6_TX(AF8)/ SDIO_CMD(AF9)/LTDC_R0(AF14)"
+    },
+    "PA1": {
+      "number": 1,
+      "pad": 17,
+      "af": "ADC_IN1/TIM2_CH2(AF1)/ TIM5_CH2(AF2)/QSPI2_SIOX3(AF4)/ TIM9_CH2(AF6)/USART2_RTS(AF7)/ USART6_RX(AF8)/QSPI1_SIO3(AF9)/ LTDC_R2(AF14)"
+    },
+    "PA2": {
+      "number": 2,
+      "pad": 18,
+      "af": "ADC_IN2/OPA3_P1/TIM2_CH3(AF1)/ TIM5_CH3(AF2)/USART6_CK(AF3)/ TIM9_CH3(AF4)/USART2_TX(AF7)/ LTDC_R1(AF14)"
+    },
+    "PA3": {
+      "number": 3,
+      "pad": 19,
+      "af": "ADC_IN3/OPA3_N1/TIM2_CH4(AF1)/ TIM5_CH4(AF2)/TIM9_CH4(AF4)/ USART2_RX(AF7)/TIM10_CH3(AF8)/"
+    },
+    "PA4": {
+      "number": 4,
+      "pad": 20,
+      "af": "ADC_IN4/DAC1_OUT/OPA3_OUT1/ TIM5_ETR(AF2)/TIM9_ETR(AF4)/ SPI1_NSS(AF5)/SPI3_NSS(AF6)/ I2S3_WS(AF6)/USART2_CK(AF7)/ TIM10_CH4(AF9)/DVP_HSYNC(AF13)/ LTDC_VSYNC(AF14)"
+    },
+    "PA5": {
+      "number": 5,
+      "pad": 21,
+      "af": "ADC_IN5/DAC2_OUT/OPA1_OUT1/ TIM2_CH1_ETR(AF1)/ TIM1_BKIN2(AF2)/TIM8_CH1N(AF3)/ SPI1_SCK(AF5)/TIM10_ETR(AF9)/ DVP_VSYNC(AF11)/LTDC_R4(AF14)"
+    },
+    "PA6": {
+      "number": 6,
+      "pad": 22,
+      "af": "ADC_IN6/OPA1_P1/TIM1_BKIN(AF1)/ TIM3_CH1(AF2)/TIM8_BKIN(AF3)/ SPI1_MISO(AF5)/TIM10_CH1(AF9)/ CMP_OUT(AF10)/LTDC_HSYNC(AF11) / DVP_PCLK(AF13)/LTDC_G2(AF14)"
+    },
+    "PA7": {
+      "number": 7,
+      "pad": 23,
+      "af": "ADC_IN7/OPA1_N1/TIM1_CH1N(AF1)/ TIM3_CH2(AF2)/TIM8_CH1N(AF3)/ SPI1_MOSI(AF5)/TIM10_CH2(AF9)/ LTDC_VSYNC(AF14)/"
+    },
+    "PA11": {
+      "number": 11,
+      "pad": 39,
+      "af": "OTG_DM/TIM1_CH4(AF1)/ USART3_CK(AF4)/SPI2_NSS(AF5)/ I2S2_WS(AF5)/USART6_RX(AF6)/ USART1_CTS(AF7)/CAN1_RX(AF9)/ LTDC_R4(AF14)"
+    },
+    "PA12": {
+      "number": 12,
+      "pad": 40,
+      "af": "OTG_DP/TIM1_ETR(AF1)/ USART3_RTS(AF4)/SPI2_SCK(AF5)/ I2S2_CK(AF5)/USART6_TX(AF6)/ USART1_RTS(AF7)/CAN1_TX(AF9)/ TIM1_BKIN2(AF12)/LTDC_R5(AF14)/"
+    },
+    "PA13": {
+      "number": 13,
+      "pad": 41,
+      "af": "SPI3_MOSI(AF1)/I2S3_SD(AF1)/ USART3_TX(AF4)/CAN_RX(AF5)/ I2C3_SDA(AF7)/LTDC_B2(AF8)/ SAI_SD_B(AF13)/"
+    },
+    "PA14": {
+      "number": 14,
+      "pad": 42,
+      "af": "SDMMC_D4(5)/SPI3_SCK(AF1)/ I2S3_CK(AF1)/USART3_RX(AF4)/ CAN_TX(AF5)/I2C3_SCL(AF7)/ USART8_CK(AF11)/SAI_SCK_B(AF13)/ LTDC_B6(AF14)/LTDC_R0(AF15)  SDMMC_D4_1(5)"
+    },
+    "PA15": {
+      "number": 15,
+      "pad": 43,
+      "af": "SDMMC_D5(5)/TIM2_CH1_ETR(AF1)/ USART3_CTS(AF4)/SPI1_NSS(AF5)/ SPI3_NSS(AF6)/I2S3_WS(AF6)/ I2C3_SMBA(AF7)/USART6_RTS(AF8)/ LTDC_R3(AF9)/LTDC_B4(AF10)/ USART8_TX(AF11)/SAI_FS_B(AF13)/ LTDC_B6(AF14)/LTDC_CLK(AF15)  SDMMC_D5_1(5)"
+    },
+    "PB0": {
+      "number": 16,
+      "pad": 26,
+      "af": "ADC_IN8/OPA1_P0/CMP_P0 /MCO(AF0)/ TIM1_CH2N(AF1)/TIM3_CH3(AF2)/ TIM8_CH2N(AF3)/TIM5_CH4(AF4)/ DFSDM_CKOUT(AF6)/USART6_CTS(A F8)/LTDC_R3(AF9)/ TIM12_ETR(AF13)/ LTDC_G1(AF14)"
+    },
+    "PB1": {
+      "number": 17,
+      "pad": 27,
+      "af": "ADC_IN9/OPA1_N0/OPA2_OUT1/ CMP_N0/TIM1_CH3N(AF1)/"
+    },
+    "PB3": {
+      "number": 19,
+      "pad": 49,
+      "af": "TIM2_CH2(AF1)/CC1(AF4)/ SPI1_SCK(AF5)/SPI3_SCK(AF6)/ I2S3_CK(AF6)/SDIO_D2(AF9)/ USART8_RX(AF11)/DVP_D5(AF13)/ TIM12_ETR(AF14)"
+    },
+    "PB4": {
+      "number": 20,
+      "pad": 50,
+      "af": "TIM3_CH1(AF2)/CC2(AF4)/ SPI1_MISO(AF5)/ SPI3_MISO(AF6)/ SPI2_NSS(AF7)/I2S2_WS(AF7)/ SDIO_D3(AF9)/TIM4_ETR(AF10)/ USART8_TX(AF11)/ USART7_CK(AF14)"
+    },
+    "PB5": {
+      "number": 21,
+      "pad": 51,
+      "af": "TIM10_ETR(AF0)/TIM3_CH2(AF2)/ LTDC_B5(AF3)/I2C1_SMBA(AF4)/ SPI1_MOSI(AF5)/I2C4_SMBA(AF6)/"
+    },
+    "PB6": {
+      "number": 22,
+      "pad": 52,
+      "af": "TIM10_CH1(AF0)/FSMC_A5(AF1)/ TIM4_CH1(AF2)/CAN1_RX(AF3)/ I2C1_SCL(AF4)/I2S3_MCK(AF5)/ I2C4_SCL(AF6)/USART1_TX(AF7)/ CAN2_TX(AF9)/QSPI1_SCSN(AF10)/ DVP_D5(AF13)/USART7_TX(AF14)"
+    },
+    "PB7": {
+      "number": 23,
+      "pad": 53,
+      "af": "TIM10_CH2(AF0)/TIM4_CH2(AF2)/ CAN1_TX(AF3)/I2C1_SDA(AF4)/ I2C4_SDA(AF6)/USART1_RX(AF7)/ USART8_CK(AF10)/ DVP_VSYNC(AF13)"
+    },
+    "PB8": {
+      "number": 24,
+      "pad": 54,
+      "af": "SWCLK/USBHS_DP/TIM10_CH3(AF1)/ TIM4_CH3(AF2)/I2C1_SCL(AF4)/ PIOC_IO0(AF5)/I2C4_SCL(AF6)/ USART6_RX(AF8)/CAN1_RX(AF9)/ SDIO_D4(AF10)/DVP_D6(AF13)/ LTDC_B6(AF14)"
+    },
+    "PB9": {
+      "number": 25,
+      "pad": 55,
+      "af": "SWIO/SWDIO/USBHS_DM/ TIM10_CH4(AF1)/TIM4_CH4(AF2)/ I2C1_SDA(AF4)/SPI2_NSS(AF5)/ I2S2_WS(AF5)/I2C4_SDA(AF6)/ PIOC_IO1(AF7)/USART6_TX(AF8)/ CAN1_TX(AF9)/SDIO_D5(AF10)/ I2C4_SMBA(AF11)/DVP_D7(AF13)/ LTDC_B7(AF14)"
+    },
+    "PC0": {
+      "number": 32,
+      "pad": 10,
+      "af": "ADC_IN10/HSADC_IN0/ TIM8_BKIN(AF0)/ DFSDM_CKIN0(AF3)/PIOC_IO1(AF5)/ SAI_MCLK_A(AF7)/I2C2_SCL(AF9)/ QSPI2_SIO3(AF10)/LTDC_G2(AF11)/ LTDC_R5(AF14)"
+    },
+    "PC1": {
+      "number": 33,
+      "pad": 11,
+      "af": "ADC_IN11/HSADC_IN1/"
+    },
+    "PC2": {
+      "number": 34,
+      "pad": 12,
+      "af": "ADC_IN12/HSADC_IN2/OPA3_P0/ TIM8_CH2N(AF0)/TIM5_CH2(AF2)/ DFSDM_CKIN1(AF3)/SPI2_MISO(AF5) /DFSDM_CKOUT(AF6)/SAI_SCK_A(A F7)/PIOC_IO1(AF8)/ I2C2_SMBA(AF9)/QSPI2_SIOX0(AF10)"
+    },
+    "PC3": {
+      "number": 35,
+      "pad": 13,
+      "af": "ADC_IN13/HSADC_IN3/ OPA3_N0/TIM8_CH3N(AF0)/ TIM5_CH3(AF2)/ DFSDM_DATIN1(AF3)/ SPI2_MOSI(AF5)/I2S2_SD(AF5)/ SAI_FS_A(AF7)/QSPI2_SIOX1(AF10)/"
+    },
+    "PC4": {
+      "number": 36,
+      "pad": 24,
+      "af": "ADC_IN14/OPA1_OUT0/CMP_N1/ CAN3_RX(AF6)/I3C_SCL(AF7)/ LTDC_R7(AF14)"
+    },
+    "PC5": {
+      "number": 37,
+      "pad": 25,
+      "af": "ADC_IN15/CAN3_TX(AF6)/ I3C_SDA(AF7)/CMP_OUT(AF13)/ LTDC_DE(AF14)"
+    },
+    "PC6": {
+      "number": 38,
+      "pad": 35,
+      "af": "SDMMC_D6(5)/TIM3_CH1(AF2)/ TIM8_CH1(AF3)/I2S2_MCK(AF5)/ USART4_TX(AF7)/SDIO_D6(AF9)/ SWPMI_IO(AF11)/DVP_D0(AF13)/ LTDC_HSYNC(AF14)  SDMMC_D6_1(5)"
+    },
+    "PC7": {
+      "number": 39,
+      "pad": 36,
+      "af": "SDMMC_D7(5)/TIM3_CH2(AF2)/ TIM8_CH2(AF3)/I2S3_MCK(AF6)/ USART4_RX(AF7)/SDIO_D7(AF9)/ SWPMI_TX(AF11)/DVP_D1(AF13)/ LTDC_G6(AF14)  SDMMC_D7_1(5)"
+    },
+    "PC8": {
+      "number": 40,
+      "pad": 37,
+      "af": "SDMMC_D0/TIM3_CH3(AF2)/ TIM8_CH3(AF3)/TIM9_ETR(AF6)/ USART4_CK(AF7)/USART7_RTS(AF8)/ SWPMI_RX(AF11)/DVP_D2(AF13)/ LTDC_G4(AF14)"
+    },
+    "PC9": {
+      "number": 41,
+      "pad": 38,
+      "af": "SDMMC_D1(5)/TIM3_CH4(AF2)/  SDMMC_D1_1(5)"
+    },
+    "PC10": {
+      "number": 42,
+      "pad": 44,
+      "af": "SDMMC_D2(5)/TIM9_CH2(AF2)/ SPI3_SCK(AF6)/I2S3_CK(AF6)/ USART3_TX(AF7)/USART6_TX(AF8)/ QSPI1_SIO1(AF9)/LTDC_B1(AF10)/ SWPMI_RX(AF11)/DVP_D8(AF13)/ LTDC_R2(AF14)/LTDC_HSYNC(AF15)  SDMMC_STS_2/ SDMMC_STS_3/ SDMMC_CMD_2 / SDMMC_CMD_3"
+    },
+    "PC11": {
+      "number": 43,
+      "pad": 45,
+      "af": "SDMMC_D3(5)/TIM9_CH4(AF2)/ SPI3_MISO(AF6)/ USART3_RX(AF7)/USART6_RX(AF8)/ QSPI1_SCSXN(AF9)/DVP_D4(AF13)/ LTDC_B4(AF14)/LTDC_VSYNC(AF15)  SDMMC_STR_2/ SDMMC_STR_3"
+    },
+    "PC12": {
+      "number": 44,
+      "pad": 46,
+      "af": "SDMMC_SDCK/SDMMC_SLVCK/ TIM9_CH3(AF2)/SPI3_MOSI(AF6)/ I2S3_SD(AF6)/USART3_CK(AF7)/ USART7_TX(AF8)/DVP_D9(AF13)/ LTDC_R6(AF14)/LTDC_DE(AF15)  SDMMC_SDCK_ 2/ SDMMC_SDCK_ 3/ SDMMC_SLVCK _2/ SDMMC_SLVCK _3"
+    },
+    "PD2": {
+      "number": 50,
+      "pad": 47,
+      "af": "SDMMC_STS/SDMMC_CMD/ TIM3_ETR(AF2)/USART7_RX(AF8)/ LTDC_B7(AF9)/DVP_D11(AF13)/ LTDC_B2(AF14)/LTDC_R5(AF15)  SDMMC_D2_2(5)/ SDMMC_D2_3(5)"
+    },
+    "PD3": {
+      "number": 51,
+      "pad": 48,
+      "af": "SDMMC_STR/TIM11_CH1(AF2)/ DFSDM_CKOUT(AF3)/SPI2_SCK(AF5)/ I2S2_CK(AF5)/USART2_CTS(AF7)/ USART6_CK(AF8)/TIM3_CH1(AF9)/ DVP_D5(AF13)/LTDC_G7(AF14)/ LTDC_R6(AF15)  SDMMC_D3_2(5)/ SDMMC_D3_3(5)"
+    },
+    "PD9": {
+      "number": 57,
+      "pad": 33,
+      "af": "I3C_SCL(AF5)/USART3_RX(AF7)/"
+    },
+    "PD10": {
+      "number": 58,
+      "pad": 34,
+      "af": "DFSDM_CKOUT(AF3)/ LPTIM2_ETR(AF4)/I3C_SDA(AF5)/ USART3_CK(AF7)/LTDC_B3(AF14)  SDMMC_STR_1"
+    },
+    "PE9": {
+      "number": 73,
+      "pad": 30,
+      "af": "OPA2_P0/ TIM1_CH1(AF1)/ DFSDM_CKOUT(AF3)/ SDIO_D1(AF8)/QSPI1_SIOX2(AF10)/"
+    },
+    "PE15": {
+      "number": 79,
+      "pad": 31,
+      "af": "TIM1_BKIN(AF1)/ TIM12_CH4(AF2)/I3C_SDA(AF3)/ QSPI2_SIO3(AF7)/SDIO_D7(AF8)/ USART5_CK(AF11)/CMP_OUT(AF13)/ LTDC_R7(AF14)"
+    },
+    "PF6": {
+      "number": 86,
+      "pad": 3,
+      "af": "CAN3_RX(AF2)/SPI1_NSS(AF3)/ QSPI2_SCK(AF4)/I3C_SCL(AF5)/ SAI_SD_B(AF6)/USART8_RX(AF7)/ TIM10_CH3(AF9)/QSPI1_SIO3(AF10)/ TIM11_CH1(AF13)"
+    },
+    "PF7": {
+      "number": 87,
+      "pad": 4,
+      "af": "CAN3_TX(AF2)/SPI1_SCK(AF3)/ QSPI2_SCSN(AF4)/I3C_SDA(AF5)/ SAI_MCLK_B(AF6)/USART8_TX(AF7)/ TIM10_CH4(AF9)/QSPI1_SIO2(AF10)/ TIM11_CH2(AF13)"
+    },
+    "PF8": {
+      "number": 88,
+      "pad": 5,
+      "af": "HSADC_IN4/SPI1_MOSI(AF3)/ QSPI2_SIO0(AF4)/SAI_SCK_B(AF6)/ USART8_RTS(AF7)/QSPI2_SIO0(AF8)/ TIM10_CH1(AF9)/TIM11_CH3(AF13) QSPI1_SIO0(AF10)"
+    },
+    "PF9": {
+      "number": 89,
+      "pad": 6,
+      "af": "HSADC_IN5/SPI1_MISO(AF3)/ QSPI2_SIO1(AF4)/SAI_FS_B(AF6)/ USART8_CTS(AF7)/TIM10_CH2(AF9)/ USART8_RTS(AF11)/ QSPI1_SIO1(AF10)/TIM11_CH4(AF13)"
+    },
+    "PF10": {
+      "number": 90,
+      "pad": 7,
+      "af": "HSADC_IN6/QSPI2_SIO2(AF4)/ USART8_CK(AF7)/TIM10_ETR(AF8)/ USART8_CTS(AF11)/DVP_D11(AF13)/ LTDC_DE(AF14)"
+    },
+    "PF12": {
+      "number": 92,
+      "pad": 28,
+      "af": "OPA2_N1/I2C4_SCL(AF2)/ PIOC_IO0(AF3)/TIM12_CH3(AF13)"
+    },
+    "PF13": {
+      "number": 93,
+      "pad": 29,
+      "af": "I2C4_SDA(AF2)/PIOC_IO1(AF5)/ DVP_PCLK(AF11)/TIM12_CH4(AF13)"
+    }
+  }
+}
