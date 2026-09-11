@@ -17,7 +17,9 @@ Everything here was written after the fact. Both bugs it now covers -- the
 flash driver hanging the part mid-program, and EEPROM::commit() returning true
 while writing nothing -- shipped because neither had a hardware test at all.
 """
+import pathlib
 import re
+import subprocess
 
 import pytest
 
@@ -239,3 +241,50 @@ def test_format_wipes_and_remounts(lfs_board, mounted):
     d = kv(lfs_board.command("fsformat", timeout=60))
     assert d["fs_format"] == 1, d.raw
     assert d["fs_remount"] == 1, d.raw
+
+
+# ---- an image built on the host, not by the sketch -------------------------
+
+def test_an_image_built_by_mklittlefs_mounts_and_reads_back(lfs_board):
+    """The whole buildfs/uploadfs path, end to end on the board.
+
+    Every other test here formats the filesystem from the sketch, so they
+    prove the core can write a filesystem it also reads. This proves something
+    different and previously untested: that an image built by mklittlefs on the
+    host is one this core will mount.
+
+    That is not a given. The platform's mklittlefs is earlephilhower's build,
+    compiled against LittleFS 2.5.1, while the core carries 2.9 -- so the
+    reader is newer than the writer. littlefs supports that direction, but the
+    only way to know the geometry, the block count and the disk version all
+    line up is to mount one.
+
+    The image is uploaded INSIDE the test, after the fixture has flashed the
+    sketch, because programming the sketch erases the whole chip and would take
+    the filesystem partition with it.
+    """
+    sketch = pathlib.Path(__file__).resolve().parents[1] / "sketches" / "lfstest"
+    payload = (sketch / "data" / "hello.txt").read_bytes()
+
+    r = subprocess.run(["pio", "run", "-d", str(sketch), "-t", "uploadfs"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, (
+        "uploadfs failed:\n" + (r.stdout + r.stderr)[-3000:])
+
+    # Writing the partition reset the board, so wait for its banner again
+    # before asking it anything. command() drains the port but does not know
+    # a reset happened.
+    _sync("lfstest")
+
+    got = kv(lfs_board.command("fscat /hello.txt", timeout=30))
+    assert got["cat_mounted"] == 1, "the image did not mount"
+    assert got["cat_open"] == 1, "/hello.txt is not in the mounted image"
+    assert got["cat_bytes"] == len(payload), (
+        "read %s bytes, the file on the host is %d"
+        % (got["cat_bytes"], len(payload)))
+
+    expected = 2166136261
+    for byte in payload:
+        expected = ((expected ^ byte) * 16777619) & 0xFFFFFFFF
+    assert got["cat_fnv"] == expected, (
+        "the contents differ from the file mklittlefs was given")

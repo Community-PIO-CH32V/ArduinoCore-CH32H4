@@ -1,0 +1,2 @@
+CH32H417 LittleFS image test payload.
+Built by mklittlefs, mounted by the core.

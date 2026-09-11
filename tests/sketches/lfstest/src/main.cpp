@@ -85,6 +85,44 @@ static void doRoundTrip(const char *name, uint32_t bytes, uint8_t seed) {
   Serial1.print("fs_rt_bytes="); Serial1.println(read_back);
 }
 
+/* Read a file the HOST put in the image, and report enough to prove it came
+ * through unchanged.
+ *
+ * This is what tests an image built by mklittlefs rather than one this sketch
+ * wrote itself. The two are different claims: formatting and writing here
+ * exercises the core's LittleFS, while mounting an image built elsewhere also
+ * exercises whether the on-disk format the tool writes is one this core reads.
+ * mklittlefs is built against LittleFS 2.5.1 and the core carries 2.9, so the
+ * reader is newer than the writer -- which littlefs supports, but only a real
+ * mount proves it.
+ */
+static void doCat(const char *path) {
+  if (!LittleFS.begin()) {
+    Serial1.println("cat_mounted=0");
+    return;
+  }
+  Serial1.println("cat_mounted=1");
+  File f = LittleFS.open(path, "r");
+  if (!f) {
+    Serial1.println("cat_open=0");
+    return;
+  }
+  Serial1.println("cat_open=1");
+
+  /* FNV-1a, the same hash every other test in this repo chains on. */
+  uint32_t h = 2166136261u;
+  uint32_t n = 0;
+  while (f.available()) {
+    const int c = f.read();
+    if (c < 0) { break; }
+    h = (h ^ (uint8_t)c) * 16777619u;
+    n++;
+  }
+  f.close();
+  Serial1.print("cat_bytes="); Serial1.println(n);
+  Serial1.print("cat_fnv="); Serial1.println(h);
+}
+
 static void doDirs() {
   LittleFS.mkdir("/sub");
   File f = LittleFS.open("/sub/inner.txt", "w");
@@ -227,6 +265,9 @@ static void handle(char *cmd) {
     uint32_t bytes = (uint32_t)atol(cmd + 5);
     char *sp = strchr(cmd + 5, ' ');
     doRoundTrip("/rt.bin", bytes, sp ? (uint8_t)atoi(sp + 1) : 1);
+
+  } else if (!strncmp(cmd, "fscat ", 6)) {
+    doCat(cmd + 6);
 
   } else if (!strcmp(cmd, "fsdirs")) {
     doDirs();
