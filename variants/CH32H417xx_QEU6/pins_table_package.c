@@ -1,9 +1,8 @@
-/* The pin table for the CH32H417QEU6-R0-1v1.
+/* The pin table for the CH32H417QEU6. GENERATED -- see tools/genvariants.py.
  *
- * Dense and port-ordered, so g_pins[n] is simply port n/16, bit n%16. The
- * table is still explicit rather than computed: a package that does not bond
- * out a whole port would differ here, and that is exactly the kind of thing a
- * variant exists to say.
+ * This is SILICON, which is why it lives in the package base rather than in a
+ * board variant: port, bit and ADC channel are decided by the die and its
+ * bonding, and every board on this part shares them.
  *
  * adc_channel is 0xFF where the pin has no ADC input.
  */
@@ -11,7 +10,7 @@
 #include "ch32h4_gpio.h"
 
 const ch32h4_pin_t g_pins[PINS_COUNT] = {
-    /* --- Port A : 0..15 --- */
+    /* --- Port A --- */
     { GPIOA,  0,    0 },
     { GPIOA,  1,    1 },
     { GPIOA,  2,    2 },
@@ -28,7 +27,7 @@ const ch32h4_pin_t g_pins[PINS_COUNT] = {
     { GPIOA, 13, 0xFF },
     { GPIOA, 14, 0xFF },
     { GPIOA, 15, 0xFF },
-    /* --- Port B : 16..31 --- */
+    /* --- Port B --- */
     { GPIOB,  0,    8 },
     { GPIOB,  1,    9 },
     { GPIOB,  2, 0xFF },
@@ -45,7 +44,7 @@ const ch32h4_pin_t g_pins[PINS_COUNT] = {
     { GPIOB, 13, 0xFF },
     { GPIOB, 14, 0xFF },
     { GPIOB, 15, 0xFF },
-    /* --- Port C : 32..47 --- */
+    /* --- Port C --- */
     { GPIOC,  0,   10 },
     { GPIOC,  1,   11 },
     { GPIOC,  2,   12 },
@@ -62,7 +61,7 @@ const ch32h4_pin_t g_pins[PINS_COUNT] = {
     { GPIOC, 13, 0xFF },
     { GPIOC, 14, 0xFF },
     { GPIOC, 15, 0xFF },
-    /* --- Port D : 48..63 --- */
+    /* --- Port D --- */
     { GPIOD,  0, 0xFF },
     { GPIOD,  1, 0xFF },
     { GPIOD,  2, 0xFF },
@@ -79,7 +78,7 @@ const ch32h4_pin_t g_pins[PINS_COUNT] = {
     { GPIOD, 13, 0xFF },
     { GPIOD, 14, 0xFF },
     { GPIOD, 15, 0xFF },
-    /* --- Port E : 64..79 --- */
+    /* --- Port E --- */
     { GPIOE,  0, 0xFF },
     { GPIOE,  1, 0xFF },
     { GPIOE,  2, 0xFF },
@@ -96,7 +95,7 @@ const ch32h4_pin_t g_pins[PINS_COUNT] = {
     { GPIOE, 13, 0xFF },
     { GPIOE, 14, 0xFF },
     { GPIOE, 15, 0xFF },
-    /* --- Port F : 80..95 --- */
+    /* --- Port F --- */
     { GPIOF,  0, 0xFF },
     { GPIOF,  1, 0xFF },
     { GPIOF,  2, 0xFF },
@@ -112,5 +111,13 @@ const ch32h4_pin_t g_pins[PINS_COUNT] = {
     { GPIOF, 12, 0xFF },
     { GPIOF, 13, 0xFF },
     { GPIOF, 14, 0xFF },
+    /* PF15 is not on the die; the slot keeps the numbering exact. */
     { GPIOF, 15, 0xFF },
 };
+
+/* Which pins the QFN128 package actually bonds out, one bit per pin number.
+ *
+ * The names exist on every part so that portable code compiles, but a pad with
+ * no bond wire cannot be driven, and pretending otherwise turns a wiring
+ * mistake into silence. ch32h4_pin_bonded() reads this. */
+const uint32_t g_pin_bonded[3] = { 0xFFFFFFFF, 0xFFFFFFFF, 0x7FFFFFFF };

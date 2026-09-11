@@ -40,7 +40,10 @@ BOARDS = [
     {
         "id": "ch32h417qeu6",
         "name": "CH32H417QEU6-R0-1v1",
-        "variant": "CH32H417QEU6",
+        # The BOARD's directory, which holds only what this PCB wired. The
+        # silicon lives in the package base named below, and the two were one
+        # directory until the family grew past a single part.
+        "variant": "CH32H417QEU6_EVT_R0",
         # The package base the variant builds on. Boards sharing a package
         # share its pin tables, its alternate-function maps and its memory
         # layout. Only the linker script has to be named here: everything

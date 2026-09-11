@@ -180,11 +180,12 @@ def adc_channels(pins):
 def filter_maps(source, pins):
     """Filter every table in `source` down to what this part can do.
 
-    Returns (text of the tables, {table: (kept, dropped)}).
+    Returns (text, {table: (kept, dropped)}, {table: [kept rows]}).
     """
     sigs = part_signals(pins)
     chunks = []
     stats = {}
+    kept_rows = {}
 
     for name, spec in MAPS.items():
         if ("%s[]" % name) not in source:
@@ -203,6 +204,7 @@ def filter_maps(source, pins):
             if ok:
                 kept.append(row)
         stats[name] = (len(kept), len(rows) - len(kept))
+        kept_rows[name] = kept
 
         ctype = ("ch32h4_pwm_af_t" if name == "g_pwm_af_map" else
                  "ch32h4_i2c_pin_t" if name == "g_i2c_map" else
@@ -214,11 +216,11 @@ def filter_maps(source, pins):
                      % (name, name, name))
         chunks.append("\n".join(lines))
 
-    return "\n\n".join(chunks) + "\n", stats
+    return "\n\n".join(chunks) + "\n", stats, kept_rows
 
 
 def emit_pin_map(part, pins, source):
-    text, stats = filter_maps(source, pins)
+    text, stats, _kept = filter_maps(source, pins)
     head = '''/* Peripheral pin maps for the %(part)s. GENERATED -- see tools/genvariants.py.
  *
  * Derived from the CH32H417QEU6 maps, which came from the MicroPython port for
@@ -444,3 +446,148 @@ def domains_block(part, pins):
     return ("/* This part has no VIO18 or VDDIO rail, so there is only one I/O\n"
             "   domain and every pin is in it. */\n"
             "#define PIN_IS_3V3_DOMAIN(p)     ((void)(p), 1)")
+
+
+def reference_pin_defaults(text):
+    """{"PIN_I2S1_WS": "PB12", ...} from the reference peripherals header."""
+    return dict(re.findall(r"^#define\s+(PIN_[A-Z0-9_]+)\s+(P[A-F]\d+)",
+                           text, re.M))
+
+
+def emit_peripherals(part, pins, source, reference_peripherals=""):
+    """peripherals_package.h: the default pin for each peripheral role.
+
+    EVERY DEFAULT IS TAKEN FROM THIS PART'S FILTERED MAPS, so it names a pin
+    the package bonds and an alternate function the part confirms. Choosing
+    them any other way -- copying the QEU6 header, or picking by rule from the
+    pin names -- produces a default that does not exist on the smaller
+    packages, and the failure lands in whatever library reads it rather than
+    here.
+
+    Each is #ifndef-guarded so a BOARD can override it: which pins a peripheral
+    comes out on is silicon, but which one a particular PCB wired is not.
+
+    A role the part cannot fill is left undefined, with a comment saying so. A
+    library that needs it then fails while naming the macro, which is a better
+    outcome than a default pointing at an unbonded pad.
+    """
+    _text, _stats, kept = filter_maps(source, pins)
+    reference_defaults = reference_pin_defaults(reference_peripherals)
+
+    def first(table, instance):
+        for row in kept.get(table, []):
+            if int(row[0]) == instance:
+                return row
+        return None
+
+    lines = ['''/* Peripheral defaults for the %s. GENERATED -- see tools/genvariants.py.
+ *
+ * Every pin here is one this package bonds, with an alternate function this
+ * part's own datasheet table confirms. A board includes this AFTER stating
+ * what it wired differently; the #ifndef guards are what make that work.
+ */
+#pragma once
+''' % part["part"]]
+
+    def define(macro, value, note=""):
+        lines.append("#ifndef %s" % macro)
+        lines.append("#define %-20s %-6s%s" % (macro, value, note))
+        lines.append("#endif")
+
+    def missing(macro, why):
+        lines.append("/* %s: %s */" % (macro, why))
+
+    # The console UART, then I2C and SPI as Wire and SPI default to.
+    for macro, table, sig in (("PIN_SERIAL1_TX", "g_uart_tx_map", "USART1 TX"),
+                              ("PIN_SERIAL1_RX", "g_uart_rx_map", "USART1 RX")):
+        row = first(table, 1)
+        if row:
+            define(macro, row[1], "/* %s, AF%s */" % (sig, row[2]))
+        else:
+            missing(macro, "this part exposes no %s pin" % sig)
+
+    row = first("g_i2c_map", 1)
+    if row:
+        define("PIN_WIRE_SCL", row[1], "/* I2C1, AF%s */" % row[3])
+        define("PIN_WIRE_SDA", row[2], "/* I2C1, AF%s */" % row[3])
+    else:
+        missing("PIN_WIRE_SCL/SDA", "no I2C1 pins on this package")
+
+    for macro, table in (("PIN_SPI_SCK", "g_spi_sck_map"),
+                         ("PIN_SPI_MISO", "g_spi_miso_map"),
+                         ("PIN_SPI_MOSI", "g_spi_mosi_map")):
+        row = first(table, 1)
+        if row:
+            define(macro, row[1], "/* SPI1, AF%s */" % row[2])
+        else:
+            missing(macro, "no SPI1 pin for this signal on this package")
+
+    # I2S, taken from the datasheet's own I2S signal names rather than from
+    # the SPI maps. The SPI NSS map has a single entry, so deriving WS from it
+    # left every part with no I2S at all.
+    #
+    # MIND THE TWO NUMBERINGS. This core calls them I2S1 and I2S2; the
+    # datasheet calls the same blocks I2S2 and I2S3, after the SPI they ride
+    # on. The core's I2S1 is SPI2.
+    sigs = part_signals(pins)
+    for n, block in ((1, 2), (2, 3)):
+        found = {}
+        for role in ("WS", "CK", "SD"):
+            want = "I2S%d_%s" % (block, role)
+            # THE QEU6 CHOICE FIRST. Picking the lowest-numbered capable pin
+            # instead produced sets spread across three ports, with the clock
+            # landing on PA9 -- the console UART's transmit pin. The reference
+            # board's set is coherent and known to work, so it is used wherever
+            # the package bonds it.
+            preferred = reference_defaults.get("PIN_I2S%d_%s" % (n, role))
+            order = ([preferred] if preferred else []) + sorted(
+                pins, key=lambda k: pins[k]["number"])
+            for name in order:
+                if name not in pins:
+                    continue
+                af = sigs.get(name, {}).get(want)
+                if af is not None:
+                    found[role] = (name, af)
+                    break
+        if len(found) == 3:
+            lines.append("/* I2S%d is SPI%d, which the datasheet calls I2S%d. */"
+                         % (n, block, block))
+            for role in ("WS", "CK", "SD"):
+                pin_name, af = found[role]
+                define("PIN_I2S%d_%s" % (n, role), pin_name, "/* AF%d */" % af)
+                define("PIN_I2S%d_AF_%s" % (n, role), str(af))
+        else:
+            missing("PIN_I2S%d_*" % n,
+                    "this package does not bring out a full I2S%d set (%s)"
+                    % (block, ", ".join(sorted(found)) or "none"))
+
+    lines.append("")
+    lines.append("#ifndef SERIAL_PORT_MONITOR")
+    lines.append("#define SERIAL_PORT_MONITOR    Serial")
+    lines.append("#endif")
+    lines.append("#ifndef SERIAL_PORT_HARDWARE")
+    lines.append("#define SERIAL_PORT_HARDWARE   Serial1")
+    lines.append("#endif")
+    return "\n".join(lines) + "\n"
+
+
+def emit_generic_pins_arduino(part):
+    """pins_arduino.h so a package base is directly usable as a variant.
+
+    A generic board -- one with no schematic of its own to describe -- can name
+    the package base as its variant and get exactly the silicon's pins. A real
+    board still gets its own directory, includes this base, and states what it
+    wired; see variants/CH32H417QEU6_EVT_R0.
+    """
+    return '''/* %(part)s, as a generic variant. GENERATED -- see tools/genvariants.py.
+ *
+ * Nothing here describes a BOARD, because there is no board: this is the bare
+ * silicon in the %(pkg)s package. A board variant includes this file and then
+ * overrides what its schematic actually wired, which the #ifndef guards in
+ * peripherals_package.h are there to allow.
+ */
+#pragma once
+
+#include "pins_package.h"
+#include "peripherals_package.h"
+''' % {"part": part["part"], "pkg": part["package"]}

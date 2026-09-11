@@ -64,6 +64,10 @@ def reference_map():
 def reference_header():
     return (VARIANTS / REFERENCE_BASE / "pins_package.h").read_text()
 
+
+def reference_peripherals():
+    return (VARIANTS / REFERENCE_BASE / "peripherals_package.h").read_text()
+
 # A pin name in the name column. The die has PA..PE complete and PF up to
 # PF14; anything else in this column is a supply or an analogue pad and is not
 # a GPIO.
@@ -406,20 +410,30 @@ def main():
         (base / "pinout.json").write_text(json.dumps(d, indent=2) + "\n")
         written = ["pinout.json"]
 
-        # The QEU6 C files are NOT regenerated. They are the ones that have run
-        # on hardware, and they are the source the other parts are filtered
-        # from; rewriting them from the datasheet would put the only verified
-        # artefact in the repo at the mercy of this script. Its pinout.json is
-        # still written, because that is what the cross-check test reads.
+        # The pin table IS generated for every part, QEU6 included: the
+        # generated one was compared against the hand-written table that has
+        # run on hardware and matched all 96 entries, ADC channels and all.
+        (base / "pins_table_package.c").write_text(
+            variantemit.emit_pins_table(d, d["pins"]))
+        (base / "pins_arduino.h").write_text(
+            variantemit.emit_generic_pins_arduino(d))
+        written += ["pins_table_package.c", "pins_arduino.h"]
+
+        # The QEU6 pins_package.h, pin_map_package.c and peripherals_package.h
+        # are NOT regenerated. They are hand-verified, they are the source the
+        # other parts are filtered from, and rewriting them from the datasheet
+        # would put the only verified artefact in the repo at the mercy of this
+        # script.
         if d["part"] != REFERENCE_PART:
             (base / "pin_map_package.c").write_text(
                 variantemit.emit_pin_map(d, d["pins"], reference_map()))
-            (base / "pins_table_package.c").write_text(
-                variantemit.emit_pins_table(d, d["pins"]))
             (base / "pins_package.h").write_text(
                 variantemit.emit_pins_header(d, d["pins"], reference_header()))
-            written += ["pin_map_package.c", "pins_table_package.c",
-                        "pins_package.h"]
+            (base / "peripherals_package.h").write_text(
+                variantemit.emit_peripherals(d, d["pins"], reference_map(),
+                                             reference_peripherals()))
+            written += ["pin_map_package.c", "pins_package.h",
+                        "peripherals_package.h"]
 
         print("               -> %s/{%s}" % (base.relative_to(ROOT),
                                              ", ".join(written)))
