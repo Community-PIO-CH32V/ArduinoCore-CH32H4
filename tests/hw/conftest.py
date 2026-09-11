@@ -51,12 +51,23 @@ EXIT_TOOL_FAILURE = 3
 
 
 def _find_wlink() -> pathlib.Path | None:
+    """The PlatformIO package first, so the tests use what users get.
+
+    It used to come last, because the package carried wlink 0.1.1, which cannot
+    program this part, and a working 0.1.2 had to be dropped in by hand. The
+    platform now pins tool-wlink to a build from Community-PIO-CH32V/wlink that
+    handles the CH32H41x, so preferring it means a fresh checkout needs no
+    manual step -- and a regression in the published tool fails here rather
+    than only for users.
+
+    $WLINK still wins, and tools/bin/ remains as a local override.
+    """
     candidates = []
     if os.environ.get("WLINK"):
         candidates.append(pathlib.Path(os.environ["WLINK"]))
-    candidates.append(ROOT / "tools" / "bin" / "wlink.exe")
     candidates.append(pathlib.Path.home()
                       / ".platformio/packages/tool-wlink/wlink.exe")
+    candidates.append(ROOT / "tools" / "bin" / "wlink.exe")
     for c in candidates:
         if c.is_file():
             return c
@@ -92,16 +103,18 @@ def flash(sketch: str):
     _flash_count += 1
     exe = _find_wlink()
     if exe is None:
-        tool_failure("wlink not found. Set $WLINK, or drop wlink.exe 0.1.2 in "
-                     "tools/bin/. The PlatformIO package ships 0.1.1, which "
-                     "reports 'Probe is not attached to an MCU' on this part.")
+        tool_failure("wlink not found. Build any sketch once and PlatformIO "
+                     "installs it, or set $WLINK, or drop a wlink.exe in "
+                     "tools/bin/.")
 
     version = _wlink_version(exe)
     if "0.1.2" not in version:
         tool_failure(f"wlink {version!r} at {exe}. This part needs 0.1.2: "
                      "0.1.1 reports 'Probe is not attached to an MCU', and the "
                      "0.1.2 x64 build fails with a driver error on Windows. "
-                     "Use the x86 build.")
+                     "Use the x86 build. The platform's tool-wlink package is "
+                     "pinned to one that works, so an older version here means "
+                     "a stale package: pio pkg update.")
 
     binary = SKETCHES / sketch / ".pio" / "build" / "ch32h417" / "firmware.bin"
     if not binary.is_file():

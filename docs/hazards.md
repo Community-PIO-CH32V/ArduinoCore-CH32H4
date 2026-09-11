@@ -1178,11 +1178,19 @@ advertised escape hatch needed the probe it had locked out.
 with it, the probe attaches to a fault-guarded board and can dump all 182 KB of
 flash, which was impossible before.
 
-**Use the right wlink: `tools/bin/wlink.exe`, 0.1.2.** PlatformIO's
-`packages/tool-wlink/wlink.exe` is **0.1.1**, which reports "Probe is not
+**Use the right wlink: 0.1.2, and now PlatformIO installs it.** The version
+that shipped with the platform was **0.1.1**, which reports "Probe is not
 attached to an MCU, or debug is not enabled" on this part regardless of how
-healthy it is. `tests/hw/conftest.py` has said so since the harness was
-written, and pins 0.1.2 for exactly this reason.
+healthy it is, and the harness pinned a hand-placed 0.1.2 in `tools/bin/` for
+exactly that reason.
+
+That is resolved as of platform-ch32v `0.23.260911`: `tool-wlink` is pinned to
+a build from `Community-PIO-CH32V/wlink` that identifies the part as `CH32H41X
+[CH32H417QEU]` and programs it, and `conftest.py` prefers the installed package
+over `tools/bin/`. A version tag rather than a branch name, because PlatformIO
+keys a VCS package by its spec string and would otherwise keep whatever binary
+it first cloned forever. If the harness still reports 0.1.1, the package is
+stale: `pio pkg update`.
 
 Believing 0.1.1 cost four NRST-and-erase rescues of a board that was fine —
 `openocd` attached to it and examined both harts in the same minute — and
