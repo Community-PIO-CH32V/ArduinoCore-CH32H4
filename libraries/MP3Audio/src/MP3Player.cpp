@@ -32,6 +32,11 @@ void MP3Player::end() {
     _running = false;
     _src = nullptr;
     _sink = nullptr;
+    /* The outstanding frame goes with the sink it was meant for: leaving it
+       would write a stale frame into whatever sink begin() is given next. */
+    _pend = nullptr;
+    _pendFrames = 0;
+    _pendDone = 0;
 }
 
 /* Top the ring up.
@@ -104,13 +109,28 @@ bool MP3Player::decodeOne() {
         }
     }
 
-    size_t done = 0;
-    while (done < frames) {
-        const size_t n = _sink->writeFrames(out + done * 2, frames - done);
-        if (n == 0) { break; }    /* full; the rest waits for the next loop */
-        done += n;
-    }
+    /* Handed over as a whole, and written across as many loop() calls as the
+       sink needs. What used to be here wrote whatever fitted and dropped the
+       remainder, which loses audio rather than delaying it. */
+    _pend = out;
+    _pendFrames = frames;
+    _pendDone = 0;
+    drainPending();
     return true;
+}
+
+void MP3Player::drainPending() {
+    while (_pendDone < _pendFrames) {
+        const size_t n = _sink->writeFrames(_pend + _pendDone * 2,
+                                            _pendFrames - _pendDone);
+        if (n == 0) { break; }          /* sink full; the rest waits */
+        _pendDone += n;
+    }
+    if (_pendDone >= _pendFrames) {
+        _pend = nullptr;
+        _pendFrames = 0;
+        _pendDone = 0;
+    }
 }
 
 bool MP3Player::loop() {
@@ -127,8 +147,25 @@ bool MP3Player::loop() {
         }
     }
 
-    if (_sink->running() && _sink->availableFrames() < 1152) {
-        return true;              /* no room for a frame yet */
+    /* WHAT IS ALREADY DECODED GOES FIRST, and nothing new is decoded until it
+     * has all been handed over.
+     *
+     * This used to ask the sink for room for a WHOLE frame -- 1152 frames --
+     * before decoding, which deadlocked against any sink whose buffer is
+     * smaller than that. The I2S sink's default ring is 4096 bytes, so
+     * availableFrames() maxes out at 1023 for 16-bit stereo and the condition
+     * could never be met: the first frame started the sink, nothing decoded
+     * again, and the output starved. It reported as a rising underrun count
+     * with a completely full input ring, which reads like a slow network and
+     * is the opposite.
+     *
+     * There is no busy-spin. When the sink is full the drain moves nothing and
+     * this returns, and at most one frame is ever outstanding. */
+    if (_pendFrames) {
+        drainPending();
+        if (_pendFrames) {
+            return true;          /* sink still full; try again next call */
+        }
     }
 
     if (_fill == 0) {

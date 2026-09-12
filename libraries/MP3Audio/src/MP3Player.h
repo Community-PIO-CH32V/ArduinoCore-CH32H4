@@ -70,6 +70,8 @@ public:
 private:
     size_t fillRing();
     bool decodeOne();
+    /* Push as much of the outstanding frame as the sink will take. */
+    void drainPending();
 
     Stream *_src = nullptr;
     AudioSink *_sink = nullptr;
@@ -79,6 +81,23 @@ private:
     int16_t _pcm[MP3Decoder::MAX_SAMPLES];
     int16_t _stereo[MP3Decoder::MAX_SAMPLES * 2];
     uint32_t _rateChanges = 0;
+
+    /* THE FRAME BEING HANDED TO THE SINK, across however many loop() calls it
+     * takes.
+     *
+     * A decoded frame is 1152 stereo samples, 4608 bytes, and a sink is not
+     * obliged to have room for all of it. The I2S sink's default ring is 4096
+     * bytes in total, so it never has room for a whole frame. Writing what
+     * fits and dropping the rest loses audio; waiting for room for the whole
+     * frame never decodes at all.
+     *
+     * `_pend` points into _pcm or _stereo, both members, so it stays valid
+     * until the next decode. At most one frame is ever outstanding: loop()
+     * will not decode again while this is non-empty. */
+    const int16_t *_pend = nullptr;
+    size_t _pendFrames = 0;
+    size_t _pendDone = 0;
+
     /* Q8 fixed point: the scale is applied per sample in the hot path, and an
        integer multiply and shift is cheaper than a float multiply there. */
     uint16_t _volQ8 = 256;

@@ -177,6 +177,12 @@ void setup() {
   i2s.setBCLK(PB12);
   i2s.setDATA(PB15);
   i2s.setBitsPerSample(16);
+  /* THE OUTPUT BUFFER, and worth setting for a network stream.
+     The default is 4096 bytes, which at 44.1 kHz 16-bit stereo is 23 ms of
+     audio -- every pause in the network longer than that is an audible gap.
+     32 KB is 186 ms, which rides out a slow segment, and this part has RAM to
+     spare. A frame of MP3 is 4608 bytes of PCM on its own. */
+  i2s.setBuffer(32768);
   /* No begin() here: the sample rate is not known until the first MP3 frame
      decodes, so MP3Player starts the sink itself on that frame. */
 
