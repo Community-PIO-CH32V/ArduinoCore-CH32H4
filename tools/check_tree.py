@@ -16,7 +16,7 @@ REQUIRED_DIRS = [
     "cores/ch32h4/api",
     "system/ch32h417lib",
     "variants/CH32H417QEU6_EVT_R0",   # the board
-    "variants/CH32H417xx_QEU6",       # its package base
+    "variants/CH32H417QEU6",       # its package base
     "libraries",
     "tools",
     "tests",

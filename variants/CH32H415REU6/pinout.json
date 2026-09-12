@@ -1,7 +1,7 @@
 {
   "part": "CH32H415REU6",
   "package": "QFN60",
-  "base": "CH32H415xx_REU6",
+  "base": "CH32H415REU6",
   "package_id": "0x4150050D",
   "source": {
     "file": "CH32H417DS0-2.PDF",

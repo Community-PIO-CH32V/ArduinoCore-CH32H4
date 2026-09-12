@@ -10,4 +10,4 @@
  * a file sitting in the package directory would never be built. Hence the
  * include, the same arrangement pin_map.c uses next door.
  */
-#include "../CH32H417xx_QEU6/pins_table_package.c"
+#include "../CH32H417QEU6/pins_table_package.c"

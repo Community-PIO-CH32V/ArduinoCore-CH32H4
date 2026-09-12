@@ -5,4 +5,4 @@
  * else, so a table living beside them in the package directory would never be
  * built. One line here costs nothing and keeps the tables in one place.
  */
-#include "../CH32H417xx_QEU6/pin_map_package.c"
+#include "../CH32H417QEU6/pin_map_package.c"

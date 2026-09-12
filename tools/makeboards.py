@@ -50,7 +50,7 @@ BOARDS = [
         # else the package supplies is reached by an #include from the
         # variant directory, which both build systems follow on their own,
         # and a linker script is the one input that is not a C include.
-        "package": "CH32H417xx_QEU6",
+        "package": "CH32H417QEU6",
         "mcu": "ch32h417qeu6",
         "f_cpu": "400000000L",
         "board": "CH32H417QEU6",

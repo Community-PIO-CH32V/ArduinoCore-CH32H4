@@ -4,4 +4,4 @@
 # platform repository rather than here, so the core cannot rely on one
 # having been updated. arduino-cli takes the same value from boards.txt,
 # which is generated and so always current.
-CH32H417xx_QEU6
+CH32H417QEU6

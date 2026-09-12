@@ -3,7 +3,7 @@
 Called by genvariants.py; see that file for where the data comes from.
 
 THE FILTER, AND WHY IT IS NOT FREE GENERATION. The QEU6 peripheral maps in
-variants/CH32H417xx_QEU6/pin_map_package.c came from the MicroPython port for
+variants/CH32H417QEU6/pin_map_package.c came from the MicroPython port for
 this silicon and have been exercised on the board. tests/test_variants.py
 confirms all 127 of their PWM entries against the datasheet independently.
 

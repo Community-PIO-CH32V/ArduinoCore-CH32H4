@@ -28,7 +28,7 @@ dac.writeFrame(left, right);
   channels 4 and 5, `write(int16_t left, int16_t right)`, and mono duplication
   already implemented. It gains an interface, not a rewrite.
 - `cores/ch32h4/ch32h4_timer.c`: the timer table, including TIM6.
-- `variants/CH32H417xx_QEU6/pins_package.h`: `PIN_DAC1` = PA4, `PIN_DAC2` = PA5,
+- `variants/CH32H417QEU6/pins_package.h`: `PIN_DAC1` = PA4, `PIN_DAC2` = PA5,
   fixed, no mux.
 
 **Resources are free and were checked, not assumed.** TIM6 is unused (Tone,

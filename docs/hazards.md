@@ -957,7 +957,7 @@ have the same shape and only one of them is real. "This master cannot reach
 that memory" is a claim about silicon, and on this part it differs per master.
 Test it per master; do not carry it across by analogy.
 
-**Where.** `variants/CH32H417xx_QEU6/ch32h417.ld`,
+**Where.** `variants/CH32H417QEU6/ch32h417.ld`,
 `cores/ch32h4/tusb_config.h`,
 `libraries/Adafruit_TinyUSB_Arduino/src/arduino/ports/ch32h4/tusb_config_ch32h4.h`,
 `libraries/Adafruit_TinyUSB_Arduino/src/portable/wch/dcd_ch32_usbfs.c`.

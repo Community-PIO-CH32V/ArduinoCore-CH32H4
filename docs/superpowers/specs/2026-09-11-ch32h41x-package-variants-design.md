@@ -90,11 +90,11 @@ For each part the generator writes:
 - `variants/<BASE>/peripherals_package.h` — per-peripheral default pins, only
   for peripherals the part has.
 
-Package base directory names follow the existing one, `CH32H417xx_QEU6`:
+Package base directory names follow the existing one, `CH32H417QEU6`:
 
 ```
-CH32H417xx_QEU6   CH32H417xx_MEU6   CH32H417xx_WEU6
-CH32H416xx_RDU6   CH32H415xx_REU6
+CH32H417QEU6   CH32H417MEU6   CH32H417WEU6
+CH32H416RDU6   CH32H415REU6
 ```
 
 ### What changes per part, beyond which pins exist

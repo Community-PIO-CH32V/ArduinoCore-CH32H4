@@ -166,14 +166,14 @@ def af_tokens(text):
 def test_the_verified_qeu6_pwm_table_agrees_with_the_datasheet():
     """The one table that has been exercised on hardware, checked both ways.
 
-    variants/CH32H417xx_QEU6/pin_map_package.c came from the MicroPython port
+    variants/CH32H417QEU6/pin_map_package.c came from the MicroPython port
     for this silicon and has run on the board. Agreeing with a table extracted
     independently from the datasheet says two things at once: that the working
     table is right, and that the extraction it is being compared against can
     be trusted for the four parts nobody here can test on hardware.
     """
-    src = (VARIANTS / "CH32H417xx_QEU6" / "pin_map_package.c").read_text()
-    pins = load(VARIANTS / "CH32H417xx_QEU6" / "pinout.json")["pins"]
+    src = (VARIANTS / "CH32H417QEU6" / "pin_map_package.c").read_text()
+    pins = load(VARIANTS / "CH32H417QEU6" / "pinout.json")["pins"]
 
     body = src[src.index("g_pwm_af_map[]"):]
     body = body[:body.index("};")]

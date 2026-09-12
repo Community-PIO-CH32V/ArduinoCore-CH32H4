@@ -54,7 +54,7 @@ import variantemit                                      # noqa: E402
 # The part whose C files are hand-verified and hardware-exercised, and which
 # every other part's peripheral maps are filtered from.
 REFERENCE_PART = "CH32H417QEU6"
-REFERENCE_BASE = "CH32H417xx_QEU6"
+REFERENCE_BASE = "CH32H417QEU6"
 
 
 def reference_map():
@@ -87,11 +87,11 @@ HDR_RE = re.compile(r"^H4(1[4-7])([A-Z]{3})6$")
 
 # Which table each part comes from, and the package it names.
 PARTS = {
-    "CH32H417QEU6": {"column": "H417QEU6", "package": "QFN128", "base": "CH32H417xx_QEU6"},
-    "CH32H417MEU6": {"column": "H417MEU6", "package": "QFN88", "base": "CH32H417xx_MEU6"},
-    "CH32H417WEU6": {"column": "H417WEU6", "package": "QFN68", "base": "CH32H417xx_WEU6"},
-    "CH32H416RDU6": {"column": "H416RDU6", "package": "QFN60", "base": "CH32H416xx_RDU6"},
-    "CH32H415REU6": {"column": "H415REU6", "package": "QFN60", "base": "CH32H415xx_REU6"},
+    "CH32H417QEU6": {"column": "H417QEU6", "package": "QFN128", "base": "CH32H417QEU6"},
+    "CH32H417MEU6": {"column": "H417MEU6", "package": "QFN88", "base": "CH32H417MEU6"},
+    "CH32H417WEU6": {"column": "H417WEU6", "package": "QFN68", "base": "CH32H417WEU6"},
+    "CH32H416RDU6": {"column": "H416RDU6", "package": "QFN60", "base": "CH32H416RDU6"},
+    "CH32H415REU6": {"column": "H415REU6", "package": "QFN60", "base": "CH32H415REU6"},
 }
 
 # The package word at 0x1FFFF704, masked the way GPIO_IPD_Unused() masks it

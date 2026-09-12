@@ -11,7 +11,7 @@
  */
 #pragma once
 
-#include "../CH32H417xx_QEU6/pins_package.h"
+#include "../CH32H417QEU6/pins_package.h"
 
 #define PIN_ONEWIRE      PB5    /* open-drain; needs a REAL external pull-up */
 #define PIN_SDMMC_CK     PC12
@@ -57,7 +57,7 @@
 #define PIN_I2S_CK       PIN_I2S1_CK
 #define PIN_I2S_SD       PIN_I2S1_SD
 
-#include "../CH32H417xx_QEU6/peripherals_package.h"
+#include "../CH32H417QEU6/peripherals_package.h"
 
 #define SERIAL_PORT_HARDWARE   Serial1
 #define SERIAL_PORT_MONITOR    Serial

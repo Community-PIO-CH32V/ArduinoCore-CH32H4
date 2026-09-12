@@ -1,7 +1,7 @@
 {
   "part": "CH32H416RDU6",
   "package": "QFN60",
-  "base": "CH32H416xx_RDU6",
+  "base": "CH32H416RDU6",
   "package_id": "0x4160050D",
   "source": {
     "file": "CH32H417DS0-2.PDF",
