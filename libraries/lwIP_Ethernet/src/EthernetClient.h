@@ -37,7 +37,13 @@ public:
         }
         return *this;
     }
-    ~EthernetClient() {   /* not override: arduino::Client has no virtual dtor */
+    /* Virtual, and not an override: arduino::Client's destructor is not
+       virtual, so this introduces one rather than overriding it. The class is
+       polymorphic regardless, so the only cost is a vtable slot, and it makes
+       `delete` through an EthernetClient* -- which HTTPClient's deleter does
+       -- correct rather than merely working. See the longer note in
+       EthernetClientSecure.h. */
+    virtual ~EthernetClient() {
         if (_ctx) {
             _ctx->unref();
         }

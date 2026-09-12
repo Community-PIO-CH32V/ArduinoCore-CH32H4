@@ -155,6 +155,19 @@ static bool connectStream() {
     radio.setCACert(root_ca);
   }
 
+  /* SAY SO BEFORE FAILING, because the failure that follows looks like a
+     network problem and is not.
+     An https station with the placeholder root cannot verify anything, so the
+     handshake never completes and GET reports -1, which is
+     HTTPC_ERROR_CONNECTION_FAILED -- the same code a wrong address gives. */
+  const bool https = strncmp(STREAM_URL, "https://", 8) == 0;
+  if (https && !INSECURE && strstr(root_ca, "paste the root") != nullptr) {
+    Serial.println("root_ca is still the placeholder, so this https station");
+    Serial.println("cannot be verified and the connection will fail with -1.");
+    Serial.println("Paste the station's root certificate into root_ca, or set");
+    Serial.println("INSECURE = true to connect without verifying it.");
+  }
+
   if (!radio.begin(STREAM_URL, &Serial)) { return false; }
 
   player.setVolumePercent(START_VOLUME_PCT);
@@ -237,8 +250,12 @@ void loop() {
   if (!player.loop()) {
     /* RECONNECTING IS THIS SKETCH'S JOB, not the library's. A retry policy
        buried in MP3Player could be neither tested nor overridden, and every
-       application wants a different one. */
-    Serial.println("stream ended, reconnecting in 2 s");
+       application wants a different one.
+       The message distinguishes the two cases, because "stream ended" while
+       retrying a connection that never opened sends you looking for the wrong
+       problem. */
+    Serial.println(radio.connected() ? "stream ended, reconnecting in 2 s"
+                                     : "not connected, retrying in 2 s");
     player.end();
     radio.end();
     delay(2000);

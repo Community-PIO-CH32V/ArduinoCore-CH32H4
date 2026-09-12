@@ -25,7 +25,22 @@
 class EthernetClientSecure : public arduino::Client {
 public:
     EthernetClientSecure() { }
-    ~EthernetClientSecure() { release(); }
+    /* VIRTUAL, though arduino::Client's destructor is not.
+     *
+     * This class is polymorphic either way -- Client's methods are virtual, so
+     * the vtable already exists -- and a virtual destructor only adds a slot
+     * to it. What it buys is that `delete` through an EthernetClientSecure*,
+     * which is what HTTPClientSecure's deleter does, is correct by the
+     * language rather than by the happy accident of nobody having subclassed
+     * this yet. Without it GCC warns, rightly:
+     *
+     *   deleting object of polymorphic class type 'EthernetClientSecure'
+     *   which has non-virtual destructor might cause undefined behavior
+     *
+     * Deleting through arduino::Client* is still undefined, and nothing here
+     * does it: the deleters cast to the concrete type first. Fixing that
+     * properly needs a virtual destructor on Client, which is upstream API. */
+    virtual ~EthernetClientSecure() { release(); }
 
     EthernetClientSecure(const EthernetClientSecure &other) { copyFrom(other); }
     EthernetClientSecure &operator=(const EthernetClientSecure &other) {
