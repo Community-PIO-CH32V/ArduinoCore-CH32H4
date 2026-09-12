@@ -26,24 +26,44 @@ int IcyStream::read() {
  * nothing and is retried on the next call, so a socket that delivers the
  * boundary in two pieces does not lose sync. */
 void IcyStream::consumeMetadata() {
-    const int lenByte = _up->read();
-    if (lenByte < 0) { return; }
-    _untilMeta = _metaint;
-
-    size_t n = (size_t)lenByte * 16u;
-    if (n == 0) { return; }        /* the common case: no change since the last */
-
-    char buf[MAX_TITLE];
-    size_t got = 0;
-    while (n--) {
-        const int c = _up->read();
-        if (c < 0) { break; }
-        if (got + 1 < sizeof(buf)) { buf[got++] = (char)c; }
+    /* RESUMABLE, because the block can arrive in pieces.
+     *
+     * Two states, distinguished by _metaLeft: zero means the next byte is the
+     * length byte, non-zero means that many text bytes are still owed. The
+     * audio counter is rearmed only when the block is complete, so a caller
+     * that gets nothing this time simply asks again. */
+    if (_metaLeft == 0) {
+        const int lenByte = _up->read();
+        if (lenByte < 0) { return; }          /* not even the length yet */
+        _metaLeft = (uint32_t)lenByte * 16u;
+        _metaGot = 0;
+        if (_metaLeft == 0) {
+            _untilMeta = _metaint;            /* common case: no change */
+            return;
+        }
     }
-    buf[got] = '\0';
+
+    while (_metaLeft) {
+        const int c = _up->read();
+        if (c < 0) {
+            /* Mid-block. Everything stays as it is and this is retried; the
+               counter is deliberately still zero, so available() reports
+               nothing rather than handing metadata out as audio. */
+            return;
+        }
+        _metaLeft--;
+        /* A block may be far longer than any title. The excess is counted and
+           discarded, which is what keeps the byte accounting exact. */
+        if (_metaGot + 1u < sizeof(_metaBuf)) {
+            _metaBuf[_metaGot++] = (char)c;
+        }
+    }
+
+    _metaBuf[_metaGot] = '\0';
+    _untilMeta = _metaint;                    /* block complete: back to audio */
 
     /* StreamTitle='...'; is the only field anyone cares about. */
-    const char *s = strstr(buf, "StreamTitle='");
+    const char *s = strstr(_metaBuf, "StreamTitle='");
     if (!s) { return; }
     s += 13;
     const char *e = strstr(s, "';");

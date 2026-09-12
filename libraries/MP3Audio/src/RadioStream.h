@@ -57,6 +57,12 @@ public:
     const char *url() const { return _url; }
     uint32_t metaint() const { return _metaint; }
     int status() const { return _status; }
+
+    /* Whether the socket is still up. A stream that stops delivering is
+       either a slow network or a closed connection, and those need opposite
+       responses -- wait, or reconnect -- so a sketch has to be able to tell
+       them apart. */
+    bool connected() { return _http.connected(); }
     /* Playlists resolved, plus any cross-scheme redirect taken here. Same-
        scheme redirects are followed inside HTTPClient and do not count. */
     int hops() const { return _hops; }

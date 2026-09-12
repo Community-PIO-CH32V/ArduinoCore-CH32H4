@@ -37,11 +37,26 @@ public:
         _untilMeta = metaint;
         _titleChanges = 0;
         _title[0] = '\0';
+        /* Any half-read block belonged to the previous connection. */
+        _metaLeft = 0;
+        _metaGot = 0;
     }
 
     /* "" until a metadata block carrying a StreamTitle arrives. */
     const char *title() const { return _title; }
     uint32_t titleChanges() const { return _titleChanges; }
+
+    /* Audio bytes still to come before the next metadata block. Zero means the
+       next byte off the wire is the block's length byte, so this reading zero
+       for any length of time says the stream is waiting at a boundary rather
+       than being slow. Exposed because that distinction is invisible from the
+       outside and was needed to find a starvation bug. */
+    uint32_t untilMeta() const { return _untilMeta; }
+
+    /* Bytes the upstream has, ignoring the metadata boundary. Compare with
+       available(): upstream non-zero while available() is zero means the
+       boundary is what is blocking, not the network. */
+    int upstreamAvailable() { return _up ? _up->available() : 0; }
 
     int available() override;
     int read() override;
@@ -56,5 +71,21 @@ private:
     uint32_t _metaint = 0;
     uint32_t _untilMeta = 0;
     uint32_t _titleChanges = 0;
+
+    /* HALF-READ METADATA BLOCK, carried between calls.
+     *
+     * A block is one length byte plus up to 4080 bytes of text, and TCP is
+     * free to split that across segments. Reading it with a non-blocking
+     * read() therefore has to be resumable: `_metaLeft` is what is still owed,
+     * and the audio counter is NOT rearmed until it reaches zero.
+     *
+     * Getting this wrong was subtle rather than loud. The rest of the block
+     * was skipped, the counter rearmed early, and the leftover text went to
+     * the decoder as audio -- a handful of decode errors, a title truncated
+     * mid-word, and every later boundary off by however many bytes were
+     * missed. */
+    uint32_t _metaLeft = 0;
+    uint16_t _metaGot = 0;
+    char _metaBuf[MAX_TITLE];
     char _title[MAX_TITLE] = {0};
 };
