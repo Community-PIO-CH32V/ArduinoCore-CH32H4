@@ -292,10 +292,26 @@ private:
             _rx_offset -= _rx->len;
             freed += _rx->len;
             pbuf *next = _rx->next;
+            /* REFERENCE COUNTING, AND EXACTLY ONE PROTECTION.
+             *
+             * A chain link holds one reference on `next`. pbuf_ref() takes a
+             * second so the tail survives freeing the head, and pbuf_free()
+             * then walks the chain and releases the head's reference, leaving
+             * the one we now own. That is the whole dance.
+             *
+             * This used to ALSO sever `_rx->next` before freeing, which looks
+             * tidier and leaks: pbuf_free() never sees the link, so it never
+             * releases the chain's reference, and every pbuf after the first
+             * keeps an extra one forever. Nothing ever frees them.
+             *
+             * The symptom was not a memory error. The pool drained, the
+             * driver started dropping received frames for want of a pbuf, TCP
+             * throughput collapsed to a few hundred bytes a second, and a web
+             * radio stream stuttered and then went silent with the connection
+             * still open. Enlarging the pool only moved the failure later. */
             if (next) {
                 pbuf_ref(next);
             }
-            _rx->next = nullptr;
             pbuf_free(_rx);
             _rx = next;
         }
