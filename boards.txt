@@ -10,6 +10,7 @@ menu.usbstack=USB stack
 menu.serial=Serial port
 menu.exceptions=C++ Exceptions
 menu.lto=Link-time optimization
+menu.castore=CA trust store
 menu.fs=Filesystem size
 
 # --------------------------------------------------------------------------
@@ -102,6 +103,31 @@ ch32h417qeu6.menu.lto.Enabled=Enabled
 ch32h417qeu6.menu.lto.Enabled.build.flags.lto=-flto
 ch32h417qeu6.menu.lto.Disabled=Disabled
 ch32h417qeu6.menu.lto.Disabled.build.flags.lto=
+
+# The built-in CA trust store.
+#
+# None is the default, and means a TLS client trusts nothing until the sketch
+# names a root with setCACert(). That keeps the trust decision visible in the
+# sketch, at the cost of pasting a certificate in -- and of it expiring.
+#
+# The sizes are FLASH, not RAM. The store stays as DER and a callback parses
+# only the root whose subject matches the server's issuer, one per handshake,
+# so the full store costs no more RAM than the minimal one. See
+# libraries/EthernetClientSecure/src/CATrustStore.h.
+#
+# Minimal is not a guess: every root in it was either read off a real
+# station's certificate chain or is one of the general-purpose roots public
+# APIs chain to. tools/gencertstore.py regenerates both from the current
+# Mozilla bundle and reports any root that has left it.
+#
+# setCACert() still wins over either store. A sketch that named one root
+# wanted that root, and a build flag should not widen it.
+ch32h417qeu6.menu.castore.None=None (sketch supplies the root)
+ch32h417qeu6.menu.castore.None.build.flags.castore=
+ch32h417qeu6.menu.castore.Minimal=Minimal (15 roots, ~13 KB flash)
+ch32h417qeu6.menu.castore.Minimal.build.flags.castore=-DCH32H4_CA_STORE=1
+ch32h417qeu6.menu.castore.Full=Full Mozilla set (121 roots, ~126 KB flash)
+ch32h417qeu6.menu.castore.Full.build.flags.castore=-DCH32H4_CA_STORE=2
 
 # The filesystem partition, immediately below the 16 KB EEPROM at the top of
 # flash. LittleFS mounts it; tools/simplesub.py substitutes the size into the

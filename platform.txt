@@ -104,7 +104,7 @@ compiler.optimization_flags.release=-Os
 compiler.optimization_flags.debug=-Og -g3
 compiler.optimization_flags={compiler.optimization_flags.release}
 
-compiler.common.flags={compiler.machine.flags} {compiler.optimization_flags} {compiler.warning_flags} -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common {build.flags.lto}
+compiler.common.flags={compiler.machine.flags} {compiler.optimization_flags} {compiler.warning_flags} -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common {build.flags.lto} {build.flags.castore}
 
 compiler.c.flags={compiler.common.flags} -std=gnu17 -MMD -c
 compiler.cpp.flags={compiler.common.flags} -std=gnu++17 {build.flags.exceptions} -fno-threadsafe-statics -fno-rtti -fno-use-cxa-atexit -MMD -c
@@ -164,6 +164,11 @@ build.flags.usbstack=
 # PlatformIO -- it comes down to TinyUSB's buffers being placed by object
 # filename, which LTO erases.
 build.flags.lto=
+
+# Empty unless the CA trust store menu says otherwise, which leaves the
+# core trusting nothing until a sketch supplies a root with setCACert().
+# See libraries/EthernetClientSecure/src/CATrustStore.h.
+build.flags.castore=
 build.flags.serial=
 
 # The filesystem, in bytes, carved out of the flash tail immediately below the

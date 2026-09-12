@@ -101,6 +101,7 @@ menu.usbstack=USB stack
 menu.serial=Serial port
 menu.exceptions=C++ Exceptions
 menu.lto=Link-time optimization
+menu.castore=CA trust store
 menu.fs=Filesystem size
 """
 
@@ -146,6 +147,33 @@ LTO = """
 {id}.menu.lto.Enabled.build.flags.lto=-flto
 {id}.menu.lto.Disabled=Disabled
 {id}.menu.lto.Disabled.build.flags.lto=
+"""
+
+CASTORE = """
+# The built-in CA trust store.
+#
+# None is the default, and means a TLS client trusts nothing until the sketch
+# names a root with setCACert(). That keeps the trust decision visible in the
+# sketch, at the cost of pasting a certificate in -- and of it expiring.
+#
+# The sizes are FLASH, not RAM. The store stays as DER and a callback parses
+# only the root whose subject matches the server's issuer, one per handshake,
+# so the full store costs no more RAM than the minimal one. See
+# libraries/EthernetClientSecure/src/CATrustStore.h.
+#
+# Minimal is not a guess: every root in it was either read off a real
+# station's certificate chain or is one of the general-purpose roots public
+# APIs chain to. tools/gencertstore.py regenerates both from the current
+# Mozilla bundle and reports any root that has left it.
+#
+# setCACert() still wins over either store. A sketch that named one root
+# wanted that root, and a build flag should not widen it.
+{id}.menu.castore.None=None (sketch supplies the root)
+{id}.menu.castore.None.build.flags.castore=
+{id}.menu.castore.Minimal=Minimal (15 roots, ~13 KB flash)
+{id}.menu.castore.Minimal.build.flags.castore=-DCH32H4_CA_STORE=1
+{id}.menu.castore.Full=Full Mozilla set (121 roots, ~126 KB flash)
+{id}.menu.castore.Full.build.flags.castore=-DCH32H4_CA_STORE=2
 """
 
 USBSTACK = """
@@ -237,6 +265,7 @@ def generate():
         out.append(SERIAL.format(id=i))
         out.append(EXCEPTIONS.format(id=i))
         out.append(LTO.format(id=i))
+        out.append(CASTORE.format(id=i))
         out.append(FS_INTRO.format(user=USER_FLASH, eeprom=EEPROM_SIZE))
 
         # The board's default goes FIRST. arduino-cli takes the first entry of

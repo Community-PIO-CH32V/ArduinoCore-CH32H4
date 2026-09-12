@@ -4,6 +4,11 @@
 
 extern "C" {
 #include "mbedtls/error.h"
+}
+
+#include "CATrustStore.h"
+
+extern "C" {
 
 #ifdef CH32H4_TLS_DEBUG
 #include "mbedtls/debug.h"
@@ -180,10 +185,18 @@ bool EthernetTlsSession::handshake(bool server, const char *hostname,
         }
         mbedtls_ssl_conf_ca_chain(&conf, &ca, nullptr);
         mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    } else if (ch32h4_ca_store_install(&conf)) {
+        /* A trust store was compiled in with -DCH32H4_CA_STORE, so use it.
+         *
+         * Tried only AFTER setCACert(): a sketch that named one root wants
+         * that root and nothing else, and widening it to 121 because a build
+         * flag was set elsewhere would loosen a decision the sketch made
+         * deliberately. See CATrustStore.h. */
+        mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_REQUIRED);
     } else {
-        /* No CA and not explicitly insecure. Refusing is the only safe
-         * reading: a connection that silently accepted anything here would
-         * look exactly like a working one. */
+        /* No CA, no store, and not explicitly insecure. Refusing is the only
+         * safe reading: a connection that silently accepted anything here
+         * would look exactly like a working one. */
         last_error = MBEDTLS_ERR_SSL_CA_CHAIN_REQUIRED;
         return false;
     }

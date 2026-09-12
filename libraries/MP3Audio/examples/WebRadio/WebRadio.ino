@@ -70,12 +70,28 @@ static const uint8_t START_VOLUME_PCT = 10;
    Name it explicitly if your router offers no NTP option. */
 static const char *NTP_SERVER = "pool.ntp.org";
 
-/* THE ROOT YOUR STATION CHAINS TO. This core ships no CA bundle -- 140-odd
-   roots is more RAM than mbedTLS can spend parsing them here -- so verifying
-   means naming the one you need.
+/* THE ROOT YOUR STATION CHAINS TO, if you name one yourself.
 
-   ISRG Root X1 is Let's Encrypt's and covers a large share of stations.
-   To find out which root a particular one uses, and get its PEM:
+   THE EASIER WAY, for an https station: compile in the trust store and delete
+   this block along with setCACert() below.
+
+     PlatformIO    build_flags = -DCH32H4_CA_STORE=1
+     Arduino IDE   Tools > CA trust store > Minimal
+
+   Minimal is 15 roots and about 15 KB of flash, and covers every station
+   tested here -- laut.fm, antenne.de, somafm, srg-ssr, omroep.nl. Full is all
+   121 Mozilla roots for about 140 KB. Either way RAM is unchanged, because
+   only the root matching the server is parsed, one per handshake. See
+   libraries/EthernetClientSecure/src/CATrustStore.h.
+
+   AND SET THE CLOCK EITHER WAY. Certificate validity is checked against it,
+   so an unset RTC fails every verification with a bare -1 and no hint that
+   the time is the problem. startClock() below does it.
+
+   Naming one root is still the stricter choice, and stays supported: what you
+   paste here wins over any store. ISRG Root X1 is Let's Encrypt's and covers
+   a large share of stations. To find out which root a particular one uses,
+   and get its PEM:
 
      openssl s_client -showcerts -connect stream.example.org:443 < /dev/null |
        openssl x509 -noout -issuer
