@@ -58,7 +58,13 @@ if [ "${CI_SKIP_SETUP:-0}" != "1" ]; then
     cli config set directories.data "$WORK/data"
     cli config set directories.user "$WORK/user"
     cli config set directories.downloads "$WORK/downloads"
-    cli config set board_manager.additional_urls "file://$ROOT/package_ch32h4_index.json"
+    # file:// plus an absolute path. A Windows path has no leading slash, and
+    # file://C:/... would make "C:" the host, so it needs the third slash.
+    case "$ROOT" in
+        /*) INDEX_URL="file://$ROOT/package_ch32h4_index.json" ;;
+        *)  INDEX_URL="file:///$ROOT/package_ch32h4_index.json" ;;
+    esac
+    cli config set board_manager.additional_urls "$INDEX_URL"
 
     cli core update-index
     cli core install ch32h4:ch32h4
