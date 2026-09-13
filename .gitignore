@@ -14,3 +14,5 @@ platform.local.txt
 ch32h4-*.zip
 tests/.examples-build/
 tests/.pio-cache/
+# CI scratch state from tests/ci/build-arduino-cli.sh
+.ci-arduino/

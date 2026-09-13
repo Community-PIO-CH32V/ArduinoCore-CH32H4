@@ -1,0 +1,36 @@
+# Examples compiled by CI, with both arduino-cli and PlatformIO.
+#
+# One sketch directory per line, relative to the repository root, built with
+# the board's default menu options. The sketch file is assumed to be named
+# after its directory, as the Arduino IDE requires.
+#
+# The list is deliberately basic: each entry exercises a different part of the
+# core, from GPIO and the second core to the filesystem, SPI, I2S, USB and the
+# TLS stack, rather than every example of one library.
+
+# Core and the second core
+libraries/CH32H4/examples/Blink
+libraries/CH32H4/examples/MulticoreHello
+libraries/CH32H4/examples/FIFO
+libraries/CH32H4/examples/Mutex
+libraries/CH32H4/examples/CoreInfo
+libraries/CH32H4/examples/InternalTemperature
+
+# Storage
+libraries/EEPROM/examples/eeprom_write
+libraries/LittleFS/examples/ReadWrite
+libraries/SD/examples/CardInfo
+libraries/PSRAM/examples/PSRAMInfo
+
+# Peripherals
+libraries/SPI/examples/SPILoopback
+libraries/Servo/examples/Sweep
+libraries/I2S/examples/SimpleTone
+libraries/Ticker/examples/TickerBasic
+libraries/Adafruit_SleepyDog/examples/BasicUsage
+
+# USB, through TinyUSB
+libraries/Keyboard/examples/KeyboardMessage
+
+# Ethernet, lwIP and mbedTLS
+libraries/HTTPClient/examples/BasicHttpsClient
