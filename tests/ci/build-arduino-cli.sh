@@ -8,9 +8,19 @@
 # that for tools installed from a Boards Manager index. So the core is
 # installed from THIS checkout's package_ch32h4_index.json, which brings
 # exactly the tools this commit declares, and the installed copy of the core
-# is then replaced by a link to the checkout. What compiles is the commit
-# under test, with the toolchain it asks for. arduino-pico's CI links its
-# checkout in the same way.
+# is then replaced by the checkout. What compiles is the commit under test,
+# with the toolchain it asks for.
+#
+# WHY A COPY AND NOT A SYMLINK. arduino-pico's CI links its checkout into
+# place, but under a link arduino-cli (1.5.1) cannot build libraries with the
+# old flat layout and a utility/ folder, such as Adafruit_SleepyDog. Its
+# library loader resolves the link for the library's install directory, and so
+# for utility/, but not for its source directory. Library detection then works
+# out each utility/ file's path relative to the source directory, gets a chain
+# of ../ that runs past the build directory's root, and hands gcc
+# "-MF /libraries/Adafruit_SleepyDog/utility/WatchdogAVR.cpp.libsdetect.d",
+# which cannot be created. Only tracked files are copied (submodules included),
+# so leftovers such as a local platform.local.txt cannot leak into the build.
 #
 # Environment:
 #   ARDUINO_CLI    the arduino-cli binary            (default: arduino-cli)
@@ -53,13 +63,16 @@ if [ "${CI_SKIP_SETUP:-0}" != "1" ]; then
     cli core update-index
     cli core install ch32h4:ch32h4
 
-    # Replace the installed release with the checkout. There is one version
-    # directory after a fresh install.
+    # Replace the installed release with a copy of the checkout's tracked
+    # files. There is one version directory after a fresh install.
     PLATFORM_DIR="$WORK/data/packages/ch32h4/hardware/ch32h4"
     VERSION="$(ls "$PLATFORM_DIR")"
     rm -rf "${PLATFORM_DIR:?}/$VERSION"
-    ln -s "$ROOT" "$PLATFORM_DIR/$VERSION"
-    echo "core $VERSION replaced by a link to $ROOT"
+    mkdir -p "$PLATFORM_DIR/$VERSION"
+    git -C "$ROOT" ls-files -z --recurse-submodules \
+        | tar -C "$ROOT" --null -T - -cf - \
+        | tar -C "$PLATFORM_DIR/$VERSION" -xf -
+    echo "core $VERSION replaced by a copy of $ROOT"
 fi
 
 cli core list
